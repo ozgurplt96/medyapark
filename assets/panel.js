@@ -392,6 +392,13 @@ async function api(action, body){
         .order('created_at',{ascending:false}).limit(q.limit?+q.limit:200); if(error)throw error; return ok(data); }
     case 'log_clear':{ const {error}=await sb.from('activity_log').delete()
         .lt('created_at',new Date(Date.now()-(+body.gun||30)*864e5).toISOString()); if(error)throw error; return ok(); }
+    /* Canonical internal identity (06 §4.2): auth.users.id -> team.auth_user_id.
+       E-posta eşleştirmesi görüntüleme verisidir, yetkilendirme için kullanılmaz. */
+    case 'me':{
+      const {data:ud}=await sb.auth.getUser(); const u=ud&&ud.user;
+      if(!u) return ok(null);
+      const {data,error}=await sb.from('team').select('*').eq('auth_user_id',u.id).maybeSingle();
+      if(error)throw error; return ok(data||null); }
     case 'team_list':{ const {data,error}=await sb.from('team').select('*').order('id'); if(error)throw error; return ok(data); }
     case 'team_save': { const r=await saveRow('team',body); logYaz(act,body); return ok(r); }
 
@@ -414,12 +421,26 @@ let ui={section:'dashboard'}, calData={};
 const root=()=>document.getElementById('root');
 
 /* ---- Kimlik doğrulama (Supabase Auth) ---- */
+/* Oturumdaki kullanıcıyı canonical bağ üzerinden çözer (06 §4.2).
+   Aktif bir ekip profili yoksa iç veriye RLS zaten izin vermez; kullanıcıyı
+   yarım çalışan bir panelde bırakmak yerine açık mesajla dışarı alırız. */
+async function loadIdentity(){
+  let me=null;
+  try{ me=await api('me'); }catch(e){ me=null; }
+  ui._me=me||null;
+  ui._role=me?(me.app_role||'team_member'):null;
+  if(!me){
+    await sb.auth.signOut();
+    showLogin('Bu hesap bir ekip profiline bağlı değil. Erişim için yönetici ile iletişime geçin.');
+    return false; }
+  return true; }
+
 async function boot(){ const {data}=await sb.auth.getSession();
-  if(data.session){ ui._email=(data.session.user||{}).email||'';
-    try{ ui._settings=await api('settings_get'); }catch(e){ ui._settings={}; }
-    try{ const t=await api('team_list'); ui._me=(t||[]).find(x=>String(x.eposta||'').toLowerCase()===ui._email.toLowerCase())||null; }catch(e){}
-    showApp(); }
-  else showLogin(); }
+  if(!data.session){ showLogin(); return; }
+  ui._email=(data.session.user||{}).email||'';
+  if(!await loadIdentity()) return;
+  try{ ui._settings=await api('settings_get'); }catch(e){ ui._settings={}; }
+  showApp(); }
 function showLogin(err){
   const yil=new Date().getFullYear();
   root().innerHTML=`<div class="login">
@@ -456,11 +477,13 @@ async function doLogin(){
   const {error}=await sb.auth.signInWithPassword({email:gv('lu'),password:gv('lp')});
   if(error){ showLogin(error.message); return; }
   ui._email=gv('lu');
-  sb.from('activity_log').insert({kullanici:ui._email,islem:'giriş yaptı',bolum:'Oturum',detay:''}).then(()=>{},()=>{});
+  /* Kimlik önce çözülür: activity_log artık aktif iç kullanıcı ister,
+     bu yüzden log kaydı kimlik doğrulandıktan sonra yazılır. */
+  if(!await loadIdentity()) return;
+  sb.from('activity_log').insert({kullanici:(ui._me&&ui._me.name)||ui._email,islem:'giriş yaptı',bolum:'Oturum',detay:''}).then(()=>{},()=>{});
   try{ ui._settings=await api('settings_get'); }catch(e){ ui._settings={}; }
-  try{ const t=await api('team_list'); ui._me=(t||[]).find(x=>String(x.eposta||'').toLowerCase()===ui._email.toLowerCase())||null; }catch(e){}
   showApp(); }
-async function logout(){ await sb.auth.signOut(); showLogin(); }
+async function logout(){ await sb.auth.signOut(); ui._me=null; ui._role=null; showLogin(); }
 
 const NAVG=[
  ['Genel','dashboard',[
@@ -515,7 +538,8 @@ function navCiz(){
 const TITLES={dashboard:'Dashboard',anasayfa:'Anasayfa Karşılama','is-takibi':'İş Takibi',urunler:'Ürünler',mecralar:'Mecralar',harita:'Harita',listeler:'Doluluk',musteriler:'Müşteriler',tedarikciler:'Tedarikçiler',raporlar:'Raporlar',teklifler:'Teklifler',talepler:'Medya Planlama Talepleri',ekip:'Ekip',sayfalar:'Sayfalar',notlar:'Notlar',ayarlar:'Ayarlar'};
 function userChip(){
   const me=ui._me||{}; const ad=me.name||(ui._email||'').split('@')[0]||'Kullanıcı';
-  const rol=me.role||me.yetki||'Yönetici';
+  /* Mevcut serbest metin unvan korunur; yoksa canonical app_role etiketi (D-203). */
+  const rol=me.role||me.yetki||(ui._role==='admin'?'Yönetici':'Ekip Üyesi');
   const av=me.photo?`<img src="${esc(me.photo)}" alt="">`
     :`<span class="uc-i">${esc((ad.trim()[0]||'K').toLocaleUpperCase('tr'))}</span>`;
   return `<div class="uchip" title="${esc(ui._email||'')}">${av}
