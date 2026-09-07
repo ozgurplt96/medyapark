@@ -71,7 +71,7 @@ function pickUpload(accept, cb, opt){ const inp=document.createElement('input');
   inp.onchange=async()=>{ const f=inp.files[0]; if(!f)return;
     toast('Yükleniyor…');
     try{ const url=await uploadFile(f,opt); cb(url); }
-    catch(e){ alert('Yükleme hatası: '+(e.message||e)); } };
+    catch(e){ mpAlert('Yükleme hatası: '+(e.message||e),'Yükleme'); } };
   inp.click(); }
 
 
@@ -113,8 +113,8 @@ async function yedekAl(){
 function yedekYukleAc(){
   const inp=document.createElement('input'); inp.type='file'; inp.accept='.json,application/json';
   inp.onchange=async()=>{ const f=inp.files[0]; if(!f)return;
-    let veri; try{ veri=JSON.parse(await f.text()); }catch(e){ alert('Dosya okunamadı, geçerli bir yedek dosyası seçin.'); return; }
-    if(!veri._tablolar){ alert('Bu dosya bir Medyapark yedeği değil.'); return; }
+    let veri; try{ veri=JSON.parse(await f.text()); }catch(e){ mpAlert('Dosya okunamadı, geçerli bir yedek dosyası seçin.','Geri Yükleme'); return; }
+    if(!veri._tablolar){ mpAlert('Bu dosya bir Medyapark yedeği değil.','Geri Yükleme'); return; }
     const say=Object.entries(veri._tablolar).map(([k,v])=>`${k}: ${v.length}`).join(' · ');
     modal(`<h3 style="margin:0 0 10px">Yedekten Geri Yükle</h3>
       <div class="imp-warn">Bu işlem yedekteki kayıtları veritabanına yazar. Aynı numaralı kayıtların üzerine yazılır.
@@ -131,7 +131,7 @@ function yedekYukleAc(){
   inp.click();
 }
 async function yedekGeriYukle(){
-  if((gv('bkOnay')||'').trim().toLocaleUpperCase('tr')!=='GERI YUKLE'){ alert('Onay metnini tam yazın: GERI YUKLE'); return; }
+  if((gv('bkOnay')||'').trim().toLocaleUpperCase('tr')!=='GERI YUKLE'){ mpAlert('Onay metnini tam yazın: GERI YUKLE','Geri Yükleme'); return; }
   const veri=window.__yedek; if(!veri)return;
   const bilgi=document.getElementById('bkOnay').parentElement;
   bilgi.innerHTML='<p class="muted">Geri yükleniyor… Bu pencereyi kapatmayın.</p>';
@@ -147,7 +147,7 @@ async function yedekGeriYukle(){
     }catch(e){ hata.push(t+' ('+(e.message||e).slice(0,40)+')'); }
   }
   closeModal();
-  alert(`Geri yükleme bitti.\n${ok} kayıt yazıldı.`+(hata.length?`\n\nSorun çıkan tablolar:\n`+hata.join('\n'):''));
+  mpAlert(`Geri yükleme bitti.\n${ok} kayıt yazıldı.`+(hata.length?`\n\nSorun çıkan tablolar:\n`+hata.join('\n'):''));
   renderSection();
 }
 
@@ -189,6 +189,37 @@ function logYaz(act, body, q){
 
 /* ---- Veri katmanı köprüsü: eski api(action,body) -> Supabase ---- */
 const DELMAP={product_delete:'products',mecra_delete:'mecralar',alt_delete:'alt_mecralar',unit_delete:'units',customer_delete:'customers',team_delete:'team',note_delete:'notes',quote_delete:'quotes',job_delete:'jobs'};
+/* ---- Tema uyumlu diyaloglar (tarayıcı alert/confirm yerine) ---- */
+function mpDlg(o){ return new Promise(res=>{
+  const eski=document.getElementById('mpDlgBg'); if(eski)eski.remove();
+  const bg=document.createElement('div'); bg.id='mpDlgBg'; bg.className='mpdlg-bg';
+  const dg=!!o.danger;
+  bg.innerHTML=`<div class="mpdlg" role="dialog" aria-modal="true">
+    <div class="mpdlg-ic ${dg?'dg':''}">${dg
+      ?'<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 9v4m0 4h.01"/><path d="M10.3 3.6 1.9 18a2 2 0 0 0 1.7 3h16.8a2 2 0 0 0 1.7-3L13.7 3.6a2 2 0 0 0-3.4 0z"/></svg>'
+      :'<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v5h1"/></svg>'}</div>
+    <div class="mpdlg-t">${esc(o.baslik||'Onay')}</div>
+    <div class="mpdlg-m">${esc(o.msg||'')}</div>
+    <div class="mpdlg-b">
+      ${o.tek?'':`<button class="btn btn-ghost" id="mpDlgNo">${esc(o.noText||'Vazgeç')}</button>`}
+      <button class="btn ${dg?'btn-danger':'btn-primary'}" id="mpDlgOk">${esc(o.okText||'Tamam')}</button>
+    </div></div>`;
+  document.body.appendChild(bg);
+  requestAnimationFrame(()=>bg.classList.add('on'));
+  const kapat=v=>{ bg.classList.remove('on'); document.removeEventListener('keydown',tus);
+    setTimeout(()=>bg.remove(),140); res(v); };
+  const tus=e=>{ if(e.key==='Escape')kapat(!o.tek?false:true); if(e.key==='Enter')kapat(true); };
+  document.addEventListener('keydown',tus);
+  bg.addEventListener('mousedown',e=>{ if(e.target===bg && !o.tek)kapat(false); });
+  const no=bg.querySelector('#mpDlgNo'); if(no)no.onclick=()=>kapat(false);
+  const okB=bg.querySelector('#mpDlgOk'); okB.onclick=()=>kapat(true); okB.focus();
+});}
+function mpAlert(msg,baslik){ return mpDlg({msg,baslik:baslik||'Bilgi',tek:true}); }
+function mpConfirm(msg,baslik,opt){ opt=opt||{};
+  const dg=opt.danger!==undefined?opt.danger:/sil|kald(ı|i)r/i.test(String(msg));
+  return mpDlg({msg,baslik:baslik||(dg?'Emin misiniz?':'Onay'),danger:dg,
+    okText:opt.ok||(dg?'Evet, Sil':'Evet'),noText:opt.no||'Vazgeç'}); }
+
 /* Form kaydetmelerini saran ortak yardimci: hata olursa artik sessizce
    yutulmuyor, kullaniciya gosteriliyor. */
 async function guard(fn, hataBasligi){
@@ -196,7 +227,7 @@ async function guard(fn, hataBasligi){
   catch(e){
     const msg=(e&&(e.message||e.hint||e.details))||String(e);
     console.error(hataBasligi||'Islem hatasi:', e);
-    alert((hataBasligi||'İşlem başarısız')+':\n\n'+msg);
+    mpAlert(msg,(hataBasligi||'İşlem başarısız'));
     return null;
   }
 }
@@ -267,12 +298,21 @@ async function api(action, body){
             .sort((a,b)=>(sira[a.status]??9)-(sira[b.status]??9))
             .slice(0,8).map(j=>{ const c=cm[j.customer_id]||{};
               return {id:j.id,title:j.title,status:j.status,start:j.start_day,end:j.end_day,
+                      assignee_id:j.assignee_id||null,
                       firma:c.firma||mm[j.mecra_id]||'—',kisi:c.ilgili_kisi||'',mecra:mm[j.mecra_id]||''}; }); })()
       });
     }
     case 'jobs_list':{ const {data,error}=await sb.from('jobs').select('*').order('sort').order('id'); if(error)throw error; return ok(data); }
     case 'job_move':{ const {error}=await sb.from('jobs').update({status:body.status}).eq('id',body.id); if(error)throw error; return ok(); }
-    case 'job_save': { const r=await saveRow('jobs',body); logYaz(act,body); return ok(r); }
+    case 'job_save': {
+      try{ const r=await saveRow('jobs',body); logYaz(act,body); return ok(r); }
+      catch(e){
+        if(body && body.assignee_id!==undefined && /assignee_id/.test(String(e.message||''))){
+          const b={...body}; delete b.assignee_id;
+          const r=await saveRow('jobs',b); logYaz(act,b);
+          toast('İş kaydedildi; atama için veritabanı güncellemesi gerekli (talimat dosyasındaki SQL).');
+          return ok(r);
+        } throw e; } }
 
     case 'products_list':{ const {data,error}=await sb.from('products').select('*').order('sort').order('id'); if(error)throw error; return ok(data); }
     case 'product_save': { const r=await saveRow('products',body); logYaz(act,body); return ok(r); }
@@ -381,14 +421,39 @@ async function boot(){ const {data}=await sb.auth.getSession();
     showApp(); }
   else showLogin(); }
 function showLogin(err){
-  root().innerHTML=`<div class="login"><div class="box"><div class="lg">medya<span>park</span></div>
-    <p class="muted">Yönetim Paneli</p>
-    <div class="field"><input class="inp" id="lu" type="email" placeholder="E-posta" autocomplete="username"></div>
-    <div class="field"><input class="inp" id="lp" type="password" placeholder="Şifre" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()"></div>
-    <button class="btn btn-primary" style="width:100%" onclick="doLogin()">Giriş Yap</button>
-    ${err?`<p class="muted" style="color:var(--clay);margin:12px 0 0">${esc(err)}</p>`:''}</div></div>`;
+  const yil=new Date().getFullYear();
+  root().innerHTML=`<div class="login">
+    <div class="lg-hero">
+      <div class="lg-blob b1"></div><div class="lg-blob b2"></div><div class="lg-blob b3"></div>
+      <div class="lg-hero-i">
+        <div class="lg-mark">medya<span>park</span></div>
+        <h1>Adana'nın açıkhava<br>reklam ağı, tek panelde.</h1>
+        <div class="lg-feats">
+          <div class="lg-f">${ic('media',18)} Mecra &amp; envanter yönetimi</div>
+          <div class="lg-f">${ic('lists',18)} Ay ay doluluk takibi</div>
+          <div class="lg-f">${ic('quotes',18)} Teklif &amp; müşteri yönetimi</div>
+        </div>
+        <div class="lg-alt">© ${yil} Medyapark Adana</div>
+      </div>
+    </div>
+    <div class="lg-form">
+      <div class="box ${err?'shake':''}">
+        <div class="lg-hi">Tekrar hoş geldiniz</div>
+        <p class="muted" style="margin:0 0 22px">Yönetim paneline giriş yapın</p>
+        <div class="field"><label class="flabel">E-posta</label>
+          <input class="inp" id="lu" type="email" placeholder="ornek@medyapark.com" autocomplete="username"></div>
+        <div class="field"><label class="flabel">Şifre</label>
+          <div class="lg-pw"><input class="inp" id="lp" type="password" placeholder="••••••••" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()">
+          <button type="button" class="lg-eye" onclick="const p=document.getElementById('lp');p.type=p.type==='password'?'text':'password';this.classList.toggle('on')" title="Şifreyi göster/gizle"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg></button></div></div>
+        ${err?`<div class="lg-err">${esc(err)}</div>`:''}
+        <button class="btn btn-primary lg-btn" id="lgBtn" onclick="doLogin()">Giriş Yap</button>
+      </div>
+    </div></div>`;
+  const u=document.getElementById('lu'); if(u)u.focus();
 }
-async function doLogin(){ const {error}=await sb.auth.signInWithPassword({email:gv('lu'),password:gv('lp')});
+async function doLogin(){
+  const b=document.getElementById('lgBtn'); if(b){b.disabled=true;b.textContent='Giriş yapılıyor…';}
+  const {error}=await sb.auth.signInWithPassword({email:gv('lu'),password:gv('lp')});
   if(error){ showLogin(error.message); return; }
   ui._email=gv('lu');
   sb.from('activity_log').insert({kullanici:ui._email,islem:'giriş yaptı',bolum:'Oturum',detay:''}).then(()=>{},()=>{});
@@ -500,7 +565,8 @@ async function yeniTeklifKontrol(){
     if(lb && !lr.error){ const k=(lr.data||[]).length; lb.textContent=k||''; lb.style.display=k?'inline-flex':'none'; }
   }catch(e){}
 }
-function go(s){ ui.section=s;
+async function go(s){ if(typeof dirtyGuard==='function' && !(await dirtyGuard())) return;
+  ui.section=s;
   const g=navGrupOf(s);                        /* kapali gruptaki bolume gidilirse grubu ac */
   if(g){ const set=navAcikGruplar(); if(!set.has(g)){ set.add(g); try{localStorage.setItem('mp_nav_acik',JSON.stringify([...set]));}catch(e){} } }
   navCiz();
@@ -651,6 +717,22 @@ function chartArea(rows,opt){
 
 /* ---- İş akışı listesi: solda firma, sağda soldan sağa aşamalar ---- */
 const JOB_STEPS=[['tasarim','Tasarım'],['baski','Baskı'],['montaj','Montaj'],['yayin','Yayın']];
+/* Dashboard mini iş panosu: 4 aşama sütunu + atanan rozetleri */
+function jobsBoard(jobs){
+  const AS=[['tasarim','Tasarım','violet'],['baski','Baskı','amber'],['montaj','Montaj','cyan'],['yayin','Yayında','green']];
+  if(!jobs||!jobs.length) return '<p class="empty">Devam eden iş yok. "+ Yeni İş" ile başlayın.</p>';
+  return `<div class="jb">${AS.map(([st,lbl,cl])=>{
+    const list=jobs.filter(j=>j.status===st);
+    const kart=list.slice(0,3).map(j=>`<button class="jb-c" onclick="go('is-takibi')" title="${esc(j.title)}">
+        <span class="jb-t">${esc(j.title)}</span>
+        <span class="jb-m">${esc(j.firma||'')}</span>
+        ${j.assignee_id?ekipRozet(j.assignee_id):''}</button>`).join('');
+    return `<div class="jb-col ${cl}">
+      <button class="jb-h" onclick="go('is-takibi')"><i></i>${lbl}<b>${list.length}</b></button>
+      ${kart||'<div class="jb-bos">—</div>'}
+      ${list.length>3?`<button class="jb-daha" onclick="go('is-takibi')">+${list.length-3} daha</button>`:''}
+    </div>`;}).join('')}</div>`;
+}
 function flowList(jobs){
   if(!jobs||!jobs.length) return '<p class="empty">Devam eden iş yok.</p>';
   return `<div class="flow">${jobs.map(j=>{
@@ -705,12 +787,13 @@ async function dashboard(c){
   const QL={yeni:'Yeni',gorusuldu:'Görüşüldü',onaylandi:'Onaylandı',iptal:'İptal'};
   const JL={tasarim:'Tasarım',baski:'Baskı',montaj:'Montaj',yayin:'Yayın',arsiv:'Arşiv'};
 
+  const tm=await api('team_list').catch(()=>[]); ui._team=tm||[];
   const kpi=[
-    ['%'+s.doluluk,'Doluluk', s.yil+' · '+s.toplamDolu+'/'+s.slot+' ay-alan','k-blue'],
-    [s.activeJobs,'Devam eden iş',(s.jobStat.yayin||0)+' yayında','k-lime'],
-    [s.newQuotes,'Yeni teklif','son 30 günde '+s.son30Teklif,'k-amber'],
-    [s.units,'Reklam alanı', s.mecra+' mecra · '+s.alts+' alt mecra','k-green']
-  ].map(k=>`<div class="kpi2 ${k[3]}"><div class="kpi2-n">${esc(k[0])}</div>
+    ['%'+s.doluluk,'Doluluk', s.yil+' · '+s.toplamDolu+'/'+s.slot+' ay-alan','k-blue','listeler'],
+    [s.activeJobs,'Devam eden iş',(s.jobStat.yayin||0)+' yayında','k-lime','is-takibi'],
+    [s.newQuotes,'Yeni teklif','son 30 günde '+s.son30Teklif,'k-amber','teklifler'],
+    [s.units,'Reklam alanı', s.mecra+' mecra · '+s.alts+' alt mecra','k-green','mecralar']
+  ].map(k=>`<div class="kpi2 ${k[3]} tik" onclick="go('${k[4]}')" title="${esc(k[1])} bölümüne git"><div class="kpi2-n">${esc(k[0])}</div>
     <div class="kpi2-t">${esc(k[1])}</div><div class="kpi2-s">${esc(k[2])}</div></div>`).join('');
 
   /* yıl değişimini alt satırda göster (Oca'nın altında yıl yazar) */
@@ -740,12 +823,15 @@ async function dashboard(c){
   <div class="dash-grid">
     <div class="dash-l">
       <section class="card">
-        <div class="card-h"><h3>Doluluk Trendi</h3><span class="chip mono">${esc(araligi)}</span></div>
-        <div class="card-b">${area}</div>
+        <div class="card-h"><h3>İş Takibi</h3>
+          <div style="display:flex;gap:8px;align-items:center">
+            <button class="btn btn-outline btn-sm" onclick="go('is-takibi').then(()=>setTimeout(()=>jobForm(),200))">+ Yeni İş</button>
+            <button class="btn-link" onclick="go('is-takibi')">Tümü</button></div></div>
+        <div class="card-b">${jobsBoard(s.jobList||[])}</div>
       </section>
       <section class="card">
-        <div class="card-h"><h3>İş Takip Akışı</h3><button class="btn-link" onclick="go('is-takibi')">Tümü</button></div>
-        <div class="card-b">${flowList(s.jobList||[])}</div>
+        <div class="card-h" style="cursor:pointer" onclick="go('listeler')" title="Doluluk bölümüne git"><h3>Doluluk Trendi</h3><span class="chip mono">${esc(araligi)}</span></div>
+        <div class="card-b">${area}</div>
       </section>
       <section class="card">
         <div class="card-h"><h3>Son Teklifler</h3><button class="btn-link" onclick="go('teklifler')">Tümü</button></div>
@@ -759,8 +845,8 @@ async function dashboard(c){
         <div class="card-b msgs">${notlar}</div>
       </section>
       <section class="card">
-        <div class="card-h"><h3>Mecra Dağılımı</h3></div>
-        <div class="card-b">${s.mecraDagilim.length?chartRows(s.mecraDagilim.map(m=>({l:m.name,v:m.adet,c:m.color}))):'<p class="empty">Mecra yok.</p>'}</div>
+        <div class="card-h" style="cursor:pointer" onclick="go('mecralar')" title="Mecralar bölümüne git"><h3>Mecra Dağılımı</h3><button class="btn-link">Tümü</button></div>
+        <div class="card-b" style="cursor:pointer" onclick="go('mecralar')">${s.mecraDagilim.length?chartRows(s.mecraDagilim.map(m=>({l:m.name,v:m.adet,c:m.color}))):'<p class="empty">Mecra yok.</p>'}</div>
       </section>
     </div>
   </div>
@@ -770,13 +856,18 @@ async function dashboard(c){
 /* ---------- İŞ TAKİBİ (kanban) ---------- */
 const JOBST=[['tasarim','Tasarımda'],['baski','Baskıda'],['montaj','Montajda'],['yayin','Yayında'],['arsiv','Arşiv']];
 const JOBC={tasarim:'violet',baski:'amber',montaj:'cyan',yayin:'green',arsiv:'slate'};
+function ekipRozet(aid){
+  const t=(ui._team||[]).find(x=>x.id===aid); if(!t)return '';
+  const bas=String(t.name||'?').trim().split(/\s+/).map(w=>w[0]).slice(0,2).join('').toLocaleUpperCase('tr');
+  return `<span class="asg" title="Atanan: ${esc(t.name)}">${esc(bas)}</span>`;
+}
 async function isTakibi(c){
-  const jobs=await api('jobs_list');
+  const [jobs,tm]=await Promise.all([api('jobs_list'),api('team_list')]); ui._team=tm||[];
   const toplam=jobs.filter(j=>j.status!=='arsiv').length;
   const cols=JOBST.map(([st,lbl],idx)=>{
     const list=jobs.filter(j=>j.status===st);
     const items=list.map(j=>`<article class="kcard">
-      <div class="kc-t">${esc(j.title)}</div>
+      <div class="kc-t">${esc(j.title)}${j.assignee_id?ekipRozet(j.assignee_id):''}</div>
       ${j.note?`<div class="kc-m">${esc(j.note)}</div>`:''}
       <div class="kc-a">
         ${idx>0?`<button title="Geri al: ${esc(JOBST[idx-1][1])}" onclick="jobMove(${j.id},'${JOBST[idx-1][0]}')">${ic('left',15)}</button>`:'<span></span>'}
@@ -796,11 +887,11 @@ async function isTakibi(c){
     <div class="kanban">${cols}</div>`;
 }
 async function jobMove(id,status){ await api('job_move',{id,status}); renderSection(); }
-async function jobDelete(id){ if(confirm('Silinsin mi?')){ await api('job_delete&id='+id); renderSection(); } }
+async function jobDelete(id){ if(await mpConfirm('Bu iş kaydı silinsin mi?','İşi Sil')){ await api('job_delete&id='+id); renderSection(); } }
 async function jobForm(st,id){
-  const veri=await guard(()=>Promise.all([api('customers_list'),api('suppliers_list'),api('mecra_list')]),'Form açılamadı');
+  const veri=await guard(()=>Promise.all([api('customers_list'),api('suppliers_list'),api('mecra_list'),api('team_list')]),'Form açılamadı');
   if(!veri) return;
-  const [cu,su,mc]=veri;
+  const [cu,su,mc,tm]=veri; ui._team=tm||[];
   const j = id ? (await api('jobs_list')).find(x=>x.id===id)||{} : {};
   const opt=(arr,val,lbl)=>`<option value="">— yok —</option>`+arr.map(x=>
     `<option value="${x.id}" ${String(val)===String(x.id)?'selected':''}>${esc(lbl(x))}</option>`).join('');
@@ -813,6 +904,7 @@ async function jobForm(st,id){
   </div>
   <div class="row2">
     <div class="field"><label class="flabel">Tedarikçi (baskı/montaj)</label><select class="inp" id="jsup">${opt(su,j.supplier_id,x=>(x.firma||x.name||'—')+((x.kategori||x.type)?' · '+(x.kategori||x.type):''))}</select></div>
+    <div class="field"><label class="flabel">Atanan ekip üyesi</label><select class="inp" id="jassg"><option value="">— Atanmadı —</option>${opt(tm,j.assignee_id,x=>x.name+(x.role?' · '+x.role:''))}</select></div>
     <div class="field"><label class="flabel">Aşama</label><select class="inp" id="js">${JOBST.map(x=>`<option value="${x[0]}" ${(j.status||st||'tasarim')===x[0]?'selected':''}>${x[1]}</option>`).join('')}</select></div>
   </div>
   <div class="row2">
@@ -823,10 +915,10 @@ async function jobForm(st,id){
   <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn btn-ghost btn-sm" onclick="closeModal()">Vazgeç</button><button class="btn btn-primary btn-sm" onclick="jobSave()">Kaydet</button></div>`);
 }
 async function jobSave(){
-  if(!gv('jt').trim()){ alert('Başlık zorunlu.'); return; }
+  if(!gv('jt').trim()){ mpAlert('Başlık zorunlu.'); return; }
   const num=v=>v?+v:null;
   const r=await guard(()=>api('job_save',{id:+gv('jid')||0,title:gv('jt'),note:gv('jn'),status:gv('js')||'tasarim',
-    customer_id:num(gv('jc')),mecra_id:num(gv('jm')),supplier_id:num(gv('jsup')),
+    customer_id:num(gv('jc')),mecra_id:num(gv('jm')),supplier_id:num(gv('jsup')),assignee_id:num(gv('jassg')),
     start_day:gv('jsd')||null,end_day:gv('jed')||null}),'İş kaydedilemedi');
   if(r===null) return;
   closeModal(); renderSection(); toast('İş kaydedildi.');
@@ -865,7 +957,7 @@ function prodEdit(id){ const p=(ui._products||[]).find(x=>x.id===id)||{prices:{}
 }
 function parsePrices(v){ const o={}; v.split('\n').forEach(l=>{const x=l.indexOf('=');if(x<0)return;const k=l.slice(0,x).trim();let val=l.slice(x+1).trim();const n=val.replace(/[.\s₺]/g,'');if(/^\d+$/.test(n))val=Number(n);if(k)o[k]=val;}); return o; }
 async function prodSave(){ await api('product_save',{id:+gv('pid'),name:gv('pname'),olcu:gv('polcu'),yuzey:gv('pyuzey'),isikli:gv('pisikli'),baski_malzemesi:gv('pbm'),baski_format:gv('pbf'),yayin_format:gv('pyf'),etiketler:gv('petiket'),ikon:gv('pikon'),baski_ucreti:gv('pbu'),montaj_ucreti:gv('pmu'),extra_ucret:gv('pex'),prices:parsePrices(gv('pprices'))}); renderSection(); }
-async function prodDel(id){ if(confirm('Ürün silinsin mi?')){ await api('product_delete&id='+id); renderSection(); } }
+async function prodDel(id){ if(await mpConfirm('Ürün silinsin mi? Bu ürünü kullanan alanlarda ürün bağlantısı boşalır.','Ürünü Sil')){ await api('product_delete&id='+id); renderSection(); } }
 
 
 /* Görünürlük seçici: her ikisi / sadece masaüstü / sadece mobil / gizle */
@@ -887,8 +979,16 @@ function collectVis(idPrefix,keys,prev){
 function imgField(id,val,label,hint,opt){
   const o=JSON.stringify(opt||upOpt(id)).replace(/"/g,'&quot;');
   return `<div class="field"><label class="flabel">${esc(label)}</label>
-    <div style="display:flex;gap:8px"><input class="inp" id="${id}" value="${esc(val)}" placeholder="${esc(hint||'https://...')}">
-    <button class="btn btn-outline btn-sm" style="flex:0 0 auto" onclick="pickUpload('image/*',u=>{document.getElementById('${id}').value=u;},${o})">Yükle</button></div></div>`; }
+    <div class="imgf">
+    <span class="imgf-pv${val?'':' bos'}" id="${id}_pv" onclick="imgAc('${id}')" title="Önizleme — tıklayınca tam boyut açılır">${val?`<img src="${esc(val)}" alt="">`:''}</span>
+    <input class="inp" id="${id}" value="${esc(val)}" placeholder="${esc(hint||'https://...')}" oninput="imgPv('${id}')">
+    <button class="btn btn-outline btn-sm" style="flex:0 0 auto" onclick="pickUpload('image/*',u=>{document.getElementById('${id}').value=u;imgPv('${id}');},${o})">Yükle</button>
+    <button class="btn btn-ghost btn-sm imgf-x" title="Görseli kaldır" onclick="imgSil('${id}')">✕</button></div></div>`; }
+function imgPv(id){ const v=(gv(id)||'').trim(), pv=document.getElementById(id+'_pv'); if(!pv)return;
+  pv.innerHTML=v?`<img src="${esc(v)}" alt="">`:''; pv.classList.toggle('bos',!v); }
+function imgAc(id){ const v=(gv(id)||'').trim(); if(v)window.open(v,'_blank'); }
+function imgSil(id){ const e=document.getElementById(id); if(!e)return; e.value=''; imgPv(id);
+  e.dispatchEvent(new Event('input',{bubbles:true})); }
 /* alan tipine göre en uzun kenar sınırı */
 function upOpt(id){
   const s=String(id||'').toLowerCase();
@@ -922,7 +1022,7 @@ async function buildSitemap(){
   const a=document.createElement('a');
   a.href=URL.createObjectURL(new Blob([xml],{type:'application/xml'}));
   a.download='sitemap.xml'; a.click(); URL.revokeObjectURL(a.href);
-  alert(urls.length+' adres içeren sitemap.xml indirildi.\nBu dosyayı sitenin ana klasörüne yükleyin.');
+  mpAlert(urls.length+' adres içeren sitemap.xml indirildi.\nBu dosyayı sitenin ana klasörüne yükleyin.');
 }
 
 
@@ -945,7 +1045,7 @@ const _dt=()=>new Date().toISOString().slice(0,10);
 
 /* --- DIŞA AKTAR --- */
 async function exportRows(dosyaAdi, sheetAdi, cols, rows){
-  try{ await xlsxLoad(); }catch(e){ alert(e.message); return; }
+  try{ await xlsxLoad(); }catch(e){ mpAlert(e.message); return; }
   const head=cols.map(c=>c.label);
   const body=rows.map(r=>cols.map(c=>{
     const v=typeof c.get==='function'?c.get(r):r[c.key];
@@ -959,7 +1059,7 @@ async function exportRows(dosyaAdi, sheetAdi, cols, rows){
 
 /* çok sayfalı Excel */
 async function exportSheets(dosyaAdi, sheets){
-  try{ await xlsxLoad(); }catch(e){ alert(e.message); return 0; }
+  try{ await xlsxLoad(); }catch(e){ mpAlert(e.message); return 0; }
   const wb=XLSX.utils.book_new(); let toplam=0;
   sheets.forEach(sh=>{
     if(!sh.rows.length) return;
@@ -973,7 +1073,7 @@ async function exportSheets(dosyaAdi, sheets){
     XLSX.utils.book_append_sheet(wb,ws,sh.name.slice(0,30));
     toplam+=sh.rows.length;
   });
-  if(!wb.SheetNames.length){ alert('Seçtiğiniz aralıkta kayıt bulunamadı.'); return 0; }
+  if(!wb.SheetNames.length){ mpAlert('Seçtiğiniz aralıkta kayıt bulunamadı.'); return 0; }
   XLSX.writeFile(wb,`${dosyaAdi}-${_dt()}.xlsx`);
   return toplam;
 }
@@ -996,12 +1096,12 @@ function importOpen(cfg){
 }
 async function importParse(file){
   if(!file)return;
-  try{ await xlsxLoad(); }catch(e){ alert(e.message); return; }
+  try{ await xlsxLoad(); }catch(e){ mpAlert(e.message); return; }
   const buf=await file.arrayBuffer();
   const wb=XLSX.read(buf,{type:'array',cellDates:true});
   const ws=wb.Sheets[wb.SheetNames[0]];
   const aoa=XLSX.utils.sheet_to_json(ws,{header:1,defval:'',blankrows:false});
-  if(!aoa.length){ alert('Dosya boş görünüyor.'); return; }
+  if(!aoa.length){ mpAlert('Dosya boş görünüyor.'); return; }
   /* başlık satırını bul: en çok dolu hücreye sahip ilk 5 satırdan biri */
   let hi=0,best=-1;
   aoa.slice(0,5).forEach((r,i)=>{ const n=r.filter(x=>String(x).trim()!=='').length; if(n>best){best=n;hi=i;} });
@@ -1063,10 +1163,10 @@ async function importApply(){
     const mode=document.getElementById('impMode')?document.getElementById('impMode').value:'';
     const rap=await cfg.onApply(data,mode);
     closeModal(); renderSection();
-    alert(rap||'İçe aktarma tamamlandı.');
+    mpAlert(rap||'İçe aktarma tamamlandı.');
   }catch(e){
     btn.disabled=false; btn.textContent='İçe Aktar';
-    alert('Aktarma hatası: '+(e.message||e));
+    mpAlert('Aktarma hatası: '+(e.message||e));
   }
 }
 
@@ -1172,7 +1272,7 @@ async function mnuSave(){
   await api('settings_save',{menu:temiz});
   toast('Menü kaydedildi. Siteyi Ctrl+F5 ile yenileyin.');
 }
-async function mnuReset(){ if(!confirm('Menü varsayılana dönsün mü?'))return;
+async function mnuReset(){ if(!await mpConfirm('Menü varsayılana dönsün mü?','Menüyü Sıfırla',{danger:false,ok:'Sıfırla'}))return;
   await api('settings_save',{menu:null}); renderSection(); }
 
 /* ==========================================================
@@ -1229,9 +1329,9 @@ function ftrAdd(ci){ ui._ftr.cols[ci].items.push({label:'',type:'sayfa',value:''
 function ftrDel(ci,ii){ ui._ftr.cols[ci].items.splice(ii,1); ftrRender(); }
 function ftrMove(ci,ii,d){ const a=ui._ftr.cols[ci].items, j=ii+d; if(j<0||j>=a.length)return;
   [a[ii],a[j]]=[a[j],a[ii]]; ftrRender(); }
-function ftrColAdd(){ if(ui._ftr.cols.length>=4){alert('En fazla 4 sütun eklenebilir.');return;}
+function ftrColAdd(){ if(ui._ftr.cols.length>=4){mpAlert('En fazla 4 sütun eklenebilir.');return;}
   ui._ftr.cols.push({title:'YENİ SÜTUN',grid:false,items:[]}); ftrRender(); }
-function ftrColDel(ci){ if(!confirm('Bu sütun silinsin mi?'))return; ui._ftr.cols.splice(ci,1);
+async function ftrColDel(ci){ if(!await mpConfirm('Bu sütun silinsin mi?','Sütunu Sil'))return; ui._ftr.cols.splice(ci,1);
   if(!ui._ftr.cols.length)ui._ftr.cols=[{title:'',grid:false,items:[]}]; ftrRender(); }
 async function ftrSave(){
   ui._ftr.hideContact=document.getElementById('ftrHideC').checked;
@@ -1242,7 +1342,7 @@ async function ftrSave(){
   await api('settings_save',{footer:temiz});
   toast('Footer menüsü kaydedildi. Siteyi Ctrl+F5 ile yenileyin.');
 }
-async function ftrReset(){ if(!confirm('Footer menüsü varsayılana dönsün mü?'))return;
+async function ftrReset(){ if(!await mpConfirm('Footer menüsü varsayılana dönsün mü?','Footer Sıfırla',{danger:false,ok:'Sıfırla'}))return;
   await api('settings_save',{footer:null}); renderSection(); }
 
 /* ==========================================================
@@ -1304,8 +1404,8 @@ function rapAy(o){ const d=new Date(); const m=d.getMonth()+(o||0);
 
 async function rapVeri(){
   const b=gv('rb'), e=gv('re');
-  if(!b||!e){ alert('Tarih aralığı seçin.'); return null; }
-  if(b>e){ alert('Başlangıç tarihi bitişten sonra olamaz.'); return null; }
+  if(!b||!e){ mpAlert('Tarih aralığı seçin.'); return null; }
+  if(b>e){ mpAlert('Başlangıç tarihi bitişten sonra olamaz.'); return null; }
   const [jb,cu,su,mc,al,un,bk,qs]=await Promise.all([
     sb.from('jobs').select('*').order('start_day'),
     api('customers_list'), api('suppliers_list'), api('mecra_list'),
@@ -1476,9 +1576,21 @@ async function mecralar(c){
   c.innerHTML=`<div class="sec-head"><h3>Mecralar</h3><button class="btn btn-primary btn-sm" onclick="mecEdit(0)">+ Mecra ekle</button></div>${rows||'<p class="muted">Mecra yok.</p>'}<div id="mecEd"></div>`;
 }
 
-function mecEdit(id){ const m=(ui._mecralar||[]).find(x=>x.id===id)||{theme_color:'#0071e3'};
-  document.getElementById('mecEd').innerHTML=`<div class="sec-card" style="margin-top:16px"><h3 style="margin:0 0 14px;font-size:16px">${id?'Mecrayı Düzenle':'Yeni Mecra'}</h3>
+async function mecEdit(id){ if(ui._dirty && !(await dirtyGuard())) return;
+  const m=(ui._mecralar||[]).find(x=>x.id===id)||{theme_color:'#0071e3'};
+  const T=(i,ad)=>`<button type="button" class="mtab-btn${i===0?' on':''}" data-mt="${i}" onclick="mecTab(${i})">${ad} <span class="mtab-badge" id="mtb${i}">–</span></button>`;
+  const slug=m.slug||pslug(m.name||'');
+  document.getElementById('mecEd').innerHTML=`<div class="sec-card" style="margin-top:16px">
+    <div class="mec-head">
+      <h3 style="margin:0;font-size:16px">${id?'Mecrayı Düzenle':'Yeni Mecra'}</h3>
+      ${id?`<span class="pill ${m.hidden?'':'pil-on'}">${m.hidden?'○ Taslak':'● Yayında'}</span>
+      <a class="btn btn-ghost btn-sm" href="mecra/${esc(slug)}" target="_blank" rel="noopener" style="margin-left:auto">Sayfayı Gör ↗</a>`:''}
+    </div>
+    ${id?`<div class="hazir" id="mecHazirBar"></div>`:''}
     <input type="hidden" id="mid" value="${id||0}">
+    <div class="mtabs">${T(0,'Genel')}${T(1,'Görseller')}${T(2,'Tanıtım')}${T(3,'Ayarlar')}</div>
+
+    <div class="mtab-p on" data-mp="0">
     <div class="fld-box"><label class="flabel" style="font-weight:700">Temel Bilgiler</label>
     <div class="row2"><div class="field"><label class="flabel">İsim (kart başlığı)</label><input class="inp" id="mname" value="${esc(m.name)}" oninput="slugHint('mname','mslug')"></div>
     <div class="field"><label class="flabel">Tema rengi</label><div class="colorwrap"><input type="color" id="mcolor" value="${esc(m.theme_color||'#0071e3')}" oninput="document.getElementById('mcolor2').value=this.value"><input class="inp" id="mcolor2" value="${esc(m.theme_color)}" oninput="document.getElementById('mcolor').value=this.value"></div></div></div>
@@ -1487,70 +1599,119 @@ function mecEdit(id){ const m=(ui._mecralar||[]).find(x=>x.id===id)||{theme_colo
       <p class="muted" style="font-size:11.5px;margin:5px 0 0">Boş bırakırsan isimden otomatik üretilir. Sonradan değiştirirsen eski linkler kırılır.</p></div>
     <div class="row2"><div class="field"><label class="flabel">Günlük gösterim</label><input class="inp" id="mgg" value="${esc(m.gunluk_gosterim)}" placeholder="≈ 250.000 gösterim"></div>
     <div class="field"><label class="flabel">Toplam reklam alanı</label><input class="inp" id="mta" value="${esc(m.toplam_alan)}" placeholder="3 alt mecra"></div></div>
+    <div class="field" style="margin-top:4px"><label class="flabel">Rozet (kart üzerinde küçük etiket)</label><input class="inp" id="mbadge" value="${esc(m.badge)}"></div>
     </div>
+    <div class="fld-box"><label class="flabel" style="font-weight:700">Yayın durumu</label>
+      <label class="switch"><input type="checkbox" id="mpub" ${m.hidden===true?'':'checked'}><span class="sl"></span><span class="txt">Sitede yayında</span></label>
+      <p class="muted" style="font-size:12px;margin:6px 0 0">Kapalıyken bu mecra ve tüm alanları sitede hiç görünmez (taslak). Panelde çalışmaya devam edebilirsiniz.</p></div>
+    </div>
+
+    <div class="mtab-p" data-mp="1">
     <div class="fld-box"><label class="flabel" style="font-weight:700">Görseller ve Kapak</label>
-    <div class="field"><label class="flabel">Kart görseli (yükle veya URL)</label><div style="display:flex;gap:8px"><input class="inp" id="mimage" value="${esc(m.image)}" placeholder="https://..."><button class="btn btn-outline btn-sm" style="flex:0 0 auto" onclick="pickUpload('image/*',u=>{document.getElementById('mimage').value=u;})">Yükle</button></div></div>
-    <div class="field"><label class="flabel">Kapak görseli (1920×400 — mecra sayfası üstü)</label><div style="display:flex;gap:8px"><input class="inp" id="mkapak" value="${esc(m.kapak)}"><button class="btn btn-outline btn-sm" style="flex:0 0 auto" onclick="pickUpload('image/*',u=>{document.getElementById('mkapak').value=u;})">Yükle</button></div></div>
+    ${imgField('mimage', m.image, 'Kart görseli (yükle veya URL)', 'https://...')}
+    ${imgField('mkapak', m.kapak, 'Kapak görseli (1920×400 — mecra sayfası üstü)', 'https://...')}
     <div class="row2"><div class="field"><label class="flabel">Kapak kaplama rengi</label><input type="color" id="mkcolor" value="${esc(m.kapak_color||'#101014')}"></div><div class="field"><label class="flabel">Kapak opasite (0–1)</label><input class="inp" type="number" min="0" max="1" step="0.05" id="mkop" value="${m.kapak_opacity!=null?m.kapak_opacity:0.4}"></div></div>
     <div class="field"><label class="flabel">Kapak yüksekliği (px)</label><input class="inp" type="number" id="mkh" value="${m.kapak_height!=null?m.kapak_height:600}"></div>
     ${imgField('mkapakm', m.kapak_mobil, 'Kapak görseli — MOBİL sürüm (opsiyonel, 760px altı)', 'boş = masaüstü görseli kullanılır')}
     ${imgField('mimagem', m.image_mobil, 'Kart görseli — MOBİL sürüm (opsiyonel)', 'boş = masaüstü görseli kullanılır')}
     ${visSel('m',m,'kapak','Kapak görünürlüğü')}
     </div>
-
-    <div class="fld-box"><label class="flabel" style="font-weight:700">Kapak altı tanıtım (mecra sayfasında kapağın hemen altında görünür)</label>
-      <input class="inp" id="mintro" value="${esc(m.intro_baslik)}" placeholder="Başlık — ör. Adana'nın Kalbinde Reklam" style="margin-bottom:8px">
-      <textarea class="inp" id="macik" placeholder="Açıklama metni…" style="min-height:90px">${esc(m.aciklama)}</textarea>
-      ${visSel('m',m,'aciklama','Bu bölüm')}</div>
-
     <div class="fld-box"><label class="flabel" style="font-weight:700">Yerleşim krokisi</label>
       <p class="muted" style="font-size:12px;margin:0 0 10px">Kendi hazırladığınız kroki. Kırpılmaz, kutuya sığdırılır; ziyaretçi tıklayınca tam ekran büyür.</p>
       ${imgField('mkroki', m.yerlesim_plani, 'Kroki görseli', 'https://...')}
       ${imgField('mkrokim', m.kroki_mobil, 'Kroki — MOBİL sürüm (opsiyonel)', 'boş = masaüstü krokisi kullanılır')}
       ${visSel('m',m,'kroki','Kroki')}</div>
+    </div>
 
+    <div class="mtab-p" data-mp="2">
+    <div class="fld-box"><label class="flabel" style="font-weight:700">Kapak altı tanıtım (mecra sayfasında kapağın hemen altında görünür)</label>
+      <input class="inp" id="mintro" value="${esc(m.intro_baslik)}" placeholder="Başlık — ör. Adana'nın Kalbinde Reklam" style="margin-bottom:8px">
+      <textarea class="inp" id="macik" placeholder="Açıklama metni…" style="min-height:90px">${esc(m.aciklama)}</textarea>
+      ${visSel('m',m,'aciklama','Bu bölüm')}</div>
+    <div class="fld-box"><label class="flabel" style="font-weight:700">Tanıtım görseli ve katalog</label>
+      ${imgField('mintroimg', m.intro_image, 'Tanıtım görseli (başlık + açıklamanın altında, tıklayınca büyür)', 'https://...')}
+      <div class="field" style="margin-top:12px"><label class="flabel">PDF Katalog (sidebar\'daki buton — boşsa genel katalog kullanılır)</label>
+        <div style="display:flex;gap:8px"><input class="inp" id="mkatalog" value="${esc(m.katalog||'')}" placeholder="uploads/katalog.pdf">
+        <button class="btn btn-outline btn-sm" style="flex:0 0 auto" onclick="pickUpload('application/pdf',u=>{document.getElementById('mkatalog').value=u;})">Yükle</button></div></div></div>
     <div class="fld-box"><label class="flabel" style="font-weight:700">Avantajlar (mecra sayfasında kutucuklar)</label>
       ${[0,1,2,3].map(i=>{const a=(Array.isArray(m.avantajlar)?m.avantajlar:[])[i]||{};
         return `<div class="row2" style="margin-bottom:8px">
           <input class="inp" id="mav_t${i}" value="${esc(a.t||a.title||'')}" placeholder="Başlık ${i+1}">
           <input class="inp" id="mav_d${i}" value="${esc(a.d||a.desc||'')}" placeholder="Kısa açıklama"></div>`;}).join('')}
       ${visSel('m',m,'avantajlar','Avantajlar')}</div>
+    </div>
 
-    <div class="fld-box"><label class="flabel" style="font-weight:700">Tanıtım içeriği</label>
-      ${imgField('mintro', m.intro_image, 'Tanıtım görseli (başlık + açıklamanın altında, tıklayınca büyür)', 'https://...')}
-      <div class="field" style="margin-top:12px"><label class="flabel">PDF Katalog (sidebar'daki buton — boşsa genel katalog kullanılır)</label>
-        <div style="display:flex;gap:8px"><input class="inp" id="mkatalog" value="${esc(m.katalog||'')}" placeholder="uploads/katalog.pdf">
-        <button class="btn btn-outline btn-sm" style="flex:0 0 auto" onclick="pickUpload('application/pdf',u=>{document.getElementById('mkatalog').value=u;})">Yükle</button></div></div></div>
-
-    <div class="fld-box"><label class="flabel" style="font-weight:700">Diğer</label>
+    <div class="mtab-p" data-mp="3">
+    <div class="fld-box"><label class="flabel" style="font-weight:700">Logo ve bloklar</label>
       ${imgField('mlogo', m.logo, 'Logo (sidebar üstünde)', 'https://...')}
       ${visSel('m',m,'logo','Logo')}
-      <div class="field" style="margin-top:12px"><label class="flabel">Rozet (kart üzerinde küçük etiket)</label><input class="inp" id="mbadge" value="${esc(m.badge)}"></div>
       ${visSel('m',m,'gosterim','İstatistik bloğu')}
       ${visSel('m',m,'maps','Mini harita')}</div>
-
-    <div class="fld-box"><label class="flabel" style="font-weight:700">Yayın durumu</label>
-      <label class="switch"><input type="checkbox" id="mpub" ${m.hidden===true?'':'checked'}><span class="sl"></span><span class="txt">Sitede yayında</span></label>
-      <p class="muted" style="font-size:12px;margin:6px 0 0">Kapalıyken bu mecra ve tüm alanları sitede hiç görünmez (taslak). Panelde çalışmaya devam edebilirsiniz.</p></div>
-
     <div class="fld-box"><label class="flabel" style="font-weight:700">Tanıtım sayfası</label>
       <p class="muted" style="font-size:12px;margin:0 0 10px">Kapalıyken ve bu mecrada tek bir alan varsa, ziyaretçi karta tıklayınca doğrudan o alanın detayına gider (duvar reklamı gibi tekil satılan yerler için).</p>
       <label class="switch"><input type="checkbox" id="mhub" ${m.hub===false?'':'checked'}><span class="sl"></span><span class="txt">Tanıtım sayfasını göster</span></label></div>
+    </div>
 
-    <button class="btn btn-primary btn-sm" onclick="mecSave()">Mecrayı Kaydet</button>
+    <div class="stickybar"><span class="dirty-msg" id="mecDirtyMsg"></span>
+      <button class="btn btn-ghost btn-sm" onclick="mecVazgec(${id||0})">Vazgeç</button>
+      <button class="btn btn-primary btn-sm" onclick="mecSave()">Mecrayı Kaydet</button></div>
     ${id?`<hr style="border:0;border-top:1px solid var(--line2);margin:18px 0"><div class="sec-head"><h3 style="font-size:15px">Alt Mecralar</h3><button class="btn btn-primary btn-sm" onclick="altAdd(${id})">+ Alt Mecra</button></div><div id="altList">Yükleniyor…</div>`:'<p class="muted" style="margin-top:12px">Alt mecraları, mecrayı kaydettikten sonra ekleyebilirsiniz.</p>'}
     </div>`;
   collapsify(document.getElementById('mecEd'),'form');
-  document.getElementById('mecEd').scrollIntoView({behavior:'smooth'});
+  const kok=document.getElementById('mecEd');
+  ui._dirty=false;
+  const tazele=()=>{ mecTabSay(); mecHazir(m); };
+  kok.oninput=()=>{ mecKirlet(); tazele(); };
+  kok.onchange=()=>{ mecKirlet(); tazele(); };
+  tazele();
+  kok.scrollIntoView({behavior:'smooth'});
   if(id) loadAltList(id);
+}
+function mecKirlet(){ ui._dirty=true;
+  const m=document.getElementById('mecDirtyMsg'); if(m)m.textContent='Kaydedilmemiş değişiklik var'; }
+function mecTemizle(){ ui._dirty=false;
+  const m=document.getElementById('mecDirtyMsg'); if(m)m.textContent=''; }
+async function mecVazgec(id){ if(ui._dirty && !await mpConfirm('Değişiklikler kaydedilmedi. Vazgeçilsin mi?','Vazgeç',{danger:false,ok:'Evet, Vazgeç'}))return;
+  ui._dirty=false; mecEdit(id); }
+async function dirtyGuard(){ if(!ui._dirty) return true;
+  if(await mpConfirm('Kaydedilmemiş değişiklikler var. Kaydetmeden ayrılmak istiyor musunuz?','Kaydedilmedi',{danger:false,ok:'Ayrıl'})){ ui._dirty=false; return true; }
+  return false; }
+/* Yayına hazırlık şeridi — kritik alanlar + koordinat sayısı */
+function mecHazir(m){
+  const bar=document.getElementById('mecHazirBar'); if(!bar)return;
+  const dolu=id=>String(gv(id)||'').trim()!=='';
+  const units=(m&&m.units)||[];
+  const koorD=units.filter(u=>u.lat!=null).length, koorT=units.length;
+  const items=[
+    ['Kapak', dolu('mkapak'), 1],
+    ['Kart görseli', dolu('mimage'), 1],
+    ['Açıklama', dolu('macik'), 2],
+    ['Avantajlar', [0,1,2,3].some(i=>dolu('mav_t'+i)), 2],
+    ['Katalog', dolu('mkatalog'), 2]];
+  bar.innerHTML=items.map(([ad,ok,tab])=>`<button type="button" class="hz ${ok?'ok':'no'}" onclick="mecTab(${tab})">${ok?'✓':'✗'} ${ad}</button>`).join('')
+    + (koorT?`<button type="button" class="hz ${koorD===koorT?'ok':(koorD?'yari':'no')}" onclick="dirtyGuard().then(t=>{if(t)go('harita')})">${koorD===koorT?'✓':'◔'} Koordinat ${koorD}/${koorT}</button>`:'');
+}
+function mecTab(i){
+  document.querySelectorAll('#mecEd .mtab-btn').forEach(b=>b.classList.toggle('on',+b.dataset.mt===i));
+  document.querySelectorAll('#mecEd .mtab-p').forEach(p=>p.classList.toggle('on',+p.dataset.mp===i));
+}
+/* Sekme rozetleri: her panelde dolu alan / toplam alan (renk seçiciler ve anahtarlar sayılmaz) */
+function mecTabSay(){
+  document.querySelectorAll('#mecEd .mtab-p').forEach(p=>{
+    const alanlar=[...p.querySelectorAll('input.inp,textarea.inp')].filter(e=>e.type!=='color');
+    const dolu=alanlar.filter(e=>String(e.value||'').trim()!=='').length;
+    const b=document.getElementById('mtb'+p.dataset.mp); if(!b)return;
+    b.textContent=dolu+'/'+alanlar.length;
+    b.classList.toggle('tam', dolu===alanlar.length && alanlar.length>0);
+  });
 }
 async function mecSave(){ const id=+gv('mid');
   const prev=((ui._mecralar||[]).find(x=>x.id===id)||{}).visible||{};
   const visible=collectVis('m',['kapak','aciklama','kroki','avantajlar','logo','gosterim','maps'],prev);
   const avantajlar=[]; for(let i=0;i<4;i++){ const t=(gv('mav_t'+i)||'').trim(), d=(gv('mav_d'+i)||'').trim(); if(t||d)avantajlar.push({t,d}); }
-  const r=await api('mecra_save',{id,name:gv('mname'),theme_color:gv('mcolor'),badge:gv('mbadge'),
+  const r=await guard(()=>api('mecra_save',{id,name:gv('mname'),theme_color:gv('mcolor'),badge:gv('mbadge'),
     hidden:!(document.getElementById('mpub')||{checked:true}).checked,
-    intro_image:gv('mintro'),katalog:gv('mkatalog'),
+    intro_image:gv('mintroimg'),katalog:gv('mkatalog'),
     gunluk_gosterim:gv('mgg'),toplam_alan:gv('mta'),slug:(gv('mslug').trim()||pslug(gv('mname'))),
     image:gv('mimage'),image_mobil:gv('mimagem'),
     kapak:gv('mkapak'),kapak_mobil:gv('mkapakm'),
@@ -1559,9 +1720,11 @@ async function mecSave(){ const id=+gv('mid');
     yerlesim_plani:gv('mkroki'),kroki_mobil:gv('mkrokim'),
     logo:gv('mlogo'),avantajlar,
     hub:document.getElementById('mhub').checked,
-    visible});
+    visible}),'Mecra kaydedilemedi');
+  if(r===null) return;
+  mecTemizle(); toast('Mecra kaydedildi.');
   ui._mecralar=await api('mecra_list'); mecEdit(id||(r&&r.id)||0); }
-async function mecDel(id){ if(confirm('Mecra, alt mecraları ve üniteleri silinsin mi?')){ await api('mecra_delete&id='+id); renderSection(); } }
+async function mecDel(id){ if(await mpConfirm('Mecra, tüm alt mecraları, pozisyonları ve DOLULUK GEÇMİŞİ birlikte silinir. Bu işlem geri alınamaz.','Mecrayı Sil')){ await api('mecra_delete&id='+id); renderSection(); } }
 async function mecReorder(id,dir){ let list=(ui._mecralar||[]).slice(); const idx=list.findIndex(x=>x.id===id); const j=idx+dir; if(idx<0||j<0||j>=list.length)return; [list[idx],list[j]]=[list[j],list[idx]]; for(let k=0;k<list.length;k++){ if((list[k].sort||0)!==k) await api('mecra_save',{id:list[k].id,sort:k}); } ui._mecralar=await api('mecra_list'); renderSection(); }
 
 async function loadAltList(mid){ const alts=await api('alt_list&mecra_id='+mid); ui._alts=alts;
@@ -1570,9 +1733,9 @@ async function loadAltList(mid){ const alts=await api('alt_list&mecra_id='+mid);
     <button class="btn btn-outline btn-sm" onclick="altEdit(${a.id},${mid})">Düzenle</button><button class="btn btn-danger btn-sm" onclick="altDel(${a.id},${mid})">Sil</button></div>`).join('') : '<p class="muted">Alt mecra yok.</p>';
 }
 async function altAdd(mid){ const pid=(ui._products[0]||{}).id||null; const r=await api('alt_save',{mecra_id:mid,product_id:pid,name:'Yeni Alt Mecra'}); ui._alts=await api('alt_list&mecra_id='+mid); altEdit(r.id,mid); }
-async function altDel(id,mid){ if(confirm('Alt mecra ve üniteleri silinsin mi?')){ await api('alt_delete&id='+id); loadAltList(mid); } }
+async function altDel(id,mid){ if(await mpConfirm('Alt mecra, pozisyonları ve doluluk geçmişiyle birlikte silinir.','Alt Mecrayı Sil')){ await api('alt_delete&id='+id); loadAltList(mid); } }
 
-async function altEdit(id,mid){
+async function altEdit(id,mid){ if(ui._dirty && !(await dirtyGuard())) return;
   const alts=await api('alt_list&mecra_id='+mid); ui._alts=alts; const a=alts.find(x=>x.id===id)||{visible:{},avantajlar:[],galeri:[]};
   const vis=a.visible||{}; const adv=Array.isArray(a.avantajlar)?a.avantajlar:[]; const gal=Array.isArray(a.galeri)?a.galeri:[];
   const advInputs=[0,1,2,3].map(i=>{const x=adv[i]||{};return `<div class="row2"><div class="field"><input class="inp" id="av${i}t" value="${esc(x.t||x.title||'')}" placeholder="Avantaj ${i+1} başlık"></div><div class="field"><input class="inp" id="av${i}d" value="${esc(x.d||x.desc||'')}" placeholder="Açıklama"></div></div>`;}).join('');
@@ -1592,12 +1755,9 @@ async function altEdit(id,mid){
       <input class="inp" id="aintro" value="${esc(a.intro_baslik)}" placeholder="Başlık — ör. M1 AVM Megalight Alanları" style="margin-bottom:8px">
       <textarea class="inp" id="aacik" placeholder="Açıklama metni…" style="min-height:90px">${esc(a.aciklama)}</textarea>
       ${visSel('',a,'aciklama','Bu bölüm')}</div>
-    <div class="field"><label class="flabel">Sayfa adresi</label>
-      <div class="slug-row"><span>/mecra/</span><input class="inp" id="mslug" value="${esc(m.slug)}" placeholder="otomatik: ${esc(pslug(m.name))}"></div>
-      <p class="muted" style="font-size:11.5px;margin:5px 0 0">Boş bırakırsan isimden otomatik üretilir. Sonradan değiştirirsen eski linkler kırılır.</p></div>
     <div class="row2"><div class="field"><label class="flabel">Günlük gösterim</label><input class="inp" id="agg" value="${esc(a.gunluk_gosterim)}"></div>
       <div class="field"><label class="flabel">Toplam alan</label><input class="inp" id="ata" value="${esc(a.toplam_alan)}"></div></div>
-    <div class="field"><label class="flabel">Kart görseli</label><div style="display:flex;gap:8px"><input class="inp" id="aimage" value="${esc(a.image)}"><button class="btn btn-outline btn-sm" style="flex:0 0 auto" onclick="pickUpload('image/*',u=>{document.getElementById('aimage').value=u;})">Yükle</button></div></div>
+    ${imgField('aimage', a.image, 'Kart görseli', 'https://...')}
     <div class="field"><label class="flabel">Kapak görseli (1920×400 — detay üstü)</label><div style="display:flex;gap:8px"><input class="inp" id="akapak" value="${esc(a.kapak)}"><button class="btn btn-outline btn-sm" style="flex:0 0 auto" onclick="pickUpload('image/*',u=>{document.getElementById('akapak').value=u;})">Yükle</button></div></div>
     ${imgField('akapakm', a.kapak_mobil, 'Kapak — MOBİL sürüm (opsiyonel)', 'boş = masaüstü görseli kullanılır')}
     ${imgField('aimagem', a.image_mobil, 'Kart görseli — MOBİL sürüm (opsiyonel)', 'boş = masaüstü görseli kullanılır')}
@@ -1618,20 +1778,20 @@ async function altEdit(id,mid){
   collapsify(document.getElementById('mecEd'),'form');
   document.getElementById('mecEd').scrollIntoView({behavior:'smooth'});
 }
-async function altSave(){ const id=+gv('aid'), mid=+gv('amid');
+async function altSave(){ const id=+gv('aid'), mid=+gv('amid'); mecTemizle();
   const a0=(ui._alts||[]).find(x=>x.id===id)||{};
   const adv=[0,1,2,3].map(i=>({t:gv('av'+i+'t'),d:gv('av'+i+'d')})).filter(x=>x.t||x.d);
   const visible=collectVis('',['baslik','aciklama','maps','avantajlar','galeri'],a0.visible||{});
   const bz=gv('afbaz'); const fiyat = bz!==''? {baz:+bz, hafta:(gv('afhafta')!==''?+gv('afhafta'):null), ind3:+gv('afind3')||0, ind6:+gv('afind6')||0, ind12:+gv('afind12')||0} : null;
   await api('alt_save',{id,name:gv('aname'),product_id:+gv('aprod'),slug:(gv('aslug').trim()||pslug(gv('aname'))),baslik:gv('abaslik'),aciklama:gv('aacik'),intro_baslik:gv('aintro'),gunluk_gosterim:gv('agg'),toplam_alan:gv('ata'),image:gv('aimage'),image_mobil:gv('aimagem'),kapak:gv('akapak'),kapak_mobil:gv('akapakm'),kapak_color:gv('akcolor'),kapak_opacity:parseFloat(gv('akop')||'0.4'),kapak_height:parseInt(gv('akh')||'600',10),marquee:gv('amarquee'),yerlesim_plani:gv('ayerlesim'),maps:gv('amaps'),avantajlar:adv,fiyat,visible,hidden:!(document.getElementById('apub')||{checked:true}).checked});
-  alert('Alt mecra kaydedildi.'); altEdit(id,mid); }
+  mpAlert('Alt mecra kaydedildi.'); altEdit(id,mid); }
 async function altGalAdd(id,mid,url){ const alts=await api('alt_list&mecra_id='+mid); const a=alts.find(x=>x.id===id)||{}; const gal=Array.isArray(a.galeri)?a.galeri:[]; gal.push(url); await api('alt_save',{id,galeri:gal}); altEdit(id,mid); }
 async function altGalDel(id,mid,idx){ const alts=await api('alt_list&mecra_id='+mid); const a=alts.find(x=>x.id===id)||{}; const gal=Array.isArray(a.galeri)?a.galeri:[]; gal.splice(idx,1); await api('alt_save',{id,galeri:gal}); altEdit(id,mid); }
 
 async function unitAdd(altId,mid){ const alt=(ui._alts||await api('alt_list&mecra_id='+mid)).find(x=>x.id===altId)||{};
   await api('unit_save',{alt_mecra_id:altId,mecra_id:mid,product_id:alt.product_id,name:'Yeni Pozisyon'}); altEdit(altId,mid); }
 async function unitSave(id,field,value){ const body={id}; body[field]=value; await api('unit_save',body); }
-async function unitDel(id,altId,mid){ if(confirm('Pozisyon silinsin mi?')){ await api('unit_delete&id='+id); altEdit(altId,mid); } }
+async function unitDel(id,altId,mid){ if(await mpConfirm('Pozisyon ve doluluk geçmişi silinsin mi?','Pozisyonu Sil')){ await api('unit_delete&id='+id); altEdit(altId,mid); } }
 async function loadUnitCal(uid){ try{ const bk=await api('booking_list&unit_id='+uid); const map={}; bk.forEach(b=>map[b.ym]=b.status);
   calData[uid]={map, y:new Date().getFullYear()}; drawUnitCal(uid); }catch(e){} }
 function drawUnitCal(uid){ const box=document.getElementById('cal-'+uid); if(!box)return; const st=calData[uid]; const y=st.y;
@@ -1701,7 +1861,7 @@ async function harita(c){
   hRenderList();
   setTimeout(hInitMap,80);
 }
-async function saveGmKey(){ await api('settings_save',{googleMapsKey:gv('gmKey').trim()}); alert('Kaydedildi. Siteyi Ctrl+F5 ile yenileyin.'); renderSection(); }
+async function saveGmKey(){ await api('settings_save',{googleMapsKey:gv('gmKey').trim()}); mpAlert('Kaydedildi. Siteyi Ctrl+F5 ile yenileyin.'); renderSection(); }
 async function logYukle(){
   const box=document.getElementById('logBox'); box.innerHTML='<p class="muted" style="font-size:12.5px">Yükleniyor…</p>';
   const lim=(document.getElementById('logLim')||{}).value||200;
@@ -1724,15 +1884,15 @@ async function logYukle(){
     </div>`).join('')}`).join('');
 }
 async function logTemizle(){
-  if(!confirm('30 günden eski işlem kayıtları silinsin mi?'))return;
+  if(!await mpConfirm('30 günden eski işlem kayıtları silinsin mi?','Günlüğü Temizle'))return;
   await api('log_clear',{gun:30}); toast('Eski kayıtlar silindi.'); logYukle();
 }
 async function saveGa(){
   const v=gv('gaId').trim();
-  if(v && !/^G-[A-Z0-9]+$/i.test(v)){ alert('Ölçüm kimliği G- ile başlamalı. Örnek: G-ABC123XYZ'); return; }
+  if(v && !/^G-[A-Z0-9]+$/i.test(v)){ mpAlert('Ölçüm kimliği G- ile başlamalı. Örnek: G-ABC123XYZ'); return; }
   await api('settings_save',{gaId:v}); toast(v?'Analytics açıldı. Siteyi Ctrl+F5 ile yenileyin.':'Analytics kapatıldı.'); renderSection();
 }
-async function saveMapTexts(){ await api('settings_save',{mapTitle:gv('mapTitle'),mapDesc:gv('mapDesc'),mapKapak:gv('mapKapak')}); alert('Kaydedildi.'); }
+async function saveMapTexts(){ await api('settings_save',{mapTitle:gv('mapTitle'),mapDesc:gv('mapDesc'),mapKapak:gv('mapKapak')}); mpAlert('Kaydedildi.'); }
 function hFilter(q){ hQ=(q||'').toLowerCase(); hRenderList(); }
 function hRenderList(){ const box=document.getElementById('hList'); if(!box)return;
   const cn=document.getElementById('hCount');
@@ -1777,7 +1937,7 @@ function hInitGoogle(){
     center:{lat:37.0000,lng:35.3213}, zoom:12, mapTypeId:'hybrid',
     mapTypeControl:true, streetViewControl:true, fullscreenControl:true, tilt:0});
   hgMap.addListener('click',e=>{
-    if(hSel==null){ alert('Önce soldaki listeden bir pozisyon seçin.'); return; }
+    if(hSel==null){ mpAlert('Önce soldaki listeden bir pozisyon seçin.'); return; }
     hPlace(e.latLng.lat(), e.latLng.lng());
   });
   hDrawAll(); 
@@ -1790,7 +1950,7 @@ function hInitLeaflet(){
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'&copy; OpenStreetMap'}).addTo(hMap);
   hCluster=L.markerClusterGroup({showCoverageOnHover:false,maxClusterRadius:50});
   hMap.addLayer(hCluster);
-  hMap.on('click',e=>{ if(hSel==null){ alert('Önce soldaki listeden bir pozisyon seçin.'); return; } hPlace(e.latlng.lat,e.latlng.lng); });
+  hMap.on('click',e=>{ if(hSel==null){ mpAlert('Önce soldaki listeden bir pozisyon seçin.'); return; } hPlace(e.latlng.lat,e.latlng.lng); });
   hDrawAll(); setTimeout(()=>hMap.invalidateSize(),200);
 }
 function hDrawAll(){
@@ -1842,18 +2002,18 @@ function hPlace(lat,lng,quiet){
 function hSetCoordText(lat,lng){ const el=document.getElementById('hCoord'); if(el)el.textContent=(+lat).toFixed(6)+', '+(+lng).toFixed(6); }
 async function hSave(){
   const has = hEngine==='google' ? !!hgSel : !!hMarker;
-  if(hSel==null||!has){ alert('Haritaya tıklayarak konumu işaretleyin.'); return; }
+  if(hSel==null||!has){ mpAlert('Haritaya tıklayarak konumu işaretleyin.'); return; }
   const p = hEngine==='google' ? {lat:hgSel.getPosition().lat(), lng:hgSel.getPosition().lng()} : hMarker.getLatLng();
   await api('unit_save',{id:hSel,lat:p.lat,lng:p.lng});
   const r=hRows.find(x=>x.id===hSel); if(r){ r.lat=p.lat; r.lng=p.lng; }
   let msg='Konum kaydedildi.';
   const tw=hTwins(r);
-  if(tw.length && confirm(r.unit+' kaydedildi.\n\nAynı yapının diğer yüzü olan '+tw.map(t=>t.unit).join(', ')+' için de aynı konum kullanılsın mı?')){
+  if(tw.length && await mpConfirm(r.unit+' kaydedildi. Aynı yapının diğer yüzü olan '+tw.map(t=>t.unit).join(', ')+' için de aynı konum kullanılsın mı?','Diğer Yüz',{danger:false,ok:'Evet, Kullan'})){
     for(const t of tw){ await api('unit_save',{id:t.id,lat:p.lat,lng:p.lng}); t.lat=p.lat; t.lng=p.lng; }
     msg='Konum kaydedildi — '+(tw.length+1)+' yüzey.';
   }
   hRenderList(); hDrawAll();
-  if(typeof toast==='function') toast(msg); else alert(msg);
+  if(typeof toast==='function') toast(msg); else mpAlert(msg);
   hNext();
 }
 /* Aynı direğin A/B yüzeyleri: P1-A ile P1-B gibi. Yalnız A/B eki + ayraç ya da rakam şartı aranır,
@@ -1922,13 +2082,13 @@ function hParseLL(s){
   return {lat:la,lng:ln};
 }
 function hPasteCoord(){
-  if(hSel==null){ alert('Önce soldan bir pozisyon seçin.'); return; }
+  if(hSel==null){ mpAlert('Önce soldan bir pozisyon seçin.'); return; }
   const p=hParseLL(gv('hPaste'));
-  if(!p){ alert('Koordinat okunamadı.\n\nÖrnek: 37.015902, 35.249627\nveya Google Maps adres çubuğundaki linkin tamamı.\n\nNot: maps.app.goo.gl ile başlayan kısa linkler koordinat içermez; linki tarayıcıda açıp adres çubuğundakini kopyalayın.'); return; }
+  if(!p){ mpAlert('Koordinat okunamadı.\n\nÖrnek: 37.015902, 35.249627\nveya Google Maps adres çubuğundaki linkin tamamı.\n\nNot: maps.app.goo.gl ile başlayan kısa linkler koordinat içermez; linki tarayıcıda açıp adres çubuğundakini kopyalayın.'); return; }
   hPlace(p.lat,p.lng); hFly(p.lat,p.lng,18);
 }
 async function hClear(){
-  if(hSel==null)return; if(!confirm('Bu pozisyonun konumu silinsin mi?'))return;
+  if(hSel==null)return; if(!await mpConfirm('Bu pozisyonun konumu silinsin mi?','Konumu Sil'))return;
   await api('unit_save',{id:hSel,lat:null,lng:null});
   const r=hRows.find(x=>x.id===hSel); if(r){ r.lat=null; r.lng=null; }
   if(hEngine==='google'){ if(hgSel){hgSel.setMap(null);hgSel=null;} }
@@ -1949,14 +2109,14 @@ function groupUnits(list){ const map=new Map();
     if(!g[p.surf]) g[p.surf]=u; else if(!g.B) g.B=u; });
   return [...map.values()]; }
 
-function lCell(u,ym,cmap,bmap){
+function lCell(u,ym,cmap,bmap,solo){
   if(!u) return `<span class="rcell yok" title="Bu yüzey tanımlı değil">–</span>`;
   const rec=(bmap[u.id]||{})[ym]; const st=rec?rec.s:'bos';
   const who=rec&&rec.c?(cmap[rec.c]||''):'';
   const surf=posParts(u.name).surf;
-  const kod = who? String(who).trim().slice(0,3).toLocaleUpperCase('tr') : surf;
+  const kod = who? String(who).trim().slice(0,3).toLocaleUpperCase('tr') : (solo?'':surf);
   return `<span class="rcell ${st}" data-u="${u.id}" data-ym="${ym}" data-surf="${surf}"
-    onclick="lCycle(${u.id},'${ym}')"
+    onclick="rezAc(${u.id},'${ym}',event)"
     onmouseenter="lTip(this)" onmouseleave="lTipHide()"><i>${esc(kod)}</i></span>`;
 }
 
@@ -2031,7 +2191,7 @@ async function bookExport(){
         durum:r?(r.s==='dolu'?'Dolu':'Rezerve'):'Boş',firma:r&&r.c?(cus[r.c]||''):'',not:r&&r.n?r.n:''});
     }
   });
-  if(!rows.length){ alert('Aktarılacak kayıt yok.'); return; }
+  if(!rows.length){ mpAlert('Aktarılacak kayıt yok.'); return; }
   await exportRows('doluluk-'+y,'Doluluk '+y,[
     {key:'mecra',label:'Mecra',w:24},{key:'alt',label:'Alt Mecra',w:22},
     {key:'pozisyon',label:'Pozisyon',w:14},{key:'yuzey',label:'Yüzey',w:8},
@@ -2106,67 +2266,257 @@ async function listeler(c){
   const altByMec={}; alts.forEach(a=>(altByMec[a.mecra_id]=altByMec[a.mecra_id]||[]).push(a));
   const bmap={}; bks.forEach(b=>{(bmap[b.unit_id]=bmap[b.unit_id]||{})[b.ym]={s:b.status,c:b.customer_id,n:b.note};}); window.__lbmap=bmap;
   const umap={}; mlist.forEach(m=>(m.units||[]).forEach(u=>umap[u.id]=u)); window.__lumap=umap;
-  const monHead=MONTHS_SHORT.map(mo=>`<div class="rg-m rg-mh"><span>${mo}</span></div>`).join('');
-  let html='';
-  for(const m of mlist){ const as=altByMec[m.id]||[];
-    const _n=as.reduce((k,a)=>k+((uByAlt[a.id]||[]).length),0);
-    html+=`<details class="sec-card lgrp"><summary><span class="grp-t">${esc(m.name)}</span>
-      <span class="lgrp-m">${as.length} alan · ${_n} pozisyon</span><i class="chev"></i></summary>`;
-    if(!as.length){ html+='<p class="muted">Alt mecra yok.</p></details>'; continue; }
-    for(const a of as){ const us=uByAlt[a.id]||[];
-      html+=`<div class="sec-head" style="margin-top:10px"><h4 style="font-size:14px;margin:0">${esc(a.name)} <span class="muted">· ${esc(pmap[a.product_id]||'')}</span></h4><button class="btn btn-outline btn-sm" onclick="lAddPos(${a.id},${m.id},${a.product_id})">+ Pozisyon</button></div>`;
-      if(!us.length){ html+='<p class="muted" style="font-size:12px">Pozisyon yok.</p>'; continue; }
-      const groups=groupUnits(us);
-      const rows=groups.map(g=>{
-        const cells=MONTHS_SHORT.map((mo,i)=>{ const ym=y+'-'+pad(i+1);
-          return `<div class="rg-m">${lCell(g.A,ym,cmap,bmap)}${lCell(g.B,ym,cmap,bmap)}</div>`; }).join('');
-        return `<div class="rg-row"><div class="rg-lbl" title="${esc(g.base)}">${esc(g.base)}</div>${cells}</div>`; }).join('');
-      html+=`<div class="rtwrap"><div class="rgrid">
-        <div class="rg-row rg-head"><div class="rg-lbl">Pozisyon</div>${monHead}</div>${rows}</div></div>`;
-    }
-    html+=`<div class="rg-legend">
-      <span class="lg-surf"><b>A</b> Ön yüz</span><span class="lg-surf"><b>B</b> Arka yüz</span><span class="lg-sep"></span>
-      <span><i class="sw bos"></i>Boş</span><span><i class="sw dolu"></i>Dolu</span><span><i class="sw rezerve"></i>Rezerve</span>
-      </div></details>`;
-  }
+  ui._L={mlist,altByMec,uByAlt,pmap,cmap,custs,y};
+
   const custOpts=custs.map(x=>`<option value="${x.id}">${esc(x.firma||x.ilgili_kisi||('#'+x.id))}</option>`).join('');
+  const mecOpts=mlist.map(m=>`<option value="${m.id}">${esc(m.name)}</option>`).join('');
   c.innerHTML=`<div class="sec-head"><h3>Doluluk / Kiralama</h3>
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
       <button class="btn btn-ghost btn-sm" onclick="bookExport()">${ic('download',15)} Excel'e Aktar</button>
       <button class="btn btn-outline btn-sm" onclick="bookImport()">${ic('upload',15)} Excel'den Al</button>
       <div class="year-nav" style="margin:0"><button onclick="lYear(-1)">‹</button><span class="yr">${y}</span><button onclick="lYear(1)">›</button></div>
     </div></div>
-    <div class="banner">Her ayın altında iki kutu vardır: <b>soldaki A (ön yüz)</b>, <b>sağdaki B (arka yüz)</b>. Kutuya tıkla: Boş → Dolu → Rezerve → Boş. Dolu/Rezerve yaparken aşağıda seçili müşteri atanır ve anında kaydedilir. Kutunun üzerine gelince kiralayan firma bilgi kartında görünür. Ziyaretçi firma adını görmez, yalnızca durumu görür.</div>
-    <div class="field" style="max-width:380px"><label class="flabel">Atanacak müşteri (dolu/rezerve için)</label><select class="inp" id="lcust"><option value="">— müşteri atama —</option>${custOpts}</select></div>
+    <div class="banner">Aya tıklayın: açılan pencereden <b>durumu seçin</b> (Boş / Dolu / Rezerve), <b>müşteri atayın</b> ya da oracıkta <b>yeni müşteri ekleyin</b> — eklenen müşteri, Müşteriler bölümünde de oluşur. Çift yüzlü pozisyonlarda (M1 megalight ve raketleri) her ayın altında iki kutu vardır: soldaki A (ön yüz), sağdaki B (arka yüz). Ziyaretçi firma adını görmez, yalnızca durumu görür.</div>
+    <div class="sec-card fbar">
+      <div class="fbar-row">
+        <input class="inp" id="lQ" placeholder="Ara: pozisyon, alan, mecra veya kiralayan firma…" oninput="lFiltre()">
+        <select class="inp" id="lFm" onchange="lFiltre()"><option value="">Tüm mecralar</option>${mecOpts}</select>
+        <select class="inp" id="lFd" onchange="lFiltre()">
+          <option value="">Tüm durumlar</option>
+          <option value="dolu">Dolu ayı olanlar</option>
+          <option value="rezerve">Rezerve ayı olanlar</option>
+          <option value="doluveya">Dolu veya rezerve</option>
+          <option value="bos">Tamamen boş (${y})</option></select>
+        <select class="inp" id="lFc" onchange="lFiltre()"><option value="">Tüm müşteriler</option>${custOpts}</select>
+        <button class="btn btn-ghost btn-sm" onclick="lTemizle()">Temizle</button>
+      </div>
+      <p class="muted" id="lSayi" style="font-size:12px;margin:8px 2px 0"></p>
+    </div>
     <div class="grp-all"><button type="button" onclick="grpAll(this,true)">Tümünü aç</button><span>·</span><button type="button" onclick="grpAll(this,false)">Tümünü kapat</button></div>
-    ${html||'<p class="muted">Mecra yok.</p>'}`;
+    <div id="lWrap"></div>`;
+  if(ui._lfSakla){ const f=ui._lfSakla; ui._lfSakla=null;
+    const e=id=>document.getElementById(id);
+    if(e('lQ'))e('lQ').value=f.q||''; if(e('lFm'))e('lFm').value=f.m||'';
+    if(e('lFd'))e('lFd').value=f.d||''; if(e('lFc'))e('lFc').value=f.c||''; }
+  lFiltre();
 }
-function lCycle(uid,ym){ const cur=(window.__lbmap[uid]||{})[ym]; const s=cur?cur.s:'bos'; const next=s==='bos'?'dolu':(s==='dolu'?'rezerve':'bos');
-  const sel=document.getElementById('lcust'); const cid= next==='bos'? null : (sel&&sel.value?+sel.value:null);
-  window.__lbmap[uid]=window.__lbmap[uid]||{}; if(next==='bos')delete window.__lbmap[uid][ym]; else window.__lbmap[uid][ym]={s:next,c:cid};
+function lTemizle(){ const e=id=>document.getElementById(id); if(e('lQ'))e('lQ').value='';
+  ['lFm','lFd','lFc'].forEach(id=>{ if(e(id))e(id).value=''; }); lFiltre(); }
+/* Bir A/B grubunun yıl içindeki durum kümesi ve kiralayan müşteri kümesi */
+function lGrupBilgi(g,y,bmap){
+  const st=new Set(), cs=new Set();
+  for(const u of [g.A,g.B]){ if(!u)continue; const b=bmap[u.id]||{};
+    for(let i=1;i<=12;i++){ const cell=b[y+'-'+pad(i)];
+      if(cell){ st.add(cell.s); if(cell.c!=null)cs.add(String(cell.c)); } } }
+  return {st,cs};
+}
+function lFiltre(){
+  const L=ui._L, box=document.getElementById('lWrap'); if(!L||!box)return;
+  const y=L.y, bmap=window.__lbmap;
+  const q=(gv('lQ')||'').trim().toLocaleLowerCase('tr');
+  const fm=gv('lFm')||'', fd=gv('lFd')||'', fc=gv('lFc')||'';
+  const aktif=!!(q||fm||fd||fc);
+  const monHead=MONTHS_SHORT.map(mo=>`<div class="rg-m rg-mh"><span>${mo}</span></div>`).join('');
+  let html='', topPoz=0, topMecra=0;
+  for(const m of L.mlist){
+    if(fm && String(m.id)!==fm) continue;
+    const as=L.altByMec[m.id]||[];
+    let inner=''; let mecPoz=0; let mecAB=false;
+    for(const a of as){
+      const us=L.uByAlt[a.id]||[];
+      const tumGruplar=groupUnits(us);
+      if(tumGruplar.some(g=>!!g.B)) mecAB=true;
+      const groups=tumGruplar.filter(g=>{
+        const {st,cs}=lGrupBilgi(g,y,bmap);
+        if(q){
+          const kiralayan=[...cs].map(id=>L.cmap[id]||'').join(' ');
+          const hay=(g.base+' '+a.name+' '+m.name+' '+kiralayan).toLocaleLowerCase('tr');
+          if(!hay.includes(q)) return false;
+        }
+        if(fd==='dolu' && !st.has('dolu')) return false;
+        if(fd==='rezerve' && !st.has('rezerve')) return false;
+        if(fd==='doluveya' && !st.has('dolu') && !st.has('rezerve')) return false;
+        if(fd==='bos' && st.size) return false;
+        if(fc && !cs.has(fc)) return false;
+        return true;
+      });
+      if(!groups.length && aktif) continue;    /* filtre varken boş alanları gizle */
+      mecPoz+=groups.length;
+      inner+=`<div class="sec-head" style="margin-top:10px"><h4 style="font-size:14px;margin:0">${esc(a.name)} <span class="muted">· ${esc(L.pmap[a.product_id]||'')}</span></h4><button class="btn btn-outline btn-sm" onclick="lAddPos(${a.id},${m.id},${a.product_id})">+ Pozisyon</button></div>`;
+      if(!us.length){ inner+='<p class="muted" style="font-size:12px">Pozisyon yok.</p>'; continue; }
+      if(!groups.length){ inner+='<p class="muted" style="font-size:12px">Filtreyle eşleşen pozisyon yok.</p>'; continue; }
+      const rows=groups.map(g=>{
+        const cells=MONTHS_SHORT.map((mo,i)=>{ const ym=y+'-'+pad(i+1);
+          return `<div class="rg-m">${g.B
+            ? lCell(g.A,ym,L.cmap,bmap)+lCell(g.B,ym,L.cmap,bmap)
+            : lCell(g.A,ym,L.cmap,bmap,true)}</div>`; }).join('');
+        return `<div class="rg-row"><div class="rg-lbl" title="${esc(g.base)}">${esc(g.base)}</div>${cells}</div>`; }).join('');
+      inner+=`<div class="rtwrap"><div class="rgrid">
+        <div class="rg-row rg-head"><div class="rg-lbl">Pozisyon</div>${monHead}</div>${rows}</div></div>`;
+    }
+    if(!inner && aktif) continue;              /* mecrada hiç eşleşme yoksa grubu gizle */
+    topMecra++; topPoz+=mecPoz;
+    html+=`<details class="sec-card lgrp" ${aktif?'open':''}><summary><span class="grp-t">${esc(m.name)}</span>
+      <span class="lgrp-m">${aktif?mecPoz+' eşleşen pozisyon':((as.length)+' alan · '+((L.uByAlt&&as.reduce((k,x)=>k+((L.uByAlt[x.id]||[]).length),0))+' pozisyon'))}</span><i class="chev"></i></summary>`;
+    html+=inner||'<p class="muted">Alt mecra yok.</p>';
+    html+=`<div class="rg-legend">
+      ${mecAB?'<span class="lg-surf"><b>A</b> Ön yüz</span><span class="lg-surf"><b>B</b> Arka yüz</span><span class="lg-sep"></span>':''}
+      <span><i class="sw bos"></i>Boş</span><span><i class="sw dolu"></i>Dolu</span><span><i class="sw rezerve"></i>Rezerve</span>
+      </div></details>`;
+  }
+  const say=document.getElementById('lSayi');
+  if(say) say.textContent=aktif?`${topPoz} pozisyon (${topMecra} mecrada) gösteriliyor — filtre etkin`:'';
+  box.innerHTML=html||'<div class="sec-card"><p class="muted" style="margin:0">Filtrelerle eşleşen kayıt bulunamadı.</p></div>';
+}
+/* ---- Rezervasyon penceresi: durum + müşteri tek yerden ---- */
+const AY_UZUN=['Ocak','Şubat','Mart','Nisan','Mayıs','Haziran','Temmuz','Ağustos','Eylül','Ekim','Kasım','Aralık'];
+function rezKapat(){ const p=document.getElementById('rezPop'); if(p)p.remove();
+  document.removeEventListener('mousedown',rezDis,true); ui._rez=null; }
+function rezDis(e){ const p=document.getElementById('rezPop'); if(p && !p.contains(e.target)) rezKapat(); }
+function rezAc(uid,ym,ev){
+  rezKapat();
+  const u=window.__lumap[uid]||{}; const cur=(window.__lbmap[uid]||{})[ym];
+  ui._rez={uid,ym,st:cur?cur.s:'bos',cid:cur&&cur.c?cur.c:null,yeni:false};
+  const p=document.createElement('div'); p.id='rezPop'; p.className='rezpop';
+  document.body.appendChild(p);
+  rezCiz();
+  /* konumlandır: hücrenin altına, ekrandan taşmasın */
+  const r=ev.target.closest('.rcell').getBoundingClientRect();
+  const W=p.offsetWidth||300, H=p.offsetHeight||260;
+  let x=r.left+r.width/2-W/2, y=r.bottom+8;
+  x=Math.max(10,Math.min(x,window.innerWidth-W-10));
+  if(y+H>window.innerHeight-10) y=r.top-H-8;
+  p.style.left=x+'px'; p.style.top=Math.max(10,y)+'px';
+  setTimeout(()=>document.addEventListener('mousedown',rezDis,true),0);
+}
+function rezCiz(){
+  const p=document.getElementById('rezPop'); if(!p||!ui._rez)return;
+  const {uid,ym,st,cid,yeni,q}=ui._rez;
+  const u=window.__lumap[uid]||{};
+  const ay=AY_UZUN[+ym.slice(5,7)-1]+' '+ym.slice(0,4);
+  const custs=(ui._L&&ui._L.custs)||[];
+  const t=(q||'').toLocaleLowerCase('tr');
+  const bul=t?custs.filter(c=>[c.firma,c.ilgili_kisi,c.telefon].some(v=>String(v||'').toLocaleLowerCase('tr').includes(t))).slice(0,7):[];
+  const secili=cid?(window.__lcmap[cid]||('#'+cid)):null;
+  p.innerHTML=`<div class="rz-h"><b>${esc(u.name||'')}</b><span>${esc(ay)}</span>
+      <button class="rz-x" onclick="rezKapat()">✕</button></div>
+    <div class="rz-seg">
+      ${[['bos','Boş'],['dolu','Dolu'],['rezerve','Rezerve']].map(x=>
+        `<button class="${st===x[0]?'on '+x[0]:''}" onclick="ui._rez.st='${x[0]}';rezCiz()">${x[1]}</button>`).join('')}
+    </div>
+    ${st==='bos'?'<p class="rz-not">Bu ay boşa çekilecek; varsa müşteri ataması kalkar.</p>':`
+    <div class="rz-cust">
+      <label class="flabel">Müşteri</label>
+      ${secili?`<div class="rz-sec">${esc(secili)}<button onclick="ui._rez.cid=null;rezCiz()" title="Kaldır">✕</button></div>`
+      : yeni? `
+        <input class="inp inp-sm" id="rzF" placeholder="Firma adı *" style="margin-bottom:6px">
+        <div style="display:flex;gap:6px;margin-bottom:6px">
+          <input class="inp inp-sm" id="rzK" placeholder="İlgili kişi">
+          <input class="inp inp-sm" id="rzT" placeholder="Telefon"></div>
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-primary btn-sm" onclick="rezYeniKaydet()">Müşteriyi Ekle</button>
+          <button class="btn btn-ghost btn-sm" onclick="ui._rez.yeni=false;rezCiz()">Geri</button></div>`
+      : `
+        <input class="inp inp-sm" id="rzQ" placeholder="Müşteri ara — firma, kişi, telefon" value="${esc(q||'')}"
+          oninput="ui._rez.q=this.value;rezCiz();document.getElementById('rzQ').focus();const v=this.value;const e=document.getElementById('rzQ');e.setSelectionRange(v.length,v.length)">
+        ${bul.length?`<div class="rz-list">${bul.map(c=>`<button onclick="ui._rez.cid=${c.id};ui._rez.q='';rezCiz()">${esc(c.firma||c.ilgili_kisi||('#'+c.id))}${c.ilgili_kisi&&c.firma?`<span>${esc(c.ilgili_kisi)}</span>`:''}</button>`).join('')}</div>`
+          :(t?'<p class="rz-not">Eşleşen müşteri yok.</p>':'')}
+        <button class="btn btn-outline btn-sm" style="margin-top:6px" onclick="ui._rez.yeni=true;rezCiz()">＋ Yeni müşteri ekle</button>`}
+    </div>`}
+    <div class="rz-f">
+      <button class="btn btn-ghost btn-sm" onclick="rezKapat()">Kapat</button>
+      <button class="btn btn-primary btn-sm" onclick="rezKaydet()">Kaydet</button></div>`;
+}
+async function rezYeniKaydet(){
+  const firma=(gv('rzF')||'').trim();
+  if(!firma){ mpAlert('Firma adı gerekli.','Yeni Müşteri'); return; }
+  const r=await guard(()=>api('customer_save',{firma,ilgili_kisi:gv('rzK'),telefon:gv('rzT')}),'Müşteri eklenemedi');
+  if(r===null)return;
+  const yeniM={id:r.id,firma,ilgili_kisi:gv('rzK'),telefon:gv('rzT')};
+  if(ui._L){ ui._L.custs.push(yeniM); ui._L.cmap[r.id]=firma; }
+  window.__lcmap[r.id]=firma;
+  ui._rez.cid=r.id; ui._rez.yeni=false; ui._rez.q='';
+  toast('Müşteri eklendi — Müşteriler bölümünde de görebilirsiniz.');
+  rezCiz();
+}
+async function rezKaydet(){
+  const {uid,ym,st}=ui._rez; const cid=st==='bos'?null:ui._rez.cid;
+  const r=await guard(()=>api('booking_toggle',{unit_id:uid,ym,status:st,customer_id:cid}),'Kaydedilemedi');
+  if(r===null)return;
+  window.__lbmap[uid]=window.__lbmap[uid]||{};
+  if(st==='bos')delete window.__lbmap[uid][ym]; else window.__lbmap[uid][ym]={s:st,c:cid};
   const el=document.querySelector(`.rcell[data-u='${uid}'][data-ym='${ym}']`);
-  if(el){ el.className='rcell '+next;
+  if(el){ el.className='rcell '+st;
     const who=cid?window.__lcmap[cid]:'';
-    const kod= (next!=='bos'&&who)? String(who).trim().slice(0,3).toLocaleUpperCase('tr') : (el.dataset.surf||'A');
-    el.innerHTML='<i>'+esc(kod)+'</i>';
-    lTip(el); }
-  api('booking_toggle',{unit_id:uid,ym,status:next,customer_id:cid});
+    const solo=el.parentElement && el.parentElement.querySelectorAll('.rcell').length===1;
+    const kod=(st!=='bos'&&who)?String(who).trim().slice(0,3).toLocaleUpperCase('tr'):(st==='bos'?(solo?'':(el.dataset.surf||'A')):(solo?'':(el.dataset.surf||'A')));
+    el.innerHTML='<i>'+esc(kod)+'</i>'; }
+  rezKapat();
 }
 async function lAddPos(altId,mid,pid){ const nm=prompt('Pozisyon adı (ör. P1-A):','P'); if(nm===null)return; await api('unit_save',{alt_mecra_id:altId,mecra_id:mid,product_id:pid,name:(nm||'Yeni Pozisyon')}); renderSection(); }
-function lYear(d){ ui._lyear=(ui._lyear||new Date().getFullYear())+d; renderSection(); }
+function lYear(d){ ui._lyear=(ui._lyear||new Date().getFullYear())+d;
+  ui._lfSakla={q:gv('lQ'),m:gv('lFm'),d:gv('lFd'),c:gv('lFc')};   /* yıl değişince filtreler korunur */
+  renderSection(); }
 
 /* ---------- MÜŞTERİLER ---------- */
 async function musteriler(c){
   const list=await api('customers_list'); ui._cust=list;
-  const rows=list.map(x=>`<div class="list-item"><div class="nm">${esc(x.firma)}</div><div class="meta">${esc(x.ilgili_kisi||'')} · ${esc(x.telefon||'')}${x.eposta?' · '+esc(x.eposta):''}</div>
-    <button class="btn btn-outline btn-sm" onclick="custForm(${x.id})">Düzenle</button><button class="btn btn-danger btn-sm" onclick="custDel(${x.id})">Sil</button></div>`).join('');
   c.innerHTML=`<div class="sec-head">
       <div><h3>Müşteriler</h3><p class="sub">${list.length} kayıt</p></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="btn btn-ghost btn-sm" onclick="custExport()">${ic('download',15)} Excel'e Aktar</button>
         <button class="btn btn-outline btn-sm" onclick="custImport()">${ic('upload',15)} Excel'den Al</button>
         <button class="btn btn-primary btn-sm" onclick="custForm(0)">${ic('plus',15)} Müşteri</button></div>
-    </div>${rows||'<p class="empty">Müşteri yok.</p>'}`;
+    </div>
+    <div class="sec-card fbar">
+      <div class="fbar-row">
+        <input class="inp" id="cQ" placeholder="Ara: firma, kişi, telefon, e-posta, vergi no, adres…" oninput="custListe()">
+        <select class="inp" id="cSort" onchange="custListe()">
+          <option value="ad">Ada göre (A→Z)</option>
+          <option value="adz">Ada göre (Z→A)</option>
+          <option value="yeni">Önce en yeni</option>
+          <option value="eski">Önce en eski</option>
+          <option value="puan">Puana göre</option></select>
+        <select class="inp" id="cFiltre" onchange="custListe()">
+          <option value="">Filtre yok</option>
+          <option value="tel">Telefonu olanlar</option>
+          <option value="mail">E-postası olanlar</option>
+          <option value="eksik">İletişim bilgisi eksik</option>
+          <option value="fatura">Fatura bilgisi tam</option>
+          <option value="fatura-eksik">Fatura bilgisi eksik</option></select>
+        <button class="btn btn-ghost btn-sm" onclick="custTemizle()">Temizle</button>
+      </div>
+      <p class="muted" id="cSayi" style="font-size:12px;margin:8px 2px 0"></p>
+    </div>
+    <div id="cRows"></div>`;
+  custListe();
+}
+function custTemizle(){ ['cQ'].forEach(i=>{const e=document.getElementById(i);if(e)e.value='';});
+  document.getElementById('cSort').value='ad'; document.getElementById('cFiltre').value=''; custListe(); }
+function custListe(){
+  const box=document.getElementById('cRows'); if(!box)return;
+  const q=(gv('cQ')||'').trim().toLocaleLowerCase('tr');
+  const srt=gv('cSort')||'ad', flt=gv('cFiltre')||'';
+  let list=(ui._cust||[]).slice();
+  if(q) list=list.filter(x=>[x.firma,x.ilgili_kisi,x.telefon,x.eposta,x.vergi_no,x.vergi_dairesi,x.adres,x.birim,x.fatura_basligi]
+    .some(v=>String(v||'').toLocaleLowerCase('tr').includes(q)));
+  if(flt==='tel') list=list.filter(x=>x.telefon);
+  else if(flt==='mail') list=list.filter(x=>x.eposta);
+  else if(flt==='eksik') list=list.filter(x=>!x.telefon&&!x.eposta);
+  else if(flt==='fatura') list=list.filter(x=>x.vergi_no&&x.vergi_dairesi);
+  else if(flt==='fatura-eksik') list=list.filter(x=>!x.vergi_no||!x.vergi_dairesi);
+  const ad=x=>String(x.firma||x.ilgili_kisi||'').toLocaleLowerCase('tr');
+  if(srt==='ad') list.sort((a,b)=>ad(a).localeCompare(ad(b),'tr'));
+  else if(srt==='adz') list.sort((a,b)=>ad(b).localeCompare(ad(a),'tr'));
+  else if(srt==='yeni') list.sort((a,b)=>String(b.created_at||'').localeCompare(String(a.created_at||'')));
+  else if(srt==='eski') list.sort((a,b)=>String(a.created_at||'').localeCompare(String(b.created_at||'')));
+  else if(srt==='puan') list.sort((a,b)=>(b.puan||0)-(a.puan||0));
+  const say=document.getElementById('cSayi');
+  if(say) say.textContent=(q||flt)?`${list.length} / ${(ui._cust||[]).length} müşteri gösteriliyor`:`${list.length} müşteri`;
+  box.innerHTML=list.map(x=>`<div class="list-item"><div class="nm">${esc(x.firma||x.ilgili_kisi||('#'+x.id))}${x.puan?` <span class="pill" title="Puan">${'★'.repeat(Math.min(5,+x.puan||0))}</span>`:''}</div>
+    <div class="meta">${esc(x.ilgili_kisi||'')}${x.telefon?' · '+esc(x.telefon):''}${x.eposta?' · '+esc(x.eposta):''}${(!x.telefon&&!x.eposta)?' · <span style="color:#b3261e">iletişim yok</span>':''}</div>
+    <button class="btn btn-outline btn-sm" onclick="custForm(${x.id})">Düzenle</button><button class="btn btn-danger btn-sm" onclick="custDel(${x.id})">Sil</button></div>`).join('')
+    ||'<p class="empty">Eşleşen müşteri yok.</p>';
 }
 const CUST_COLS=[
   {key:'firma',label:'Firma',w:28},{key:'ilgili_kisi',label:'İlgili Kişi',w:20},
@@ -2177,7 +2527,7 @@ const CUST_COLS=[
   {key:'puan',label:'Puan',w:8}];
 async function custExport(){
   const list=ui._cust||await api('customers_list');
-  if(!list.length){ alert('Aktarılacak müşteri yok.'); return; }
+  if(!list.length){ mpAlert('Aktarılacak müşteri yok.'); return; }
   await exportRows('musteriler','Müşteriler',CUST_COLS,list);
 }
 function custImport(){
@@ -2258,18 +2608,18 @@ function supForm(id){ const x=(ui._sup||[]).find(s=>s.id===id)||{aktif:true};
       <button class="btn btn-primary btn-sm" onclick="supSave()">Kaydet</button></div>`);
 }
 async function supSave(){
-  if(!gv('sf').trim()){ alert('Firma adı zorunlu.'); return; }
+  if(!gv('sf').trim()){ mpAlert('Firma adı zorunlu.'); return; }
   const r=await guard(()=>api('supplier_save',{id:+gv('sid'),firma:gv('sf'),kategori:gv('sk'),ilgili_kisi:gv('sik'),telefon:gv('st'),
     eposta:gv('se'),iban:gv('sib'),adres:gv('sa'),vergi_no:gv('sv'),vergi_dairesi:gv('svd'),notlar:gv('sn'),
     aktif:document.getElementById('sak').checked}),'Tedarikçi kaydedilemedi');
   if(r===null) return;
   closeModal(); renderSection(); toast('Tedarikçi kaydedildi.');
 }
-async function supDel(id){ if(!confirm('Bu tedarikçi silinsin mi?'))return;
+async function supDel(id){ if(!await mpConfirm('Bu tedarikçi silinsin mi?','Tedarikçiyi Sil'))return;
   await guard(()=>api('supplier_delete',{id}),'Tedarikçi silinemedi'); renderSection(); }
 async function supExport(){
   const list=ui._sup||await api('suppliers_list');
-  if(!list.length){ alert('Aktarılacak tedarikçi yok.'); return; }
+  if(!list.length){ mpAlert('Aktarılacak tedarikçi yok.'); return; }
   await exportRows('tedarikciler','Tedarikçiler',SUP_COLS,list);
 }
 function supImport(){
@@ -2306,7 +2656,7 @@ function custForm(id){ const x=(ui._cust||[]).find(c=>c.id===id)||{};
     <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn btn-ghost btn-sm" onclick="closeModal()">Vazgeç</button><button class="btn btn-primary btn-sm" onclick="custSave()">Kaydet</button></div>`);
 }
 async function custSave(){ await api('customer_save',{id:+gv('cid'),firma:gv('cf'),ilgili_kisi:gv('cik'),telefon:gv('ct'),eposta:gv('ce'),adres:gv('ca'),vergi_no:gv('cv'),vergi_dairesi:gv('cvd'),puan:+gv('cp')}); closeModal(); renderSection(); }
-async function custDel(id){ if(!confirm('Bu müşteri silinsin mi?'))return;
+async function custDel(id){ if(!await mpConfirm('Bu müşteri silinsin mi? Doluluk ve iş kayıtlarındaki bağlantıları boşalır.','Müşteriyi Sil'))return;
   await guard(()=>api('customer_delete',{id}),'Müşteri silinemedi'); renderSection(); }
 
 /* ---------- TEKLİFLER ---------- */
@@ -2333,7 +2683,7 @@ async function quoteView(id){
 async function quoteStatus(id){ const r=await api('quote_status',{id,status:gv('qs')}); closeModal();
   if(r && r.reserved!==undefined){ let msg='✓ '+r.reserved+' ay rezerve edildi (dolu işaretlendi). Müşteri ve İş Takibi kartı oluşturuldu.';
     if(r.conflicts && r.conflicts.length){ msg+='\n\n⚠ Çakışma (bu aylar başka müşteride dolu, atlandı):\n· '+r.conflicts.join('\n· '); }
-    alert(msg); }
+    mpAlert(msg); }
   renderSection(); }
 /* ================= TEKLİF OLUŞTURUCU (panel) ================= */
 let QB={id:0,customer_id:null,customer_name:'',firma:'',telefon:'',eposta:'',note:'',
@@ -2468,8 +2818,8 @@ function qbToplam(){
 }
 async function qbSave(){
   const ad=gv('qbAd').trim(), firma=gv('qbFirma').trim();
-  if(!ad && !firma){ alert('En az yetkili kişi veya firma adı girin.'); return; }
-  if(!QB.items.length){ alert('Teklife en az bir kalem ekleyin.'); return; }
+  if(!ad && !firma){ mpAlert('En az yetkili kişi veya firma adı girin.'); return; }
+  if(!QB.items.length){ mpAlert('Teklife en az bir kalem ekleyin.'); return; }
   const h=qbHesap();
   const payload={id:QB.id||0,customer_id:QB.customer_id,customer_name:ad,firma,telefon:gv('qbTel'),eposta:gv('qbMail'),
     note:gv('qbNot'),gecerlilik:gv('qbGec')||null,indirim:h.ind,kdv:h.kdv,total:h.genel,
@@ -2485,7 +2835,7 @@ function qbPrint(){
     <td>${esc(i.aciklama||'')}</td><td>${esc(i.period||'')}</td><td>${esc(i.start_day||'')}</td>
     <td style="text-align:center">${i.adet}</td><td style="text-align:right">${money(i.price)}</td>
     <td style="text-align:right">${money(i.adet*i.price)}</td></tr>`).join('');
-  const w=window.open('','_blank'); if(!w){ alert('Yazdırma penceresi engellendi. Tarayıcının açılır pencere iznini verin.'); return; }
+  const w=window.open('','_blank'); if(!w){ mpAlert('Yazdırma penceresi engellendi. Tarayıcının açılır pencere iznini verin.'); return; }
   w.document.write(`<!doctype html><html lang="tr"><head><meta charset="utf-8"><title>Teklif${QB.id?' #'+QB.id:''}</title>
   <style>body{font-family:system-ui,Segoe UI,Arial,sans-serif;color:#16233b;padding:32px;font-size:13px}
   h1{font-size:21px;margin:0 0 4px}.mut{color:#667;font-size:12px}
@@ -2513,7 +2863,7 @@ function qbPrint(){
   w.document.close(); setTimeout(()=>w.print(),400);
 }
 
-async function quoteDel(id){ if(confirm('Teklif silinsin mi?')){ await api('quote_delete&id='+id); renderSection(); } }
+async function quoteDel(id){ if(await mpConfirm('Teklif ve kalemleri silinsin mi?','Teklifi Sil')){ await api('quote_delete&id='+id); renderSection(); } }
 
 /* ---------- EKİP ---------- */
 async function ekip(c){
@@ -2531,7 +2881,7 @@ function teamForm(id){ const x=(ui._team||[]).find(t=>t.id===id)||{};
     <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn btn-ghost btn-sm" onclick="closeModal()">Vazgeç</button><button class="btn btn-primary btn-sm" onclick="teamSave()">Kaydet</button></div>`);
 }
 async function teamSave(){ await api('team_save',{id:+gv('tid'),name:gv('tn'),role:gv('tr'),yetki:gv('ty'),telefon:gv('tt')}); closeModal(); renderSection(); }
-async function teamDel(id){ if(confirm('Silinsin mi?')){ await api('team_delete&id='+id); renderSection(); } }
+async function teamDel(id){ if(await mpConfirm('Ekip üyesi silinsin mi?','Üyeyi Sil')){ await api('team_delete&id='+id); renderSection(); } }
 
 /* ---------- SAYFALAR ---------- */
 async function sayfalar(c){
@@ -2554,7 +2904,7 @@ async function sayfalar(c){
     <div class="sec-card"><div class="sec-head"><h3>Sayfalar</h3><button class="btn btn-primary btn-sm" onclick="pageNew()">+ Yeni Sayfa</button></div>
     ${pageRows||'<p class="muted">Sayfa yok.</p>'}<div id="pageEd"></div></div>`;
 }
-async function saveHero(){ await api('settings_save',{logoText:gv('logoText'),logoImage:gv('logoImg'),hero:{eyebrow:gv('hEye'),title:gv('hTitle'),desc:gv('hDesc')}}); alert('Kaydedildi.'); }
+async function saveHero(){ await api('settings_save',{logoText:gv('logoText'),logoImage:gv('logoImg'),hero:{eyebrow:gv('hEye'),title:gv('hTitle'),desc:gv('hDesc')}}); mpAlert('Kaydedildi.'); }
 
 function pageEdit(slug){ const p=(ui._pages||[]).find(x=>x.slug===slug)||{slug,blocks:[]}; ui._pageSlug=slug; ui._blocks=JSON.parse(JSON.stringify(p.blocks||[])); ui._pageTitle=p.title||''; ui._pageMenu=p.in_menu!==false; renderPageEd(); document.getElementById('pageEd').scrollIntoView({behavior:'smooth'}); }
 function blkLabel(t){ return {heading:'Başlık',text:'Metin',image:'Görsel',gallery:'Galeri',features:'Özellikler',faq:'S.S.S.',cta:'Çağrı (CTA)',spacer:'Boşluk',
@@ -2598,8 +2948,8 @@ const PG_TPL={
   {type:'map',code:''},
   {type:'faq',items:[{q:'Minimum kiralama süresi nedir?',a:'LED ekranlarda 1 hafta, diğer mecralarda 1 aydır.'},{q:'Baskı ücrete dahil mi?',a:'Baskı ve montaj ayrı kalem olarak fiyatlandırılır.'}]},
   {type:'cta',title:'Aklınıza takılan bir şey mi var?',label:'Hemen Arayın',link:''}]};
-function tplInsert(k){ syncBlocks(); const t=PG_TPL[k]; if(!t)return;
-  if(ui._blocks.length && !confirm('Şablon blokları mevcut blokların sonuna eklenecek. Devam edilsin mi?')) return;
+async function tplInsert(k){ syncBlocks(); const t=PG_TPL[k]; if(!t)return;
+  if(ui._blocks.length && !await mpConfirm('Şablon blokları mevcut blokların sonuna eklenecek. Devam edilsin mi?','Şablon Ekle',{danger:false,ok:'Ekle'})) return;
   ui._blocks.push(...JSON.parse(JSON.stringify(t))); renderPageEd(); }
 function blockEditor(b,i){
   const off=b.off===true;
@@ -2683,8 +3033,8 @@ function blkMove(i,d){ syncBlocks(); const j=i+d; if(j<0||j>=ui._blocks.length)r
 function blkDel(i){ syncBlocks(); ui._blocks.splice(i,1); renderPageEd(); }
 function blkGalAdd(i,url){ syncBlocks(); ui._blocks[i].images=ui._blocks[i].images||[]; ui._blocks[i].images.push(url); renderPageEd(); }
 function blkGalDel(i,k){ syncBlocks(); ui._blocks[i].images.splice(k,1); renderPageEd(); }
-async function pageSaveBlocks(){ syncBlocks(); await api('page_save',{slug:ui._pageSlug,title:gv('pgTitle'),in_menu:gv('pgMenu')==='1',blocks:ui._blocks}); ui._pages=await api('pages_list'); alert('Sayfa kaydedildi.'); }
-async function pageDel(slug){ if(confirm('Sayfa silinsin mi?')){ await api('page_delete&slug='+encodeURIComponent(slug)); renderSection(); } }
+async function pageSaveBlocks(){ syncBlocks(); await api('page_save',{slug:ui._pageSlug,title:gv('pgTitle'),in_menu:gv('pgMenu')==='1',blocks:ui._blocks}); ui._pages=await api('pages_list'); mpAlert('Sayfa kaydedildi.'); }
+async function pageDel(slug){ if(await mpConfirm('Sayfa silinsin mi?','Sayfayı Sil')){ await api('page_delete&slug='+encodeURIComponent(slug)); renderSection(); } }
 function pageNew(){ const t=prompt('Yeni sayfa başlığı:'); if(!t)return; const slug=t.trim().toLowerCase().replace(/ğ/g,'g').replace(/ü/g,'u').replace(/ş/g,'s').replace(/ı/g,'i').replace(/ö/g,'o').replace(/ç/g,'c').replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'')||('sayfa-'+Date.now()); api('page_save',{slug,title:t,blocks:[],in_menu:true,sort:9}).then(async()=>{ ui._pages=await api('pages_list'); pageEdit(slug); }); }
 
 
@@ -2740,7 +3090,7 @@ async function leadMusteri(id){
   await api('customer_save',{firma:l.firma||l.ad,ilgili_kisi:l.ad,telefon:l.telefon,eposta:l.eposta,not:'Medya planlama talebinden: '+[l.butce,(Array.isArray(l.mecralar)?l.mecralar.join(', '):'')].filter(Boolean).join(' · ')});
   closeModal(); toast('Müşteri kaydı oluşturuldu.');
 }
-async function leadDel(id){ if(!confirm('Talep silinsin mi?'))return; await sb.from('leads').delete().eq('id',id); renderSection(); }
+async function leadDel(id){ if(!await mpConfirm('Talep silinsin mi?','Talebi Sil'))return; await sb.from('leads').delete().eq('id',id); renderSection(); }
 
 /* ---------- NOTLAR ---------- */
 async function notlar(c){
@@ -2769,7 +3119,7 @@ function noteForm(id){ const n=(ui._notes||[]).find(x=>x.id===id)||{};
     <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn btn-ghost btn-sm" onclick="closeModal()">Vazgeç</button><button class="btn btn-primary btn-sm" onclick="noteSave()">Kaydet</button></div>`);
 }
 async function noteSave(){ await api('note_save',{id:+gv('nid'),konu:gv('nk'),ilgili_kisi:gv('nik'),tarih:gv('nt')||null,body:gv('nb')}); closeModal(); renderSection(); }
-async function noteDel(id){ if(confirm('Silinsin mi?')){ await api('note_delete&id='+id); renderSection(); } }
+async function noteDel(id){ if(await mpConfirm('Not silinsin mi?','Notu Sil')){ await api('note_delete&id='+id); renderSection(); } }
 
 /* ---------- AYARLAR ---------- */
 async function ayarlar(c){
@@ -2811,7 +3161,7 @@ async function ayarlar(c){
     <p class="muted" style="font-size:12.5px;margin:0 0 12px">Yalnızca bu yönetim panelini etkiler; siteye dokunmaz.</p>
     <div style="display:flex;gap:16px;align-items:flex-end;flex-wrap:wrap">
       <div class="field" style="margin:0"><label class="flabel">Vurgu rengi</label>
-        <input id="pTColor" type="color" value="${esc((st.panelTheme||{}).accent||'#3455e6')}" style="width:64px;height:38px;border:1px solid var(--c-line);border-radius:10px;background:#fff;padding:3px"></div>
+        <input id="pTColor" type="color" value="${esc((st.panelTheme||{}).accent||'#e11d48')}" style="width:64px;height:38px;border:1px solid var(--c-line);border-radius:10px;background:#fff;padding:3px"></div>
       <div class="field" style="margin:0;flex:1;min-width:240px"><label class="flabel">Panel logosu (sol üst)</label>
         <div style="display:flex;gap:8px"><input class="inp" id="pTLogo" value="${esc((st.panelTheme||{}).logo||'')}">
         <button class="btn btn-outline btn-sm" style="flex:0 0 auto" onclick="pickUpload('image/*',u=>{document.getElementById('pTLogo').value=u;})">Yükle</button></div></div>
@@ -2884,7 +3234,7 @@ async function ayarlar(c){
     <p class="muted" style="font-size:13px;margin:0 0 12px">Google'a hangi sayfaların var olduğunu bildiren dosya. Mecra veya sayfa ekledikçe yeniden üretip sitenin ana klasörüne yükleyin.</p>
     <div class="field"><label class="flabel">Site adresi</label><input class="inp" id="siteUrl" value="${esc(st.siteUrl||'https://medyaparkadana.com')}"></div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
-      <button class="btn btn-outline btn-sm" onclick="api('settings_save',{siteUrl:gv('siteUrl')}).then(()=>alert('Kaydedildi.'))">Adresi Kaydet</button>
+      <button class="btn btn-outline btn-sm" onclick="api('settings_save',{siteUrl:gv('siteUrl')}).then(()=>mpAlert('Kaydedildi.'))">Adresi Kaydet</button>
       <button class="btn btn-primary btn-sm" onclick="buildSitemap()">sitemap.xml Üret ve İndir</button></div></div>
 
   <div class="sec-card"><h3 style="margin:0 0 6px;font-size:16px">Fiyat Gösterimi</h3>
@@ -2906,8 +3256,8 @@ async function ayarlar(c){
     <div class="field"><button class="btn btn-primary" onclick="changePw()">Şifreyi Güncelle</button></div></div></div>`;
   ftrRender(); mnuRender();
 }
-async function savePrices(){ await api('settings_save',{showPrices:document.getElementById('showPrices').checked}); alert('Kaydedildi. Siteyi yenileyin.'); }
-async function saveSettings(){ await api('settings_save',{siteName:gv('sName'),phone:gv('sPhone'),email:gv('sMail'),address:gv('sAddr'),catalogPdf:gv('sPdf')}); alert('Kaydedildi.'); }
+async function savePrices(){ await api('settings_save',{showPrices:document.getElementById('showPrices').checked}); mpAlert('Kaydedildi. Siteyi yenileyin.'); }
+async function saveSettings(){ await api('settings_save',{siteName:gv('sName'),phone:gv('sPhone'),email:gv('sMail'),address:gv('sAddr'),catalogPdf:gv('sPdf')}); mpAlert('Kaydedildi.'); }
 async function saveGorunum(){ await api('settings_save',{logoText:gv('gLogoT'),logoImage:gv('gLogoI'),favicon:gv('gFav')}); toast('Kaydedildi. Sitede Ctrl+F5 ile görünür.'); }
 async function savePanelTheme(reset){
   const t=reset?null:{accent:gv('pTColor'),logo:gv('pTLogo')};
@@ -2928,12 +3278,12 @@ function applyPanelTheme(t){
 function refAdd(u){ ui._settings.refLogos=Array.isArray(ui._settings.refLogos)?ui._settings.refLogos:[]; ui._settings.refLogos.push(u); refSave(true); }
 function refDel(i){ (ui._settings.refLogos||[]).splice(i,1); refSave(true); }
 async function refSave(sessiz){ await api('settings_save',{refTitle:gv('refT')||'Referanslar',refLogos:ui._settings.refLogos||[]}); if(sessiz){renderSection();} else toast('Kaydedildi. Sitede Ctrl+F5 ile görünür.'); }
-async function saveSocial(){ await api('settings_save',{social_whatsapp:gv('soWa'),social_instagram:gv('soIg'),social_linkedin:gv('soLi'),social_facebook:gv('soFb'),social_x:gv('soTw'),social_youtube:gv('soYt')}); alert('Kaydedildi.'); }
-async function saveSeo(){ await api('settings_save',{seoTitle:gv('seoT'),seoDesc:gv('seoD'),seoKeywords:gv('seoK')}); alert('Kaydedildi.'); }
-async function saveFooter(){ await api('settings_save',{footer_about:gv('fAbout'),footer_news:gv('fNews'),footer_note:gv('fNote')}); alert('Kaydedildi.'); }
+async function saveSocial(){ await api('settings_save',{social_whatsapp:gv('soWa'),social_instagram:gv('soIg'),social_linkedin:gv('soLi'),social_facebook:gv('soFb'),social_x:gv('soTw'),social_youtube:gv('soYt')}); mpAlert('Kaydedildi.'); }
+async function saveSeo(){ await api('settings_save',{seoTitle:gv('seoT'),seoDesc:gv('seoD'),seoKeywords:gv('seoK')}); mpAlert('Kaydedildi.'); }
+async function saveFooter(){ await api('settings_save',{footer_about:gv('fAbout'),footer_news:gv('fNews'),footer_note:gv('fNote')}); mpAlert('Kaydedildi.'); }
 async function exportBackup(){ const tables=['settings','pages','products','mecralar','alt_mecralar','units','bookings','customers','quotes','quote_items','jobs','team','notes','suppliers'];
   const out={_exported:new Date().toISOString()}; for(const t of tables){ try{ const {data}=await sb.from(t).select('*'); out[t]=data||[]; }catch(e){ out[t]='HATA'; } }
   const blob=new Blob([JSON.stringify(out,null,2)],{type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='medyapark-yedek-'+new Date().toISOString().slice(0,10)+'.json'; a.click(); URL.revokeObjectURL(a.href); }
-async function changePw(){ const p=gv('npw'); if(p.length<4){alert('En az 4 karakter.');return;} await api('password_change',{password:p}); alert('Şifre güncellendi.'); }
+async function changePw(){ const p=gv('npw'); if(p.length<4){mpAlert('En az 4 karakter.');return;} await api('password_change',{password:p}); mpAlert('Şifre güncellendi.'); }
 
 boot();
