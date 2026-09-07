@@ -655,6 +655,7 @@ const NAVG=[
 const NAV=NAVG.flatMap(g=>g[2].map(n=>[n[0],n[1],n[2],'']));
 /* Bir bölüm hangi grupta? */
 function navGrupOf(sec){ const g=NAVG.find(g=>g[2].some(n=>n[0]===sec)); return g?g[0]:null; }
+/* Workspace bölümleri NAVG grubuna ait değildir; null dönmesi doğrudur. */
 function navAcikGruplar(){
   try{ const v=JSON.parse(localStorage.getItem('mp_nav_acik')||'null'); if(Array.isArray(v))return new Set(v); }catch(e){}
   return new Set(NAVG.map(g=>g[0]));       /* ilk açılışta hepsi açık */
@@ -666,6 +667,13 @@ function navGrupTogle(ad){
 }
 function navCiz(){
   const box=document.getElementById('navScroll'); if(!box)return;
+  /* Workspace yüzeyi düz ve kısa: dört birincil kavram (07 §2.1). */
+  if(surfaceGet()==='workspace'){
+    box.innerHTML=WS_NAV.map(n=>`<button class="navi${ui.section===n[0]?' on':''}" data-s="${n[0]}"
+      ${ui.section===n[0]?'aria-current="page"':''} onclick="go('${n[0]}')">
+      ${ic(n[2],17)}<span>${esc(n[1])}</span></button>`).join('');
+    return;
+  }
   const acik=navAcikGruplar();
   box.innerHTML=NAVG.map(g=>{
     const ac=acik.has(g[0]);
@@ -679,7 +687,7 @@ function navCiz(){
       <div class="nav-gb">${items}</div></div>`;
   }).join('');
 }
-const TITLES={dashboard:'Dashboard',kurumlar:'Kurumlar',operasyon:'Baskı & Montaj',anasayfa:'Anasayfa Karşılama','is-takibi':'İş Takibi',urunler:'Ürünler',mecralar:'Mecralar',harita:'Harita',listeler:'Doluluk',musteriler:'Müşteriler',tedarikciler:'Tedarikçiler',raporlar:'Raporlar',teklifler:'Teklifler',talepler:'Medya Planlama Talepleri',ekip:'Ekip',sayfalar:'Sayfalar',notlar:'Notlar',ayarlar:'Ayarlar'};
+const TITLES={dashboard:'Dashboard',kurumlar:'Kurumlar',operasyon:'Baskı & Montaj','workspace-home':'Ana Sayfa','ws-mecralar':'Mecralar',anasayfa:'Anasayfa Karşılama','is-takibi':'İş Takibi',urunler:'Ürünler',mecralar:'Mecralar',harita:'Harita',listeler:'Doluluk',musteriler:'Müşteriler',tedarikciler:'Tedarikçiler',raporlar:'Raporlar',teklifler:'Teklifler',talepler:'Medya Planlama Talepleri',ekip:'Ekip',sayfalar:'Sayfalar',notlar:'Notlar',ayarlar:'Ayarlar'};
 function userChip(){
   const me=ui._me||{}; const ad=me.name||(ui._email||'').split('@')[0]||'Kullanıcı';
   /* Mevcut serbest metin unvan korunur; yoksa canonical app_role etiketi (D-203). */
@@ -697,7 +705,8 @@ function showApp(){
   const nav='';
   root().innerHTML=`<div class="app">
     <nav class="side">
-      <div class="brand">${logo}<span class="brand-sub">Yönetim Paneli</span></div>
+      <div class="brand">${logo}<span class="brand-sub">${surfaceGet()==='workspace'?'Team Workspace':'Yönetim Paneli'}</span></div>
+      ${surfaceSwitchHtml()}
       <div class="nav-scroll" id="navScroll"></div>
       <button class="navi logout" onclick="logout()">${ic('logout',17)}<span>Çıkış</span></button>
     </nav>
@@ -711,7 +720,7 @@ function showApp(){
       </header>
       <div class="content" id="content"></div>
     </div></div>`;
-  navCiz(); go('dashboard');
+  navCiz(); go(surfaceGet()==='workspace'?'workspace-home':'dashboard');
   api('settings_get').then(st=>{ ui._settings=st; if(st.panelTheme)applyPanelTheme(st.panelTheme);
     if(st.favicon){ let l=document.head.querySelector("link[rel~='icon']");
       if(!l){ l=document.createElement('link'); l.rel='icon'; document.head.appendChild(l); } l.href=st.favicon; } }).catch(()=>{});
@@ -734,6 +743,13 @@ async function yeniTeklifKontrol(){
   }catch(e){}
 }
 async function go(s){ if(typeof dirtyGuard==='function' && !(await dirtyGuard())) return;
+  /* Yüzey koruması. UI gizleme yetkilendirme DEĞİLDİR (08 §9) — asıl
+     koruma RLS'tedir; bu yalnız team_member'ı ona kapalı olan ve boş
+     görünecek ekranlara düşmekten korur. */
+  if(ui._role!=='admin' && !WS_IZIN.has(s)){
+    toast('Bu bölüm Yönetim yüzeyine aittir.');
+    s='workspace-home';
+  }
   ui.section=s;
   const g=navGrupOf(s);                        /* kapali gruptaki bolume gidilirse grubu ac */
   if(g){ const set=navAcikGruplar(); if(!set.has(g)){ set.add(g); try{localStorage.setItem('mp_nav_acik',JSON.stringify([...set]));}catch(e){} } }
@@ -743,7 +759,7 @@ async function go(s){ if(typeof dirtyGuard==='function' && !(await dirtyGuard())
 async function renderSection(){
   const c=document.getElementById('content'); c.innerHTML='<p class="muted">Yükleniyor…</p>';
   const F={dashboard,'is-takibi':isTakibi,urunler,mecralar,listeler,musteriler,kurumlar,teklifler,ekip,
-           sayfalar,notlar,anasayfa:anasayfaBolum,tedarikciler,raporlar,harita,ayarlar,talepler,operasyon};
+           sayfalar,notlar,anasayfa:anasayfaBolum,tedarikciler,raporlar,harita,ayarlar,talepler,operasyon,'workspace-home':workspaceHome,'ws-mecralar':wsMecralar};
   try{
     const fn=F[ui.section]; if(!fn)return;
     await fn(c);
@@ -751,9 +767,39 @@ async function renderSection(){
   }catch(e){ c.innerHTML='<div class="banner">Hata: '+esc(e.message||e)+'</div>'; }
 }
 
-/* modal */
-function modal(html){ document.getElementById('modal').innerHTML=html; document.getElementById('modalBg').classList.add('open'); }
-function closeModal(){ document.getElementById('modalBg').classList.remove('open'); }
+/* modal — 07 §19: role=dialog, Escape ile kapanır, odak yönetimi */
+let _modalOnceki=null;
+function modal(html){
+  const m=document.getElementById('modal'), bg=document.getElementById('modalBg');
+  m.innerHTML=html;
+  m.setAttribute('role','dialog'); m.setAttribute('aria-modal','true'); m.setAttribute('tabindex','-1');
+  const b=m.querySelector('h3');
+  if(b){ if(!b.id) b.id='mdlTitle'; m.setAttribute('aria-labelledby',b.id); }
+  else m.removeAttribute('aria-labelledby');
+  _modalOnceki=document.activeElement;
+  bg.classList.add('open');
+  /* İlk anlamlı alana odaklan; yoksa diyaloğun kendisine. */
+  const ilk=m.querySelector('input:not([type=hidden]):not([disabled]),textarea,select,button');
+  setTimeout(()=>{ (ilk||m).focus(); },30);
+}
+function closeModal(){
+  document.getElementById('modalBg').classList.remove('open');
+  if(_modalOnceki&&document.body.contains(_modalOnceki)){ try{ _modalOnceki.focus(); }catch(e){} }
+  _modalOnceki=null;
+}
+/* Kaydetme sırasında çift gönderimi ve “tıkladım mı?” belirsizliğini önler. */
+function modalBusy(on,txt){
+  const m=document.getElementById('modal'); if(!m)return;
+  m.querySelectorAll('button').forEach(b=>{ b.disabled=!!on; });
+  const p=m.querySelector('.btn-primary'); if(!p)return;
+  if(on){ p.dataset.eski=p.textContent; p.textContent=txt||'Kaydediliyor…'; }
+  else if(p.dataset.eski!==undefined){ p.textContent=p.dataset.eski; delete p.dataset.eski; }
+}
+document.addEventListener('keydown',e=>{
+  if(e.key!=='Escape')return;
+  const bg=document.getElementById('modalBg');
+  if(bg&&bg.classList.contains('open')) closeModal();
+});
 
 
 /* ================= İKONLAR (satır içi SVG) ================= */
@@ -1095,8 +1141,8 @@ async function isTakibi(c){
       <div class="row2" style="margin-bottom:8px">
         <div class="field"><label class="flabel" for="isQ">Ara</label>
           <input class="inp" id="isQ" value="${esc(f.q)}" placeholder="Başlık, not, kurum" oninput="isFiltreDegis()"></div>
-        <div class="field"><label class="flabel">Durum</label>
-          <div style="display:flex;gap:12px;align-items:center;padding-top:6px">
+        <div class="field"><span class="flabel" id="isLifeLbl">Durum</span>
+          <div role="group" aria-labelledby="isLifeLbl" style="display:flex;gap:12px;align-items:center;padding-top:6px">
             ${LIFE.map(l=>`<label class="switch" style="margin:0"><input type="checkbox" class="isLife" value="${l[0]}" ${f.life.includes(l[0])?'checked':''} onchange="isFiltreDegis()"><span class="sl"></span><span class="txt">${esc(l[1])}</span></label>`).join('')}
           </div></div>
       </div>
@@ -1294,7 +1340,9 @@ async function entrySave(){
     row.assignee_id=+gv('easg')||null;
     row.due_at=gv('edue')?new Date(gv('edue')+'T09:00:00').toISOString():null; }
   else { row.action_status=null; row.assignee_id=null; row.due_at=null; }
+  modalBusy(true);
   const r=await guard(()=>api('entry_save',row),'Güncelleme kaydedilemedi');
+  modalBusy(false);
   if(r===null)return;
   closeModal(); toast('Güncelleme eklendi.'); workAc(jid);
 }
@@ -1335,7 +1383,9 @@ function partyForm(jobId){
 }
 async function partySave(){
   const jid=+gv('pjid');
+  modalBusy(true);
   const r=await guard(()=>api('work_party_save',{id:0,job_id:jid,customer_id:+gv('pcid')||null,role:gv('prole'),note:gv('pnote')||null}),'Taraf eklenemedi');
+  modalBusy(false);
   if(r===null)return;
   closeModal(); toast('Taraf eklendi.'); workAc(jid);
 }
@@ -1369,9 +1419,11 @@ function workMetaForm(id){
 async function workMetaSave(){
   const id=+gv('wmid'); const j=ui._work||{};
   const cs=gv('wcs'), as=gv('was');
+  modalBusy(true);
   const r=await guard(()=>api('job_save',{id,contract_status:cs,contract_signed_at:gv('wcd')||null,
     contract_url:gv('wcu')||null,accounting_status:as,
     accounting_amount:gv('waa')?+gv('waa'):null,accounting_note:gv('wan')||null}),'Kaydedilemedi');
+  modalBusy(false);
   if(r===null)return;
   if(j.contract_status!==cs) await sysEntry(id,`Sözleşme durumu: ${({missing:'Eksik',pending:'Bekleniyor',signed:'İmzalı'})[cs]}`);
   if(j.accounting_status!==as) await sysEntry(id,`Muhasebe durumu: ${({yok:'Yok',hazir:'Hazır',gonderildi:'Gönderildi',islendi:'İşlendi'})[as]}`);
@@ -1387,21 +1439,21 @@ async function jobForm(st,id){
     `<option value="${x.id}" ${String(val)===String(x.id)?'selected':''}>${esc(lbl(x))}</option>`).join('');
   modal(`<h3 style="margin:0 0 14px">${id?'İşi Düzenle':'Yeni İş'}</h3>
   <input type="hidden" id="jid" value="${id||0}">
-  <div class="field"><label class="flabel">Başlık *</label><input class="inp" id="jt" value="${esc(j.title)}" placeholder="ör. M1 AVM Megalight baskı"></div>
+  <div class="field"><label class="flabel" for="jt">Başlık *</label><input class="inp" id="jt" value="${esc(j.title)}" placeholder="ör. M1 AVM Megalight baskı"></div>
   <div class="row2">
-    <div class="field"><label class="flabel">Müşteri</label><select class="inp" id="jc">${opt(cu,j.customer_id,x=>x.firma||('#'+x.id))}</select></div>
-    <div class="field"><label class="flabel">Mecra</label><select class="inp" id="jm">${opt(mc,j.mecra_id,x=>x.name)}</select></div>
+    <div class="field"><label class="flabel" for="jc">Müşteri</label><select class="inp" id="jc">${opt(cu,j.customer_id,x=>x.firma||('#'+x.id))}</select></div>
+    <div class="field"><label class="flabel" for="jm">Mecra</label><select class="inp" id="jm">${opt(mc,j.mecra_id,x=>x.name)}</select></div>
   </div>
   <div class="row2">
-    <div class="field"><label class="flabel">Tedarikçi (baskı/montaj)</label><select class="inp" id="jsup">${opt(su,j.supplier_id,x=>(x.firma||x.name||'—')+((x.kategori||x.type)?' · '+(x.kategori||x.type):''))}</select></div>
-    <div class="field"><label class="flabel">Atanan ekip üyesi</label><select class="inp" id="jassg"><option value="">— Atanmadı —</option>${opt(tm,j.assignee_id,x=>x.name+(x.role?' · '+x.role:''))}</select></div>
-    <div class="field"><label class="flabel">Aşama</label><select class="inp" id="js">${JOBST.map(x=>`<option value="${x[0]}" ${(j.status||st||'temas_takip')===x[0]?'selected':''}>${x[1]}</option>`).join('')}</select></div>
+    <div class="field"><label class="flabel" for="jsup">Tedarikçi (baskı/montaj)</label><select class="inp" id="jsup">${opt(su,j.supplier_id,x=>(x.firma||x.name||'—')+((x.kategori||x.type)?' · '+(x.kategori||x.type):''))}</select></div>
+    <div class="field"><label class="flabel" for="jassg">Atanan ekip üyesi</label><select class="inp" id="jassg"><option value="">— Atanmadı —</option>${opt(tm,j.assignee_id,x=>x.name+(x.role?' · '+x.role:''))}</select></div>
+    <div class="field"><label class="flabel" for="js">Aşama</label><select class="inp" id="js">${JOBST.map(x=>`<option value="${x[0]}" ${(j.status||st||'temas_takip')===x[0]?'selected':''}>${x[1]}</option>`).join('')}</select></div>
   </div>
   <div class="row2">
-    <div class="field"><label class="flabel">Başlangıç</label><input class="inp" type="date" id="jsd" value="${esc(j.start_day)}"></div>
-    <div class="field"><label class="flabel">Bitiş / teslim</label><input class="inp" type="date" id="jed" value="${esc(j.end_day)}"></div>
+    <div class="field"><label class="flabel" for="jsd">Başlangıç</label><input class="inp" type="date" id="jsd" value="${esc(j.start_day)}"></div>
+    <div class="field"><label class="flabel" for="jed">Bitiş / teslim</label><input class="inp" type="date" id="jed" value="${esc(j.end_day)}"></div>
   </div>
-  <div class="field"><label class="flabel">Not</label><textarea class="inp" id="jn">${esc(j.note)}</textarea></div>
+  <div class="field"><label class="flabel" for="jn">Not</label><textarea class="inp" id="jn">${esc(j.note)}</textarea></div>
   <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn btn-ghost btn-sm" onclick="closeModal()">Vazgeç</button><button class="btn btn-primary btn-sm" onclick="jobSave()">Kaydet</button></div>`);
 }
 async function jobSave(){
@@ -1409,9 +1461,11 @@ async function jobSave(){
   const num=v=>v?+v:null;
   const yeni=!(+gv('jid'));
   const cid=num(gv('jc'));
+  modalBusy(true);
   const r=await guard(()=>api('job_save',{id:+gv('jid')||0,title:gv('jt'),note:gv('jn'),status:gv('js')||'temas_takip',
     customer_id:cid,mecra_id:num(gv('jm')),supplier_id:num(gv('jsup')),assignee_id:num(gv('jassg')),
     start_day:gv('jsd')||null,end_day:gv('jed')||null}),'İş kaydedilemedi');
+  modalBusy(false);
   if(r===null) return;
   /* Yeni Work: seçilen kurum compatibility alanına ve canonical
      work_parties account rolüne birlikte yazılır (06 §8). */
@@ -1582,11 +1636,13 @@ async function opSave(){
   const id=+gv('opid');
   const eski=(ui._ops||ui._workOps||[]).find(x=>x.id===id)||{};
   const st=gv('opSt')||'planned';
+  modalBusy(true);
   const r=await guard(()=>api('operation_save',{id,job_id:jid,operation_type:gv('opT'),
     status:st,description:gv('opDesc')||null,quantity:num(gv('opQty')),dimensions:gv('opDim')||null,
     supplier_org_id:+gv('opSup')||null,unit_id:+gv('opUnit')||null,location_text:gv('opLoc')||null,
     planned_date:gv('opDate')||null,cost:num(gv('opCost')),note:gv('opNote')||null,
     evidence_urls:ev}),'Kayıt kaydedilemedi');
+  modalBusy(false);
   if(r===null)return;
   if(!id) await sysEntry(jid,`${opTypeLbl(gv('opT'))} kaydı eklendi${gv('opDate')?' · '+trTarih(gv('opDate')):''}`);
   else if(eski.status!==st) await sysEntry(jid,`${opTypeLbl(gv('opT'))} durumu: ${opStatLbl(eski.status)} → ${opStatLbl(st)}`);
@@ -1667,6 +1723,233 @@ function opImport(){
       if(atlanan.length) rap+=`\n\n⚠ ${atlanan.length} satır ATLANDI (hiçbiri üzerine yazılmadı):\n· `+atlanan.slice(0,12).join('\n· ')+(atlanan.length>12?`\n· … +${atlanan.length-12} satır`:'');
       return rap;
     }});
+}
+
+/* ================= TEAM WORKSPACE (Sprint 06) =================
+   Tek shell, iki surface (D-232 / 07 §2). Ayrı bir frontend yoktur;
+   `team_member` sade Workspace navigasyonunu görür, `admin` mevcut
+   Yönetim Paneli'ni korur ve iki yüzey arasında geçebilir.
+
+   Surface tercihi localStorage'da tutulur ve YALNIZ görünümü belirler —
+   yetkilendirme kaynağı değildir (07 §2.3, 08 §9). Gerçek koruma RLS'tedir.
+   ============================================================== */
+const WS_NAV=[
+  ['workspace-home','Ana Sayfa','dashboard'],
+  ['is-takibi','İşler','jobs'],
+  ['kurumlar','Kurumlar','customers'],
+  ['ws-mecralar','Mecralar','media']];
+/* Workspace'ten ulaşılabilen ek rotalar: ana navigasyona yeni birincil
+   kavram eklemeden Baskı & Montaj tablosuna geçiş (07 §13). */
+const WS_EXTRA=['operasyon'];
+const WS_IZIN=new Set(WS_NAV.map(n=>n[0]).concat(WS_EXTRA));
+
+function surfaceGet(){
+  if(ui._role!=='admin') return 'workspace';
+  try{ return localStorage.getItem('mp_surface')==='workspace'?'workspace':'yonetim'; }
+  catch(e){ return 'yonetim'; }
+}
+function surfaceSet(v){
+  try{ localStorage.setItem('mp_surface',v); }catch(e){}
+  const sub=document.querySelector('.brand-sub');
+  if(sub) sub.textContent=(v==='workspace'?'Team Workspace':'Yönetim Paneli');
+  navCiz();
+  go(v==='workspace'?'workspace-home':'dashboard');
+}
+function surfaceSwitchHtml(){
+  if(ui._role!=='admin') return '';           /* team_member'a switch gösterilmez */
+  const s=surfaceGet();
+  return `<div class="ws-switch" role="group" aria-label="Yüzey seçimi">
+    <button type="button" class="${s==='workspace'?'on':''}" aria-pressed="${s==='workspace'}"
+      onclick="surfaceSet('workspace')">Workspace</button>
+    <button type="button" class="${s==='yonetim'?'on':''}" aria-pressed="${s==='yonetim'}"
+      onclick="surfaceSet('yonetim')">Yönetim</button></div>`;
+}
+
+/* ---------- Ana Sayfa ---------- */
+const _wsIso=d=>d.toISOString().slice(0,10);
+function wsHafta(){
+  const n=new Date(), g=n.getDay();
+  const pzt=new Date(n); pzt.setDate(n.getDate()-((g+6)%7));
+  const paz=new Date(pzt); paz.setDate(pzt.getDate()+6);
+  return [_wsIso(pzt),_wsIso(paz)];
+}
+async function workspaceHome(c){
+  const [h1,h2]=wsHafta();
+  /* Tek turda paralel çekim — kart başına sorgu yok (07 §20). */
+  const [jobs,ents,ops,custs,team]=await Promise.all([
+    api('jobs_list'),
+    api('entries_list&limit=400'),
+    api(`operations_list&from=${h1}&to=${h2}`),
+    api('customers_list'),
+    api('team_list')]);
+  ui._team=team||[]; ui._jobs=jobs||[];
+  const jm={}; (jobs||[]).forEach(j=>jm[j.id]=j);
+  const cm={}; (custs||[]).forEach(x=>cm[x.id]=x.firma);
+  const tm={}; (team||[]).forEach(t=>tm[t.id]=t.name);
+  ui._opJobs=jm; ui._opCust=cm;
+  const benim=(ui._me&&ui._me.id)||0;
+  const bugun=_wsIso(new Date());
+  const orgAdi=j=>cm[j.customer_id]||'';
+
+  /* A — Bana Düşenler: bana atanmış açık aksiyonlar, gecikenler önce */
+  const benimAks=(ents||[]).filter(e=>e.action_status==='open'&&benim&&e.assignee_id===benim)
+    .sort((a,b)=>{
+      const ad=a.due_at?String(a.due_at).slice(0,10):'9999', bd=b.due_at?String(b.due_at).slice(0,10):'9999';
+      return ad.localeCompare(bd); });
+  const geciken=benimAks.filter(e=>e.due_at&&String(e.due_at).slice(0,10)<bugun).length;
+
+  /* B — Bekleyen İşler */
+  const bekleyen=(jobs||[]).filter(j=>j.lifecycle_status==='bekliyor');
+  const sonEntryOf=jid=>(ents||[]).filter(e=>e.job_id===jid)
+    .sort((a,b)=>String(b.occurred_at).localeCompare(String(a.occurred_at)))[0];
+
+  /* D — Son Güncellemeler (anlamlı iş akışı) */
+  const sonGun=(ents||[]).slice()
+    .sort((a,b)=>String(b.occurred_at).localeCompare(String(a.occurred_at))).slice(0,8);
+
+  /* E — Açık İşler Özeti: faz dağılımı (KPI yarışı değil, konum özeti) */
+  const acikIsler=(jobs||[]).filter(j=>(j.lifecycle_status||'acik')!=='kapandi');
+  const fazSay=JOBST.map(([st,lbl])=>({st,lbl,n:acikIsler.filter(j=>(j.status||'temas_takip')===st).length}));
+
+  const kartAks=benimAks.length?benimAks.slice(0,7).map(e=>{
+    const j=jm[e.job_id]||{}; const gec=e.due_at&&String(e.due_at).slice(0,10)<bugun;
+    return `<button type="button" class="ws-row" onclick="workAc(${e.job_id})">
+      <span class="ws-row-t">${esc(e.body)}</span>
+      <span class="ws-row-m">${esc(j.title||'—')}${orgAdi(j)?' · '+esc(orgAdi(j)):''}</span>
+      <span class="ws-row-r">${e.due_at
+        ? (gec?`<span class="pill clay">⚠ gecikti · ${esc(trTarih(e.due_at))}</span>`
+              :`<span class="pill">${esc(trTarih(e.due_at))}</span>`)
+        : '<span class="muted">tarihsiz</span>'}</span></button>`;}).join('')
+    : '<p class="empty">Sana atanmış açık bir aksiyon yok.</p>';
+
+  const kartBek=bekleyen.length?bekleyen.slice(0,7).map(j=>{
+    const son=sonEntryOf(j.id);
+    return `<button type="button" class="ws-row" onclick="workAc(${j.id})">
+      <span class="ws-row-t">${esc(j.title)}</span>
+      <span class="ws-row-m">${esc(JOBLBL[j.status]||j.status)}${orgAdi(j)?' · '+esc(orgAdi(j)):''}${son?' · '+esc(String(son.body).slice(0,52)):''}</span>
+      <span class="ws-row-r"><span class="pill sand">Bekliyor</span></span></button>`;}).join('')
+    : '<p class="empty">Bekleyen iş yok.</p>';
+
+  const kartOps=(ops||[]).length?(ops||[]).slice(0,8).map(o=>{
+    const j=jm[o.job_id]||{};
+    return `<button type="button" class="ws-row" onclick="workAc(${o.job_id})">
+      <span class="ws-row-t"><span class="pill">${esc(opTypeLbl(o.operation_type))}</span> ${esc(o.description||j.title||'')}</span>
+      <span class="ws-row-m">${esc(j.title||'')}${orgAdi(j)?' · '+esc(orgAdi(j)):''}</span>
+      <span class="ws-row-r">${o.planned_date?esc(trTarih(o.planned_date)):'<span class="muted">tarihsiz</span>'}</span></button>`;}).join('')
+    : '<p class="empty">Bu hafta planlanmış baskı/montaj yok.</p>';
+
+  const kartSon=sonGun.length?sonGun.map(e=>{
+    const j=jm[e.job_id]||{};
+    const kim=e.source==='system'?'sistem':(tm[e.created_by_team_id]||'—');
+    const bas=String(kim).trim()[0]||'•';
+    return `<div class="msg" onclick="${e.job_id?`workAc(${e.job_id})`:''}">
+      <span class="msg-av">${esc(bas.toLocaleUpperCase('tr'))}</span>
+      <div class="msg-b"><div class="msg-t">${esc(String(e.body).slice(0,60))}</div>
+        <div class="msg-x">${esc(j.title||'')}${e.source==='system'?' · sistem':''}</div></div>
+      <span class="msg-d">${esc(String(e.occurred_at||'').slice(5,10))}</span></div>`;}).join('')
+    : '<p class="empty">Henüz güncelleme yok.</p>';
+
+  const ad=((ui._me&&ui._me.name)||'').split(' ')[0]||'';
+  c.innerHTML=`
+    <div class="kpi2-row">
+      <div class="kpi2 k-teal tik" onclick="wsAksiyonlarim()" title="Bana düşen aksiyonlar">
+        <div class="kpi2-n">${benimAks.length}</div><div class="kpi2-t">Bana düşen aksiyon</div>
+        <div class="kpi2-s">${geciken?`<span style="color:var(--c-red)">${geciken} tanesi gecikti</span>`:'gecikme yok'}</div></div>
+      <div class="kpi2 k-amber tik" onclick="wsBekleyenler()" title="Bekleyen işler">
+        <div class="kpi2-n">${bekleyen.length}</div><div class="kpi2-t">Bekleyen iş</div>
+        <div class="kpi2-s">dış cevap/onay bekliyor</div></div>
+      <div class="kpi2 k-green tik" onclick="go('operasyon')" title="Baskı &amp; Montaj">
+        <div class="kpi2-n">${(ops||[]).length}</div><div class="kpi2-t">Bu hafta baskı/montaj</div>
+        <div class="kpi2-s">${esc(trTarih(h1))} – ${esc(trTarih(h2))}</div></div>
+      <div class="kpi2 tik" onclick="go('is-takibi')" title="Açık işler">
+        <div class="kpi2-n">${acikIsler.length}</div><div class="kpi2-t">Açık iş</div>
+        <div class="kpi2-s">${fazSay.filter(f=>f.n).map(f=>esc(f.lbl)+': '+f.n).join(' · ')||'—'}</div></div>
+    </div>
+
+    <div class="dash-grid">
+      <div class="dash-l">
+        <section class="card">
+          <div class="card-h"><h3>Bana Düşenler${ad?` — ${esc(ad)}`:''}</h3>
+            <button class="btn-link" onclick="wsAksiyonlarim()">Tümü</button></div>
+          <div class="card-b">${kartAks}</div></section>
+
+        <section class="card">
+          <div class="card-h"><h3>Bekleyen İşler</h3>
+            <button class="btn-link" onclick="wsBekleyenler()">Tümü</button></div>
+          <div class="card-b">${kartBek}</div></section>
+
+        <section class="card">
+          <div class="card-h"><h3>Bu Hafta Baskı &amp; Montaj</h3>
+            <button class="btn-link" onclick="go('operasyon')">Tümü</button></div>
+          <div class="card-b">${kartOps}</div></section>
+      </div>
+
+      <div class="dash-r">
+        <section class="card">
+          <div class="card-h"><h3>Açık İşler</h3>
+            <button class="btn-link" onclick="go('is-takibi')">Panoyu aç</button></div>
+          <div class="card-b">${fazSay.map(f=>`<div class="ws-faz">
+            <span>${esc(f.lbl)}</span><b>${f.n}</b></div>`).join('')}</div></section>
+
+        <section class="card">
+          <div class="card-h"><h3>Son Güncellemeler</h3></div>
+          <div class="card-b msgs">${kartSon}</div></section>
+      </div>
+    </div>`;
+}
+/* Ana Sayfa kısayolları — aynı kayda İşler ekranındaki filtreyle gider,
+   ayrı bir liste kopyası üretmez (BR-V01). */
+function wsAksiyonlarim(){
+  isFiltreYaz({life:['acik','bekliyor'],q:'',mine:true}); go('is-takibi');
+}
+function wsBekleyenler(){
+  isFiltreYaz({life:['bekliyor'],q:'',mine:false}); go('is-takibi');
+}
+
+/* ---------- Workspace Mecralar — read-only (07 §10) ---------- */
+async function wsMecralar(c){
+  const ay=(ui._wsAy||new Date().toISOString().slice(0,7));
+  const [mlist,bookings,custs]=await Promise.all([
+    api('mecra_list'), api('bookings_all'), api('customers_list')]);
+  const cm={}; (custs||[]).forEach(x=>cm[x.id]=x.firma);
+  const bm={}; (bookings||[]).forEach(b=>{ if(b.ym===ay) bm[b.unit_id]=b; });
+  ui._wsAy=ay;
+
+  let toplam=0, dolu=0, rez=0, pasif=0;
+  const bloklar=(mlist||[]).map(m=>{
+    const us=(m.units||[]);
+    const satir=us.map(u=>{
+      toplam++;
+      const b=bm[u.id];
+      if(u.active===false) pasif++;
+      else if(b&&b.status==='dolu') dolu++;
+      else if(b&&b.status==='rezerve') rez++;
+      const durum=u.active===false
+        ? '<span class="pill">Pasif</span>'
+        : b&&b.status==='dolu'    ? '<span class="pill clay">Dolu</span>'
+        : b&&b.status==='rezerve' ? '<span class="pill sand">Rezerve</span>'
+        : '<span class="pill teal">Boş</span>';
+      const kurum=b&&b.customer_id?cm[b.customer_id]:'';
+      return `<div class="list-item">
+        <div class="nm">${esc(u.name||('#'+u.id))}</div>
+        <div class="meta">${durum}${kurum?' · '+esc(kurum):''}${u.olcu?' · '+esc(u.olcu):''}</div></div>`;
+    }).join('');
+    return us.length?`<div class="sec-card">
+      <div class="sec-head" style="margin-bottom:10px"><h4 style="font-size:14px;margin:0">${esc(m.name)} <span class="chip">${us.length}</span></h4></div>
+      ${satir}</div>`:'';
+  }).join('');
+
+  c.innerHTML=`<div class="sec-head">
+      <div><h3>Mecralar</h3><p class="sub">Envanter ve doluluk görünümü — düzenleme Yönetim tarafındadır</p></div>
+      <div class="field" style="margin:0;min-width:180px">
+        <label class="flabel" for="wsAy">Dönem</label>
+        <input class="inp" type="month" id="wsAy" value="${esc(ay)}" onchange="ui._wsAy=this.value;renderSection()"></div>
+    </div>
+    <div class="sec-card">
+      <div class="meta">${toplam} pozisyon · <b>${dolu}</b> dolu · <b>${rez}</b> rezerve · <b>${toplam-dolu-rez-pasif}</b> boş${pasif?` · ${pasif} pasif`:''}
+        <br><span class="muted">Rezervasyon ve pozisyon yönetimi mecra yetkisindedir (BR-M03); burası salt okunur bir görünümdür.</span></div>
+    </div>
+    ${bloklar||'<div class="sec-card"><p class="empty">Mecra kaydı yok.</p></div>'}`;
 }
 
 /* ---------- ÜRÜNLER ---------- */
@@ -3428,15 +3711,15 @@ function supImport(){
 
 function custForm(id){ const x=(ui._cust||[]).find(c=>c.id===id)||{};
   modal(`<h3 style="margin:0 0 14px">${id?'Müşteri Düzenle':'Yeni Müşteri'}</h3><input type="hidden" id="cid" value="${id||0}">
-    <div class="row2"><div class="field"><label class="flabel">Firma</label><input class="inp" id="cf" value="${esc(x.firma)}"></div>
-    <div class="field"><label class="flabel">Kayıt Niteliği</label>
-      <input class="inp" value="${esc(evidenceLabel(x.relationship_evidence)||'—')}" disabled title="Organization Memory kayıt kanıtı (S02_001). Kişi bilgisi değildir; kişiler Kurumlar ekranından eklenir."></div></div>
-    <div class="row2"><div class="field"><label class="flabel">Telefon</label><input class="inp" id="ct" value="${esc(x.telefon)}"></div>
-    <div class="field"><label class="flabel">E-posta</label><input class="inp" id="ce" value="${esc(x.eposta)}"></div></div>
-    <div class="field"><label class="flabel">Adres</label><input class="inp" id="ca" value="${esc(x.adres)}"></div>
-    <div class="row3"><div class="field"><label class="flabel">Vergi No</label><input class="inp" id="cv" value="${esc(x.vergi_no)}"></div>
-    <div class="field"><label class="flabel">Vergi Dairesi</label><input class="inp" id="cvd" value="${esc(x.vergi_dairesi)}"></div>
-    <div class="field"><label class="flabel">Puan (0-5)</label><input class="inp" id="cp" type="number" min="0" max="5" value="${esc(x.puan||0)}"></div></div>
+    <div class="row2"><div class="field"><label class="flabel" for="cf">Firma</label><input class="inp" id="cf" value="${esc(x.firma)}"></div>
+    <div class="field"><label class="flabel" for="cEvid">Kayıt Niteliği</label>
+      <input class="inp" id="cEvid" value="${esc(evidenceLabel(x.relationship_evidence)||'—')}" disabled title="Organization Memory kayıt kanıtı (S02_001). Kişi bilgisi değildir; kişiler Kurumlar ekranından eklenir."></div></div>
+    <div class="row2"><div class="field"><label class="flabel" for="ct">Telefon</label><input class="inp" id="ct" value="${esc(x.telefon)}"></div>
+    <div class="field"><label class="flabel" for="ce">E-posta</label><input class="inp" id="ce" value="${esc(x.eposta)}"></div></div>
+    <div class="field"><label class="flabel" for="ca">Adres</label><input class="inp" id="ca" value="${esc(x.adres)}"></div>
+    <div class="row3"><div class="field"><label class="flabel" for="cv">Vergi No</label><input class="inp" id="cv" value="${esc(x.vergi_no)}"></div>
+    <div class="field"><label class="flabel" for="cvd">Vergi Dairesi</label><input class="inp" id="cvd" value="${esc(x.vergi_dairesi)}"></div>
+    <div class="field"><label class="flabel" for="cp">Puan (0-5)</label><input class="inp" id="cp" type="number" min="0" max="5" value="${esc(x.puan||0)}"></div></div>
     <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn btn-ghost btn-sm" onclick="closeModal()">Vazgeç</button><button class="btn btn-primary btn-sm" onclick="custSave()">Kaydet</button></div>`);
 }
 /* ilgili_kisi bilinçli olarak gönderilmez: raw provenance evidence olarak
@@ -3557,9 +3840,11 @@ async function contactSave(){
   const ad=(gv('kn')||'').trim();
   if(!ad){ mpAlert('Ad Soyad zorunlu.'); return; }
   const cid=+gv('kcid')||null;
+  modalBusy(true);
   const r=await guard(()=>api('contact_save',{id:+gv('kid'),customer_id:cid,name:ad,
     title:gv('kt')||null,department:gv('kd')||null,phone:gv('kp')||null,email:gv('ke')||null,notes:gv('kno')||null,
     is_primary:document.getElementById('kpr').checked,active:document.getElementById('kak').checked}),'Kişi kaydedilemedi');
+  modalBusy(false);
   if(r===null)return;
   closeModal(); toast('Kişi kaydedildi.'); orgAc(cid||(ui._org||{}).id);
 }
@@ -3583,7 +3868,9 @@ function orgRolForm(id){
 async function orgRolSave(){
   const id=+gv('orid');
   const roles=[...document.querySelectorAll('.orgRol')].filter(x=>x.checked).map(x=>x.value);
+  modalBusy(true);
   const r=await guard(()=>api('customer_save',{id,relationship_roles:roles}),'Roller kaydedilemedi');
+  modalBusy(false);
   if(r===null)return;
   closeModal(); toast('Roller kaydedildi.'); orgAc(id);
 }
@@ -4222,7 +4509,9 @@ function applyPanelTheme(t){
     r.setProperty('--c-brand',t.accent); r.setProperty('--c-brand-d',_shade(t.accent,.72)); r.setProperty('--c-brand-dk',_shade(t.accent,.4)); }
   else ['--c-accent','--c-accent-d','--c-brand','--c-brand-d','--c-brand-dk'].forEach(k=>r.removeProperty(k));
   const br=document.querySelector('.side .brand');
-  if(br){ if(t.logo) br.innerHTML=`<img src="${esc(t.logo)}" alt="" style="max-height:34px;max-width:160px;object-fit:contain"><span class="brand-sub">Yönetim Paneli</span>`; }
+  /* Tema logosu uygulanırken yüzey etiketi korunur — aksi halde
+     showApp'ten sonra çalışıp Workspace başlığını eziyordu. */
+  if(br){ if(t.logo) br.innerHTML=`<img src="${esc(t.logo)}" alt="" style="max-height:34px;max-width:160px;object-fit:contain"><span class="brand-sub">${surfaceGet()==='workspace'?'Team Workspace':'Yönetim Paneli'}</span>`; }
 }
 function refAdd(u){ ui._settings.refLogos=Array.isArray(ui._settings.refLogos)?ui._settings.refLogos:[]; ui._settings.refLogos.push(u); refSave(true); }
 function refDel(i){ (ui._settings.refLogos||[]).splice(i,1); refSave(true); }
