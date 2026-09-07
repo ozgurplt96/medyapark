@@ -420,12 +420,38 @@ async function api(action, body){
        primitive'idir: action_status NULL ise sıradan güncelleme, dolu ise
        yapılacak aksiyon (D-204). Ayrı Task/Ticket tablosu yoktur. */
     case 'work_detail':{
-      const [j,wp,en]=await Promise.all([
+      const [j,wp,en,qs,bk]=await Promise.all([
         sb.from('jobs').select('*').eq('id',q.id).single(),
         sb.from('work_parties').select('*').eq('job_id',q.id),
-        sb.from('entries').select('*').eq('job_id',q.id).order('occurred_at',{ascending:false})]);
+        sb.from('entries').select('*').eq('job_id',q.id).order('occurred_at',{ascending:false}),
+        /* Offer ve Booking kendi domainlerinde kalır; burada yalnız
+           Work bağlamında özet olarak yüzeye çıkar (07 §11/§12). */
+        sb.from('quotes').select('id,status,total,created_at,revision_no,revision_of_id,gecerlilik')
+          .eq('work_id',q.id).order('revision_no',{ascending:false}),
+        sb.from('bookings').select('id,unit_id,ym,status,source_quote_id')
+          .eq('work_id',q.id).order('ym')]);
       if(j.error)throw j.error; if(wp.error)throw wp.error; if(en.error)throw en.error;
-      return ok({job:j.data, parties:wp.data||[], entries:en.data||[]}); }
+      if(qs.error)throw qs.error; if(bk.error)throw bk.error;
+      return ok({job:j.data, parties:wp.data||[], entries:en.data||[],
+                 quotes:qs.data||[], bookings:bk.data||[]}); }
+    case 'quote_revise':{
+      /* Gönderilmiş Offer overwrite edilmez: klon + revision_of_id +
+         revision_no artışı (06 §10.2). */
+      const [qr,ir]=await Promise.all([
+        sb.from('quotes').select('*').eq('id',body.id).single(),
+        sb.from('quote_items').select('*').eq('quote_id',body.id)]);
+      if(qr.error)throw qr.error; if(ir.error)throw ir.error;
+      const src=qr.data; const yeni={...src};
+      delete yeni.id; delete yeni.created_at;
+      yeni.status='yeni'; yeni.okundu=false;
+      yeni.revision_of_id=src.id;
+      yeni.revision_no=(src.revision_no||1)+1;
+      const {data:ny,error:e1}=await sb.from('quotes').insert(yeni).select('id').single();
+      if(e1)throw e1;
+      const items=(ir.data||[]).map(x=>{ const c={...x}; delete c.id; c.quote_id=ny.id; return c; });
+      if(items.length){ const {error:e2}=await sb.from('quote_items').insert(items); if(e2)throw e2; }
+      logYaz('quote_builder_save',{id:ny.id});
+      return ok({id:ny.id, revision_no:yeni.revision_no}); }
     case 'entries_list':{
       let sel=sb.from('entries').select('*');
       if(q.job_id)        sel=sel.eq('job_id',q.job_id);
@@ -1083,6 +1109,7 @@ async function workAc(id){
   if(!veri)return;
   const [d,tm,cu]=veri; ui._team=tm||[]; ui._cust=cu||[];
   ui._work=d.job; ui._workParties=d.parties; ui._workEntries=d.entries;
+  ui._workQuotes=d.quotes||[]; ui._workBookings=d.bookings||[];
   const j=d.job, org=(cu||[]).find(x=>x.id===j.customer_id);
   const ls=j.lifecycle_status||'acik';
   const c=document.getElementById('content');
@@ -1122,6 +1149,24 @@ async function workAc(id){
         <h4 style="font-size:14px;margin:0">Taraflar <span class="chip">${d.parties.length}</span></h4>
         <button class="btn btn-outline btn-sm" onclick="partyForm(${j.id})">${ic('plus',15)} Taraf Ekle</button></div>
       <div id="wParties"></div></div>
+
+    ${d.quotes.length?`<div class="sec-card">
+      <div class="sec-head" style="margin-bottom:10px"><h4 style="font-size:14px;margin:0">Teklifler <span class="chip">${d.quotes.length}</span></h4></div>
+      ${d.quotes.map(o=>`<div class="list-item">
+        <div class="nm">Teklif #${o.id}${o.revision_no>1?` <span class="pill">rev ${o.revision_no}</span>`:''}</div>
+        <div class="meta"><span class="badge-st st-${esc(o.status||'yeni')}">${esc(({yeni:'Yeni',gorusuldu:'Görüşüldü',onaylandi:'Onaylandı',iptal:'İptal'})[o.status]||o.status)}</span> · ${esc(money(o.total))}${o.gecerlilik?' · geçerlilik '+esc(trTarih(o.gecerlilik)):''}</div>
+        <button class="btn btn-outline btn-sm" onclick="quoteView(${o.id})">Aç</button>
+        <button class="btn btn-outline btn-sm" onclick="quoteRevise(${o.id})">Revize</button></div>`).join('')}
+    </div>`:''}
+
+    ${d.bookings.length?`<div class="sec-card">
+      <div class="sec-head" style="margin-bottom:10px"><h4 style="font-size:14px;margin:0">Mecra / Doluluk <span class="chip">${d.bookings.length}</span></h4></div>
+      <div class="meta" style="margin-bottom:8px">Rezervasyon medya domaininde yönetilir; burada yalnız bu işe bağlı aylar görünür (BR-M02).</div>
+      ${d.bookings.map(b=>`<div class="list-item">
+        <div class="nm">${esc((window.__lumap&&window.__lumap[b.unit_id]&&window.__lumap[b.unit_id].name)||('Pozisyon #'+b.unit_id))}</div>
+        <div class="meta">${esc(b.ym)} · <span class="pill">${esc(b.status)}</span>${b.source_quote_id?' · Teklif #'+b.source_quote_id:''}</div></div>`).join('')}
+      <button class="btn btn-ghost btn-sm" onclick="go('listeler')">Doluluk ekranında aç</button>
+    </div>`:''}
 
     <div class="sec-card">
       <div class="sec-head" style="margin-bottom:10px"><h4 style="font-size:14px;margin:0">Zaman Çizelgesi <span class="chip">${d.entries.length}</span></h4></div>
@@ -1217,6 +1262,12 @@ async function entryDel(id){
   const jid=(ui._work||{}).id;
   const r=await guard(()=>api('entry_delete&id='+id),'Silinemedi'); if(r===null)return;
   toast('Silindi.'); workAc(jid);
+}
+async function quoteRevise(id){
+  if(!await mpConfirm('Bu teklifin yeni bir revizyonu oluşturulsun mu? Mevcut teklif korunur.','Teklifi Revize Et'))return;
+  const r=await guard(()=>api('quote_revise',{id}),'Revizyon oluşturulamadı'); if(r===null)return;
+  await sysEntry((ui._work||{}).id,`Teklif #${id} revize edildi → #${r.id} (rev ${r.revision_no})`);
+  toast(`Revizyon oluşturuldu: Teklif #${r.id}`); workAc((ui._work||{}).id);
 }
 function partyForm(jobId){
   modal(`<h3 style="margin:0 0 6px">Taraf Ekle</h3>
@@ -2829,9 +2880,25 @@ function rezCiz(){
           :(t?'<p class="rz-not">Eşleşen müşteri yok.</p>':'')}
         <button class="btn btn-outline btn-sm" style="margin-top:6px" onclick="ui._rez.yeni=true;rezCiz()">＋ Yeni müşteri ekle</button>`}
     </div>`}
+    <div class="rz-not" style="display:flex;align-items:center;gap:8px;justify-content:space-between;margin-top:8px">
+      <span title="Ticari satisa kapatir. Kisa bakim otomatik pasife almaz (BR-M03).">Pozisyon durumu</span>
+      <label class="switch" style="margin:0"><input type="checkbox" id="rzAktif" ${u.active===false?'':'checked'}
+        onchange="unitAktifDegis(${uid},this.checked)"><span class="sl"></span>
+        <span class="txt">${u.active===false?'Pasif':'Aktif'}</span></label>
+    </div>
     <div class="rz-f">
       <button class="btn btn-ghost btn-sm" onclick="rezKapat()">Kapat</button>
       <button class="btn btn-primary btn-sm" onclick="rezKaydet()">Kaydet</button></div>`;
+}
+async function unitAktifDegis(uid,aktif){
+  /* Pasife alinan pozisyon public availability view'indan da duser
+     (06 s12.3/s12.4). Bakim nedeniyle otomatik degismez. */
+  const r=await guard(()=>api('unit_save',{id:uid,active:aktif,
+    inactive_note:aktif?null:'Panelden elle pasife alindi'}),'Pozisyon durumu degistirilemedi');
+  if(r===null) return;
+  if(window.__lumap&&window.__lumap[uid]) window.__lumap[uid].active=aktif;
+  toast(aktif?'Pozisyon aktif.':'Pozisyon pasife alindi - satisa kapali.');
+  rezCiz();
 }
 async function rezYeniKaydet(){
   const firma=(gv('rzF')||'').trim();
@@ -3248,10 +3315,23 @@ async function quoteView(id){
     <div class="field"><label class="flabel">Durum</label><select class="inp" id="qs">${['yeni','gorusuldu','onaylandi','iptal'].map(s=>`<option value="${s}" ${q.status===s?'selected':''}>${s}</option>`).join('')}</select></div>
     <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn btn-ghost btn-sm" onclick="closeModal()">Kapat</button><button class="btn btn-primary btn-sm" onclick="quoteStatus(${q.id})">Durumu Kaydet</button></div>`);
 }
-async function quoteStatus(id){ const r=await api('quote_status',{id,status:gv('qs')}); closeModal();
-  if(r && r.reserved!==undefined){ let msg='✓ '+r.reserved+' ay rezerve edildi (dolu işaretlendi). Müşteri ve İş Takibi kartı oluşturuldu.';
-    if(r.conflicts && r.conflicts.length){ msg+='\n\n⚠ Çakışma (bu aylar başka müşteride dolu, atlandı):\n· '+r.conflicts.join('\n· '); }
-    mpAlert(msg); }
+async function quoteStatus(id){
+  const r=await guard(()=>api('quote_status',{id,status:gv('qs')}),'Durum kaydedilemedi');
+  if(r===null) return;
+  closeModal();
+  if(r && r.done!==undefined){
+    let msg;
+    if(r.already_approved){
+      msg='Bu teklif zaten onaylanmis. Tekrar uygulanmadi.';
+    }else{
+      msg='\u2713 '+(r.reserved||0)+' ay rezerve edildi (dolu isaretlendi).';
+      msg+=r.created_work?'\nYeni is karti olusturuldu.':'\nMevcut is kartina baglandi.';
+      if(r.conflicts && r.conflicts.length){
+        msg+='\n\n\u26a0 Cakisma - bu aylar baska bir kurumda dolu/rezerve oldugu icin ATLANDI (uzerine yazilmadi):\n\u00b7 '+r.conflicts.join('\n\u00b7 ');
+      }
+    }
+    mpAlert(msg);
+  }
   renderSection(); }
 /* ================= TEKLİF OLUŞTURUCU (panel) ================= */
 let QB={id:0,customer_id:null,customer_name:'',firma:'',telefon:'',eposta:'',note:'',
