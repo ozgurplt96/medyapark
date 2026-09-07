@@ -82,11 +82,11 @@ function pickUpload(accept, cb, opt){ const inp=document.createElement('input');
    geri yüklenebilir.
    ========================================================== */
 const YEDEK_TABLO=['settings','pages','products','mecralar','alt_mecralar','units',
-  'customers','contacts','suppliers','jobs','work_parties','entries','bookings','notes','team','quotes','quote_items'];
+  'customers','contacts','suppliers','jobs','work_parties','entries','work_operations','bookings','notes','team','quotes','quote_items'];
 /* geri yükleme sırası: bağımlı tablolar sonra gelmeli
    (contacts -> customers'a bağlı olduğu için ondan sonra gelir) */
 const YEDEK_SIRA=['settings','pages','products','customers','contacts','suppliers','team',
-  'mecralar','alt_mecralar','units','jobs','work_parties','entries','bookings','notes','quotes','quote_items'];
+  'mecralar','alt_mecralar','units','jobs','work_parties','entries','work_operations','bookings','notes','quotes','quote_items'];
 
 async function yedekAl(){
   const btn=document.getElementById('bkBtn'); if(btn){btn.disabled=true;btn.textContent='Hazırlanıyor…';}
@@ -165,6 +165,7 @@ const LOG_AD={
   customer_save:['Müşteri','kaydetti'], customer_delete:['Müşteri','sildi'],
   contact_save:['Kişi','kaydetti'], contact_delete:['Kişi','sildi'],
   entry_save:['Güncelleme','ekledi'], entry_delete:['Güncelleme','sildi'],
+  operation_save:['Baskı/Montaj','kaydetti'], operation_delete:['Baskı/Montaj','sildi'],
   job_lifecycle:['İş','durumunu değiştirdi'],
   work_party_save:['İş tarafı','kaydetti'], work_party_delete:['İş tarafı','sildi'],
   supplier_save:['Tedarikçi','kaydetti'], supplier_delete:['Tedarikçi','sildi'],
@@ -208,7 +209,7 @@ function logYaz(act, body, q){
 }
 
 /* ---- Veri katmanı köprüsü: eski api(action,body) -> Supabase ---- */
-const DELMAP={product_delete:'products',mecra_delete:'mecralar',alt_delete:'alt_mecralar',unit_delete:'units',customer_delete:'customers',contact_delete:'contacts',team_delete:'team',note_delete:'notes',quote_delete:'quotes',job_delete:'jobs',entry_delete:'entries',work_party_delete:'work_parties'};
+const DELMAP={product_delete:'products',mecra_delete:'mecralar',alt_delete:'alt_mecralar',unit_delete:'units',customer_delete:'customers',contact_delete:'contacts',team_delete:'team',note_delete:'notes',quote_delete:'quotes',job_delete:'jobs',entry_delete:'entries',work_party_delete:'work_parties',operation_delete:'work_operations'};
 /* ---- Tema uyumlu diyaloglar (tarayıcı alert/confirm yerine) ---- */
 function mpDlg(o){ return new Promise(res=>{
   const eski=document.getElementById('mpDlgBg'); if(eski)eski.remove();
@@ -476,6 +477,27 @@ async function api(action, body){
       if(error)throw error; logYaz(act,body); return ok(); }
     case 'work_party_save':{ const r=await saveRow('work_parties',body); logYaz(act,body); return ok(r); }
 
+    /* ---- Baskı / Montaj operasyonları (Sprint 05) ----
+       Work'ün structured child'ı; Booking parent zorunlu değildir. */
+    case 'operations_list':{
+      let sel=sb.from('work_operations').select('*');
+      if(q.job_id)   sel=sel.eq('job_id',q.job_id);
+      if(q.from)     sel=sel.gte('planned_date',q.from);
+      if(q.to)       sel=sel.lte('planned_date',q.to);
+      if(q.type)     sel=sel.eq('operation_type',q.type);
+      if(q.status)   sel=sel.eq('status',q.status);
+      const {data,error}=await sel.order('planned_date',{ascending:true,nullsFirst:false})
+        .order('id').limit(q.limit?+q.limit:1000);
+      if(error)throw error; return ok(data); }
+    case 'operation_save':{
+      const row={...body};
+      if(!row.id) row.created_by_team_id=(ui._me&&ui._me.id)||null;
+      else row.updated_at=new Date().toISOString();
+      /* Tamamlandı işaretlenince completed_at sistemce yazılır. */
+      if(row.status==='done'&&!row.completed_at) row.completed_at=new Date().toISOString();
+      if(row.status&&row.status!=='done') row.completed_at=null;
+      const r=await saveRow('work_operations',row); logYaz(act,body); return ok(r); }
+
     /* ---- Kurumlar / Kişiler (Sprint 02) ----
        Organization backing = physical `customers` (D-212 / D-227).
        Gerçek iş kişileri yalnız `contacts` tablosundadır; legacy
@@ -621,6 +643,7 @@ const NAVG=[
    ['musteriler','Müşteriler','customers']]],
  ['Operasyon','jobs',[
    ['is-takibi','İş Takibi','jobs'],
+   ['operasyon','Baskı & Montaj','truck'],
    ['tedarikciler','Tedarikçiler','truck']]],
  ['Site İçeriği','home',[
    ['anasayfa','Anasayfa','home'],
@@ -656,7 +679,7 @@ function navCiz(){
       <div class="nav-gb">${items}</div></div>`;
   }).join('');
 }
-const TITLES={dashboard:'Dashboard',kurumlar:'Kurumlar',anasayfa:'Anasayfa Karşılama','is-takibi':'İş Takibi',urunler:'Ürünler',mecralar:'Mecralar',harita:'Harita',listeler:'Doluluk',musteriler:'Müşteriler',tedarikciler:'Tedarikçiler',raporlar:'Raporlar',teklifler:'Teklifler',talepler:'Medya Planlama Talepleri',ekip:'Ekip',sayfalar:'Sayfalar',notlar:'Notlar',ayarlar:'Ayarlar'};
+const TITLES={dashboard:'Dashboard',kurumlar:'Kurumlar',operasyon:'Baskı & Montaj',anasayfa:'Anasayfa Karşılama','is-takibi':'İş Takibi',urunler:'Ürünler',mecralar:'Mecralar',harita:'Harita',listeler:'Doluluk',musteriler:'Müşteriler',tedarikciler:'Tedarikçiler',raporlar:'Raporlar',teklifler:'Teklifler',talepler:'Medya Planlama Talepleri',ekip:'Ekip',sayfalar:'Sayfalar',notlar:'Notlar',ayarlar:'Ayarlar'};
 function userChip(){
   const me=ui._me||{}; const ad=me.name||(ui._email||'').split('@')[0]||'Kullanıcı';
   /* Mevcut serbest metin unvan korunur; yoksa canonical app_role etiketi (D-203). */
@@ -720,7 +743,7 @@ async function go(s){ if(typeof dirtyGuard==='function' && !(await dirtyGuard())
 async function renderSection(){
   const c=document.getElementById('content'); c.innerHTML='<p class="muted">Yükleniyor…</p>';
   const F={dashboard,'is-takibi':isTakibi,urunler,mecralar,listeler,musteriler,kurumlar,teklifler,ekip,
-           sayfalar,notlar,anasayfa:anasayfaBolum,tedarikciler,raporlar,harita,ayarlar,talepler};
+           sayfalar,notlar,anasayfa:anasayfaBolum,tedarikciler,raporlar,harita,ayarlar,talepler,operasyon};
   try{
     const fn=F[ui.section]; if(!fn)return;
     await fn(c);
@@ -1169,9 +1192,33 @@ async function workAc(id){
     </div>`:''}
 
     <div class="sec-card">
+      <div class="sec-head" style="margin-bottom:10px">
+        <h4 style="font-size:14px;margin:0">Baskı &amp; Montaj <span class="chip" id="wOpSayi">0</span></h4>
+        <button class="btn btn-outline btn-sm" onclick="opForm(0,${j.id})">${ic('plus',15)} Kayıt Ekle</button></div>
+      <div id="wOps"></div></div>
+
+    <div class="sec-card">
       <div class="sec-head" style="margin-bottom:10px"><h4 style="font-size:14px;margin:0">Zaman Çizelgesi <span class="chip">${d.entries.length}</span></h4></div>
       <div id="wTimeline"></div></div>`;
-  workPartyCiz(); workTimelineCiz();
+  workPartyCiz(); workTimelineCiz(); workOpsCiz(j.id);
+}
+async function workOpsCiz(jobId){
+  const box=document.getElementById('wOps'); if(!box)return;
+  const [ops,custs,units]=await Promise.all([
+    api('operations_list&job_id='+jobId), api('customers_list'), api('units_full').catch(()=>[])]);
+  ui._workOps=ops||[];
+  ui._opCust=ui._opCust||{}; (custs||[]).forEach(x=>ui._opCust[x.id]=x.firma);
+  ui._opUnits=ui._opUnits||{}; (units||[]).forEach(u=>ui._opUnits[u.id]=u);
+  const say=document.getElementById('wOpSayi'); if(say) say.textContent=String((ops||[]).length);
+  box.innerHTML=(ops||[]).map(o=>`<div class="list-item" style="cursor:pointer" onclick="opForm(${o.id},${jobId})">
+      <div class="nm"><span class="pill">${esc(opTypeLbl(o.operation_type))}</span> ${esc(o.description||'')}</div>
+      <div class="meta">${o.planned_date?esc(trTarih(o.planned_date)):'tarihsiz'}
+        ${o.quantity!=null?' · '+esc(o.quantity)+' adet':''}${o.dimensions?' · '+esc(o.dimensions):''}
+        ${o.unit_id&&ui._opUnits[o.unit_id]?' · '+esc(ui._opUnits[o.unit_id].name):(o.location_text?' · '+esc(o.location_text):'')}
+        ${o.supplier_org_id&&ui._opCust[o.supplier_org_id]?' · '+esc(ui._opCust[o.supplier_org_id]):''}
+        · <span class="badge-st st-${esc(o.status)}">${esc(opStatLbl(o.status))}</span></div>
+    </div>`).join('')
+    ||'<p class="empty">Bu işe bağlı baskı/montaj kaydı yok.</p>';
 }
 function workPartyCiz(){
   const box=document.getElementById('wParties'); if(!box)return;
@@ -1373,6 +1420,253 @@ async function jobSave(){
     await sysEntry(r.id,'İş oluşturuldu.');
   }
   closeModal(); renderSection(); toast('İş kaydedildi.');
+}
+
+/* ================= BASKI & MONTAJ (Sprint 05) =================
+   Ayrı bir source-of-truth modülü değil; work_operations üzerinde bir
+   view'dır (07 §13). Aktif takip artık Excel'de değil burada yaşar
+   (BR-X01); Excel yalnız import/export formatıdır (BR-X02).
+   ============================================================== */
+const OPTYPE=[['baski','Baskı'],['montaj','Montaj'],['sokum','Söküm'],['diger','Diğer']];
+const OPSTAT=[['planned','Planlandı'],['waiting','Bekliyor'],['in_progress','Devam ediyor'],
+              ['done','Tamamlandı'],['cancelled','İptal']];
+const opTypeLbl=v=>(OPTYPE.find(x=>x[0]===v)||[null,v])[1];
+const opStatLbl=v=>(OPSTAT.find(x=>x[0]===v)||[null,v])[1];
+const OPSTAT_CLS={planned:'violet',waiting:'amber',in_progress:'cyan',done:'green',cancelled:'slate'};
+
+const _iso=d=>d.toISOString().slice(0,10);
+function opDonem(kind){
+  const n=new Date(); const g=n.getDay(); const pzt=new Date(n); pzt.setDate(n.getDate()-((g+6)%7));
+  if(kind==='hafta'){ const son=new Date(pzt); son.setDate(pzt.getDate()+6); return [_iso(pzt),_iso(son)]; }
+  if(kind==='ay')   { return [_iso(new Date(n.getFullYear(),n.getMonth(),1)), _iso(new Date(n.getFullYear(),n.getMonth()+1,0))]; }
+  if(kind==='gecen'){ return [_iso(new Date(n.getFullYear(),n.getMonth()-1,1)), _iso(new Date(n.getFullYear(),n.getMonth(),0))]; }
+  if(kind==='yil')  { return [_iso(new Date(n.getFullYear(),0,1)), _iso(new Date(n.getFullYear(),11,31))]; }
+  return ['',''];
+}
+function opFiltre(){
+  try{ return JSON.parse(sessionStorage.getItem('mp_op_filtre')||'null')||{donem:'ay',from:'',to:'',type:'',status:'',q:''}; }
+  catch(e){ return {donem:'ay',from:'',to:'',type:'',status:'',q:''}; }
+}
+function opFiltreYaz(f){ try{ sessionStorage.setItem('mp_op_filtre',JSON.stringify(f)); }catch(e){} }
+
+async function operasyon(c){
+  const f=opFiltre();
+  let [from,to]=f.donem==='ozel'?[f.from,f.to]:opDonem(f.donem);
+  const qs=['operations_list'];
+  if(from) qs.push('from='+from); if(to) qs.push('to='+to);
+  if(f.type) qs.push('type='+f.type); if(f.status) qs.push('status='+f.status);
+  const [ops,jobs,custs,units]=await Promise.all([
+    api(qs.join('&')), api('jobs_list'), api('customers_list'), api('units_full').catch(()=>[])]);
+  const jm={}; (jobs||[]).forEach(j=>jm[j.id]=j);
+  const cm={}; (custs||[]).forEach(x=>cm[x.id]=x.firma);
+  const um={}; (units||[]).forEach(u=>um[u.id]=u);
+  ui._ops=ops||[]; ui._opJobs=jm; ui._opCust=cm; ui._opUnits=um;
+
+  let list=(ops||[]).slice();
+  if(f.q){ const t=f.q.toLocaleLowerCase('tr');
+    list=list.filter(o=>[o.description,o.location_text,o.dimensions,o.note,
+      (jm[o.job_id]||{}).title, cm[(jm[o.job_id]||{}).customer_id], cm[o.supplier_org_id],
+      (um[o.unit_id]||{}).name].some(v=>String(v||'').toLocaleLowerCase('tr').includes(t))); }
+  ui._opFiltered=list;
+
+  const sayim={}; OPSTAT.forEach(s=>sayim[s[0]]=list.filter(o=>o.status===s[0]).length);
+  const rows=list.map(o=>{
+    const j=jm[o.job_id]||{};
+    const gec=o.planned_date&&o.planned_date<_iso(new Date())&&['planned','waiting','in_progress'].includes(o.status);
+    return `<tr onclick="opForm(${o.id})" style="cursor:pointer">
+      <td class="mono dim">${o.planned_date?esc(trTarih(o.planned_date)):'<span class="muted">tarihsiz</span>'}${gec?' <span style="color:#b3261e" title="Gecikti">⚠</span>':''}</td>
+      <td>${esc(j.title||('#'+o.job_id))}<br><span class="muted" style="font-size:12px">${esc(cm[j.customer_id]||'')}</span></td>
+      <td><span class="pill">${esc(opTypeLbl(o.operation_type))}</span></td>
+      <td>${esc(o.description||'')}</td>
+      <td class="mono">${o.quantity!=null?esc(o.quantity):''}</td>
+      <td>${esc(o.dimensions||'')}</td>
+      <td>${esc((um[o.unit_id]||{}).name||o.location_text||'')}</td>
+      <td>${esc(cm[o.supplier_org_id]||'')}</td>
+      <td><span class="badge-st st-${esc(o.status)}">${esc(opStatLbl(o.status))}</span></td></tr>`;}).join('');
+
+  c.innerHTML=`<div class="sec-head">
+      <div><h3>Baskı &amp; Montaj</h3><p class="sub">${list.length} kayıt · aktif takip uygulamada, Excel yalnız alışveriş formatı</p></div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-outline btn-sm" onclick="opExport()">${ic('download',15)} Excel'e Aktar</button>
+        ${ui._role==='admin'?`<button class="btn btn-outline btn-sm" onclick="opImport()">${ic('upload',15)} Excel'den Al</button>`:''}
+        <button class="btn btn-primary btn-sm" onclick="opForm(0)">${ic('plus',15)} Yeni Kayıt</button></div></div>
+
+    <div class="sec-card">
+      <div class="row2" style="margin-bottom:8px">
+        <div class="field"><label class="flabel" for="opDonem">Dönem</label>
+          <select class="inp" id="opDonem" onchange="opFiltreDegis()">
+            ${[['hafta','Bu hafta'],['ay','Bu ay'],['gecen','Geçen ay'],['yil','Bu yıl'],['ozel','Özel aralık'],['tum','Tümü']]
+              .map(o=>`<option value="${o[0]}" ${f.donem===o[0]?'selected':''}>${o[1]}</option>`).join('')}
+          </select></div>
+        <div class="field"><label class="flabel" for="opQ">Ara</label>
+          <input class="inp" id="opQ" value="${esc(f.q)}" placeholder="İş, kurum, tedarikçi, yer, açıklama" oninput="opFiltreDegis()"></div>
+      </div>
+      <div class="row2" id="opOzelBox" ${f.donem==='ozel'?'':'hidden'} style="margin-bottom:8px">
+        <div class="field"><label class="flabel" for="opFrom">Başlangıç</label><input class="inp" type="date" id="opFrom" value="${esc(f.from)}" onchange="opFiltreDegis()"></div>
+        <div class="field"><label class="flabel" for="opTo">Bitiş</label><input class="inp" type="date" id="opTo" value="${esc(f.to)}" onchange="opFiltreDegis()"></div>
+      </div>
+      <div class="row2">
+        <div class="field"><label class="flabel" for="opType">Tür</label>
+          <select class="inp" id="opType" onchange="opFiltreDegis()"><option value="">Tümü</option>
+            ${OPTYPE.map(o=>`<option value="${o[0]}" ${f.type===o[0]?'selected':''}>${o[1]}</option>`).join('')}</select></div>
+        <div class="field"><label class="flabel" for="opStatus">Durum</label>
+          <select class="inp" id="opStatus" onchange="opFiltreDegis()"><option value="">Tümü</option>
+            ${OPSTAT.map(o=>`<option value="${o[0]}" ${f.status===o[0]?'selected':''}>${o[1]}</option>`).join('')}</select></div>
+      </div>
+      <div class="meta" style="margin-top:8px">${OPSTAT.map(s=>`${s[1]}: <b>${sayim[s[0]]}</b>`).join(' · ')}</div>
+    </div>
+
+    ${list.length?`<div class="sec-card" style="overflow-x:auto">
+      <table class="tbl rowlink"><thead><tr>
+        <th>Tarih</th><th>İş / Kurum</th><th>Tür</th><th>Açıklama</th><th>Adet</th>
+        <th>Ölçü</th><th>Yer / Pozisyon</th><th>Uygulayan</th><th>Durum</th>
+      </tr></thead><tbody>${rows}</tbody></table></div>`
+    :'<div class="sec-card"><p class="empty">Bu dönemde planlanmış baskı/montaj yok.</p></div>'}`;
+}
+function opFiltreDegis(){
+  const d=gv('opDonem')||'ay';
+  const box=document.getElementById('opOzelBox'); if(box) box.hidden=(d!=='ozel');
+  opFiltreYaz({donem:d,from:gv('opFrom')||'',to:gv('opTo')||'',
+    type:gv('opType')||'',status:gv('opStatus')||'',q:gv('opQ')||''});
+  renderSection();
+}
+
+/* ---------- Operation formu (hem shared view hem Work detail) ---------- */
+async function opForm(id,jobId){
+  const o=(ui._ops||ui._workOps||[]).find(x=>x.id===id)||{};
+  const veri=await guard(()=>Promise.all([api('jobs_list'),api('customers_list'),api('units_full').catch(()=>[])]),'Form açılamadı');
+  if(!veri)return;
+  const [jobs,custs,units]=veri;
+  const jid=jobId||o.job_id||((ui._work||{}).id)||0;
+  modal(`<h3 style="margin:0 0 14px">${id?'Kaydı Düzenle':'Yeni Baskı / Montaj Kaydı'}</h3>
+    <input type="hidden" id="opid" value="${id||0}">
+    <div class="row2">
+      <div class="field"><label class="flabel" for="opJob">İş *</label>
+        <select class="inp" id="opJob">${(jobs||[]).map(j=>`<option value="${j.id}" ${String(jid)===String(j.id)?'selected':''}>${esc(j.title)}</option>`).join('')}</select></div>
+      <div class="field"><label class="flabel" for="opT">Tür *</label>
+        <select class="inp" id="opT">${OPTYPE.map(t=>`<option value="${t[0]}" ${o.operation_type===t[0]?'selected':''}>${t[1]}</option>`).join('')}</select></div>
+    </div>
+    <div class="field"><label class="flabel" for="opDesc">Açıklama</label><input class="inp" id="opDesc" value="${esc(o.description)}" placeholder="ör. M1 AVM megalight baskı"></div>
+    <div class="row2">
+      <div class="field"><label class="flabel" for="opQty">Adet</label><input class="inp" type="number" step="0.01" id="opQty" value="${esc(o.quantity)}"></div>
+      <div class="field"><label class="flabel" for="opDim">Ölçü</label><input class="inp" id="opDim" value="${esc(o.dimensions)}" placeholder="ör. 300x400 cm"></div>
+    </div>
+    <div class="row2">
+      <div class="field"><label class="flabel" for="opUnit">Pozisyon (mecra)</label>
+        <select class="inp" id="opUnit"><option value="">— yok —</option>${(units||[]).map(u=>`<option value="${u.id}" ${String(o.unit_id)===String(u.id)?'selected':''}>${esc(u.name)}</option>`).join('')}</select></div>
+      <div class="field"><label class="flabel" for="opLoc">Yer (serbest)</label><input class="inp" id="opLoc" value="${esc(o.location_text)}"></div>
+    </div>
+    <div class="row2">
+      <div class="field"><label class="flabel" for="opSup">Uygulayan / tedarikçi kurum</label>
+        <select class="inp" id="opSup"><option value="">— yok —</option>${(custs||[]).slice(0,800).map(x=>`<option value="${x.id}" ${String(o.supplier_org_id)===String(x.id)?'selected':''}>${esc(x.firma||('#'+x.id))}</option>`).join('')}</select></div>
+      <div class="field"><label class="flabel" for="opDate">Planlanan tarih</label><input class="inp" type="date" id="opDate" value="${esc(o.planned_date)}"></div>
+    </div>
+    <div class="row2">
+      <div class="field"><label class="flabel" for="opSt">Durum</label>
+        <select class="inp" id="opSt">${OPSTAT.map(t=>`<option value="${t[0]}" ${(o.status||'planned')===t[0]?'selected':''}>${t[1]}</option>`).join('')}</select></div>
+      <div class="field"><label class="flabel" for="opCost">Maliyet (₺)</label><input class="inp" type="number" step="0.01" id="opCost" value="${esc(o.cost)}"></div>
+    </div>
+    <div class="field"><label class="flabel" for="opNote">Not</label><textarea class="inp" id="opNote">${esc(o.note)}</textarea></div>
+    <div class="field"><label class="flabel" for="opEv">Kanıt görseli / belge bağlantıları (her satıra bir URL)</label>
+      <textarea class="inp" id="opEv" rows="2" placeholder="https://drive.google.com/...">${esc((Array.isArray(o.evidence_urls)?o.evidence_urls:[]).join('\n'))}</textarea></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      ${id?`<button class="btn btn-danger btn-sm" style="margin-right:auto" onclick="opDel(${id})">Sil</button>`:''}
+      <button class="btn btn-ghost btn-sm" onclick="closeModal()">Vazgeç</button>
+      <button class="btn btn-primary btn-sm" onclick="opSave()">Kaydet</button></div>`);
+}
+async function opSave(){
+  const jid=+gv('opJob');
+  if(!jid){ mpAlert('İş seçimi zorunlu.'); return; }
+  const ev=(gv('opEv')||'').split('\n').map(x=>x.trim()).filter(Boolean);
+  const num=v=>v!==''&&v!=null?+v:null;
+  const id=+gv('opid');
+  const eski=(ui._ops||ui._workOps||[]).find(x=>x.id===id)||{};
+  const st=gv('opSt')||'planned';
+  const r=await guard(()=>api('operation_save',{id,job_id:jid,operation_type:gv('opT'),
+    status:st,description:gv('opDesc')||null,quantity:num(gv('opQty')),dimensions:gv('opDim')||null,
+    supplier_org_id:+gv('opSup')||null,unit_id:+gv('opUnit')||null,location_text:gv('opLoc')||null,
+    planned_date:gv('opDate')||null,cost:num(gv('opCost')),note:gv('opNote')||null,
+    evidence_urls:ev}),'Kayıt kaydedilemedi');
+  if(r===null)return;
+  if(!id) await sysEntry(jid,`${opTypeLbl(gv('opT'))} kaydı eklendi${gv('opDate')?' · '+trTarih(gv('opDate')):''}`);
+  else if(eski.status!==st) await sysEntry(jid,`${opTypeLbl(gv('opT'))} durumu: ${opStatLbl(eski.status)} → ${opStatLbl(st)}`);
+  closeModal(); toast('Kaydedildi.');
+  if(ui.section==='operasyon') renderSection(); else workAc(jid);
+}
+async function opDel(id){
+  if(!await mpConfirm('Bu baskı/montaj kaydı silinsin mi?','Kaydı Sil'))return;
+  const jid=(ui._ops||ui._workOps||[]).find(x=>x.id===id)?.job_id||(ui._work||{}).id;
+  const r=await guard(()=>api('operation_delete&id='+id),'Silinemedi'); if(r===null)return;
+  closeModal(); toast('Silindi.');
+  if(ui.section==='operasyon') renderSection(); else workAc(jid);
+}
+
+/* ---------- Excel export / import (07 §16, BR-X02) ---------- */
+const OP_COLS=[
+  {key:'planned_date',label:'Tarih',w:12},
+  {key:'is',label:'İş',w:28,get:o=>((ui._opJobs||{})[o.job_id]||{}).title||''},
+  {key:'kurum',label:'Kurum',w:26,get:o=>(ui._opCust||{})[(((ui._opJobs||{})[o.job_id])||{}).customer_id]||''},
+  {key:'operation_type',label:'Tür',w:10,get:o=>opTypeLbl(o.operation_type)},
+  {key:'description',label:'Açıklama',w:32},
+  {key:'quantity',label:'Adet',w:8},
+  {key:'dimensions',label:'Ölçü',w:14},
+  {key:'yer',label:'Yer / Pozisyon',w:22,get:o=>((ui._opUnits||{})[o.unit_id]||{}).name||o.location_text||''},
+  {key:'uygulayan',label:'Uygulayan',w:24,get:o=>(ui._opCust||{})[o.supplier_org_id]||''},
+  {key:'status',label:'Durum',w:12,get:o=>opStatLbl(o.status)},
+  {key:'cost',label:'Maliyet',w:12},
+  {key:'note',label:'Not',w:30}];
+async function opExport(){
+  const list=ui._opFiltered||ui._ops||[];
+  if(!list.length){ mpAlert('Aktarılacak kayıt yok.'); return; }
+  await exportRows('baski-montaj','Baskı & Montaj',OP_COLS,list);
+}
+function opImport(){
+  importOpen({
+    title:'Baskı & Montaj Kayıtlarını Excel\'den Al',
+    hint:'İş başlığı ve tür zorunludur. Eşleşen iş bulunamazsa satır ATLANIR — hiçbir kayıt sessizce üzerine yazılmaz.',
+    fields:[
+      {key:'is',label:'İş başlığı',required:true,alias:['iş','is','work','proje','müşteri işi']},
+      {key:'operation_type',label:'Tür',required:true,alias:['tür','tur','işlem','islem','tip']},
+      {key:'planned_date',label:'Tarih',alias:['tarih','planlanan','gün']},
+      {key:'description',label:'Açıklama',alias:['açıklama','aciklama','iş tanımı']},
+      {key:'quantity',label:'Adet',alias:['adet','miktar']},
+      {key:'dimensions',label:'Ölçü',alias:['ölçü','olcu','ebat','boyut']},
+      {key:'location_text',label:'Yer',alias:['yer','lokasyon','konum','mecra']},
+      {key:'uygulayan',label:'Uygulayan',alias:['uygulayan','tedarikçi','tedarikci','firma']},
+      {key:'status',label:'Durum',alias:['durum','statü']},
+      {key:'cost',label:'Maliyet',alias:['maliyet','tutar','fiyat']},
+      {key:'note',label:'Not',alias:['not','açıklama2']}],
+    modes:[['append','Yeni kayıt olarak EKLE (mevcut kayıtlara dokunma)']],
+    onApply:async (data)=>{
+      const jobs=await api('jobs_list');
+      const custs=await api('customers_list');
+      const jidx={}; jobs.forEach(j=>jidx[String(j.title||'').toLocaleLowerCase('tr').trim()]=j);
+      const cidx={}; custs.forEach(x=>cidx[String(x.firma||'').toLocaleLowerCase('tr').trim()]=x);
+      const tmap={}; OPTYPE.forEach(t=>{ tmap[t[0]]=t[0]; tmap[t[1].toLocaleLowerCase('tr')]=t[0]; });
+      const smap={}; OPSTAT.forEach(t=>{ smap[t[0]]=t[0]; smap[t[1].toLocaleLowerCase('tr')]=t[0]; });
+      let eklendi=0; const atlanan=[];
+      for(const r of data){
+        const j=jidx[String(r.is||'').toLocaleLowerCase('tr').trim()];
+        if(!j){ atlanan.push(`"${r.is}" — eşleşen iş yok`); continue; }
+        const tip=tmap[String(r.operation_type||'').toLocaleLowerCase('tr').trim()];
+        if(!tip){ atlanan.push(`"${r.is}" — geçersiz tür: ${r.operation_type}`); continue; }
+        const sup=cidx[String(r.uygulayan||'').toLocaleLowerCase('tr').trim()];
+        let tarih=r.planned_date||null;
+        if(tarih instanceof Date) tarih=_iso(tarih);
+        else if(tarih) tarih=String(tarih).slice(0,10);
+        const qty=(r.quantity!==''&&r.quantity!=null)?+r.quantity:null;
+        const cost=(r.cost!==''&&r.cost!=null)?+r.cost:null;
+        await api('operation_save',{id:0,job_id:j.id,operation_type:tip,
+          status:smap[String(r.status||'').toLocaleLowerCase('tr').trim()]||'planned',
+          description:r.description||null,quantity:isNaN(qty)?null:qty,dimensions:r.dimensions||null,
+          supplier_org_id:sup?sup.id:null,location_text:r.location_text||null,
+          planned_date:tarih,cost:isNaN(cost)?null:cost,note:r.note||null,evidence_urls:[]});
+        eklendi++;
+      }
+      let rap=`Tamamlandı.\n${eklendi} kayıt eklendi.`;
+      if(atlanan.length) rap+=`\n\n⚠ ${atlanan.length} satır ATLANDI (hiçbiri üzerine yazılmadı):\n· `+atlanan.slice(0,12).join('\n· ')+(atlanan.length>12?`\n· … +${atlanan.length-12} satır`:'');
+      return rap;
+    }});
 }
 
 /* ---------- ÜRÜNLER ---------- */
@@ -3936,7 +4230,7 @@ async function refSave(sessiz){ await api('settings_save',{refTitle:gv('refT')||
 async function saveSocial(){ await api('settings_save',{social_whatsapp:gv('soWa'),social_instagram:gv('soIg'),social_linkedin:gv('soLi'),social_facebook:gv('soFb'),social_x:gv('soTw'),social_youtube:gv('soYt')}); mpAlert('Kaydedildi.'); }
 async function saveSeo(){ await api('settings_save',{seoTitle:gv('seoT'),seoDesc:gv('seoD'),seoKeywords:gv('seoK')}); mpAlert('Kaydedildi.'); }
 async function saveFooter(){ await api('settings_save',{footer_about:gv('fAbout'),footer_news:gv('fNews'),footer_note:gv('fNote')}); mpAlert('Kaydedildi.'); }
-async function exportBackup(){ const tables=['settings','pages','products','mecralar','alt_mecralar','units','bookings','customers','contacts','quotes','quote_items','jobs','work_parties','entries','team','notes','suppliers'];
+async function exportBackup(){ const tables=['settings','pages','products','mecralar','alt_mecralar','units','bookings','customers','contacts','quotes','quote_items','jobs','work_parties','entries','work_operations','team','notes','suppliers'];
   const out={_exported:new Date().toISOString()}; for(const t of tables){ try{ const {data}=await sb.from(t).select('*'); out[t]=data||[]; }catch(e){ out[t]='HATA'; } }
   const blob=new Blob([JSON.stringify(out,null,2)],{type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='medyapark-yedek-'+new Date().toISOString().slice(0,10)+'.json'; a.click(); URL.revokeObjectURL(a.href); }
 async function changePw(){ const p=gv('npw'); if(p.length<4){mpAlert('En az 4 karakter.');return;} await api('password_change',{password:p}); mpAlert('Şifre güncellendi.'); }
