@@ -23,6 +23,9 @@ seeds/*
 # Sprint 02: provenance mapping replayed after the company-data seed.
 # Deterministic mapping logic only - contains no company data.
 !seeds/40_s02_provenance_backfill.sql
+# Sprint 03: work_parties backfill + legacy phase mapping, replayed after
+# the company-data seed. Deterministic logic only - no company data.
+!seeds/50_s03_work_backfill.sql
 
 # Eski düzen (seeds/ öncesi) — geri gelmesin
 seed.sql
