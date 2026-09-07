@@ -16,6 +16,10 @@
 # ---------------------------------------------------------------------
 seeds/*
 !seeds/10_local_dev_auth.sql
+# Sprint 01: synthetic dev -> team mapping. Contains no real identity and
+# no company data, so it is safe to commit and is required for a fresh
+# clone to have working internal access after the RLS tightening.
+!seeds/30_local_identity_mapping.sql
 
 # Eski düzen (seeds/ öncesi) — geri gelmesin
 seed.sql

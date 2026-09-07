@@ -60,7 +60,11 @@ async function load(){
       sb.from('settings').select('k,v'), sb.from('pages').select('*').order('sort'),
       sb.from('products').select('*').order('sort'), sb.from('mecralar').select('*').order('sort'),
       sb.from('alt_mecralar').select('*').order('sort').order('id'),
-      sb.from('units').select('*').order('sort').order('id'), sb.from('bookings').select('unit_id,ym,status')
+      sb.from('units').select('*').order('sort').order('id'),
+      /* Public doluluk yalnız booking_availability_public üzerinden okunur.
+         bookings tablosunda anon SELECT yoktur; view customer_id/note
+         kolonlarını fiziksel olarak taşımaz (06 §12.4). */
+      sb.from('booking_availability_public').select('unit_id,ym,status')
     ]);
     const err=[stg,pg,pr,mc,al,un,bk].map(x=>x.error).find(Boolean); if(err) throw err;
     const settings={}; (stg.data||[]).forEach(r=>settings[r.k]=r.v);
