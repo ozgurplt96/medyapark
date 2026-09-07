@@ -20,6 +20,9 @@ seeds/*
 # no company data, so it is safe to commit and is required for a fresh
 # clone to have working internal access after the RLS tightening.
 !seeds/30_local_identity_mapping.sql
+# Sprint 02: provenance mapping replayed after the company-data seed.
+# Deterministic mapping logic only - contains no company data.
+!seeds/40_s02_provenance_backfill.sql
 
 # Eski düzen (seeds/ öncesi) — geri gelmesin
 seed.sql

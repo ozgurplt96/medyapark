@@ -82,9 +82,10 @@ function pickUpload(accept, cb, opt){ const inp=document.createElement('input');
    geri yüklenebilir.
    ========================================================== */
 const YEDEK_TABLO=['settings','pages','products','mecralar','alt_mecralar','units',
-  'customers','suppliers','jobs','bookings','notes','team','quotes','quote_items'];
-/* geri yükleme sırası: bağımlı tablolar sonra gelmeli */
-const YEDEK_SIRA=['settings','pages','products','customers','suppliers','team',
+  'customers','contacts','suppliers','jobs','bookings','notes','team','quotes','quote_items'];
+/* geri yükleme sırası: bağımlı tablolar sonra gelmeli
+   (contacts -> customers'a bağlı olduğu için ondan sonra gelir) */
+const YEDEK_SIRA=['settings','pages','products','customers','contacts','suppliers','team',
   'mecralar','alt_mecralar','units','jobs','bookings','notes','quotes','quote_items'];
 
 async function yedekAl(){
@@ -162,6 +163,7 @@ const LOG_AD={
   alt_save:['Alt mecra','kaydetti'], alt_delete:['Alt mecra','sildi'],
   unit_save:['Pozisyon','kaydetti'], unit_delete:['Pozisyon','sildi'],
   customer_save:['Müşteri','kaydetti'], customer_delete:['Müşteri','sildi'],
+  contact_save:['Kişi','kaydetti'], contact_delete:['Kişi','sildi'],
   supplier_save:['Tedarikçi','kaydetti'], supplier_delete:['Tedarikçi','sildi'],
   quote_builder_save:['Teklif','hazırladı'],
   job_save:['İş','kaydetti'], job_move:['İş','aşama değiştirdi'], job_delete:['İş','sildi'],
@@ -188,7 +190,7 @@ function logYaz(act, body, q){
 }
 
 /* ---- Veri katmanı köprüsü: eski api(action,body) -> Supabase ---- */
-const DELMAP={product_delete:'products',mecra_delete:'mecralar',alt_delete:'alt_mecralar',unit_delete:'units',customer_delete:'customers',team_delete:'team',note_delete:'notes',quote_delete:'quotes',job_delete:'jobs'};
+const DELMAP={product_delete:'products',mecra_delete:'mecralar',alt_delete:'alt_mecralar',unit_delete:'units',customer_delete:'customers',contact_delete:'contacts',team_delete:'team',note_delete:'notes',quote_delete:'quotes',job_delete:'jobs'};
 /* ---- Tema uyumlu diyaloglar (tarayıcı alert/confirm yerine) ---- */
 function mpDlg(o){ return new Promise(res=>{
   const eski=document.getElementById('mpDlgBg'); if(eski)eski.remove();
@@ -253,7 +255,7 @@ async function api(action, body){
       const _n=new Date(); const roll=[];
       for(let i=0;i<12;i++){ const dd=new Date(_n.getFullYear(),_n.getMonth()+i,1);
         roll.push(dd.getFullYear()+'-'+String(dd.getMonth()+1).padStart(2,'0')); }
-      const [un,mc,al,jb,qs,bk,rq,nt,tm,cu]=await Promise.all([
+      const [un,mc,al,jb,qs,bk,rq,nt,tm,cu,ct]=await Promise.all([
         sb.from('units').select('id,mecra_id'),
         sb.from('mecralar').select('id,name,theme_color').order('sort'),
         sb.from('alt_mecralar').select('id'),
@@ -263,7 +265,9 @@ async function api(action, body){
         sb.from('quotes').select('*').order('created_at',{ascending:false}).limit(5),
         sb.from('notes').select('*').order('created_at',{ascending:false}).limit(5),
         sb.from('team').select('id,name,role,photo,eposta'),
-        sb.from('customers').select('id,firma,ilgili_kisi')
+        sb.from('customers').select('id,firma'),
+        /* Gerçek kişi yalnız contacts'tan gelir (S02_001). */
+        sb.from('contacts').select('customer_id,name,is_primary').eq('active',true)
       ]);
       const units=(un.data||[]), mecras=(mc.data||[]), alts=(al.data||[]);
       const jobs=(jb.data||[]), quotes=(qs.data||[]), bks=(bk.data||[]);
@@ -292,6 +296,7 @@ async function api(action, body){
         yil:y, rollBas:roll[0], rollSon:roll[11], recentQuotes:rq.data||[], notes:nt.data||[], team:tm.data||[],
         takvim:jobs.filter(j=>j.start_day).map(j=>({d:j.start_day,t:j.title,s:j.status})),
         jobList:(()=>{ const cm={}; (cu.data||[]).forEach(x=>cm[x.id]=x);
+          const km={}; (ct.data||[]).forEach(k=>{ if(!km[k.customer_id]||k.is_primary) km[k.customer_id]=k.name; });
           const mm={}; mecras.forEach(x=>mm[x.id]=x.name);
           const sira={tasarim:0,baski:1,montaj:2,yayin:3,arsiv:4};
           return jobs.filter(j=>j.status!=='arsiv')
@@ -299,7 +304,7 @@ async function api(action, body){
             .slice(0,8).map(j=>{ const c=cm[j.customer_id]||{};
               return {id:j.id,title:j.title,status:j.status,start:j.start_day,end:j.end_day,
                       assignee_id:j.assignee_id||null,
-                      firma:c.firma||mm[j.mecra_id]||'—',kisi:c.ilgili_kisi||'',mecra:mm[j.mecra_id]||''}; }); })()
+                      firma:c.firma||mm[j.mecra_id]||'—',kisi:km[j.customer_id]||'',mecra:mm[j.mecra_id]||''}; }); })()
       });
     }
     case 'jobs_list':{ const {data,error}=await sb.from('jobs').select('*').order('sort').order('id'); if(error)throw error; return ok(data); }
@@ -392,6 +397,42 @@ async function api(action, body){
         .order('created_at',{ascending:false}).limit(q.limit?+q.limit:200); if(error)throw error; return ok(data); }
     case 'log_clear':{ const {error}=await sb.from('activity_log').delete()
         .lt('created_at',new Date(Date.now()-(+body.gun||30)*864e5).toISOString()); if(error)throw error; return ok(); }
+    /* ---- Kurumlar / Kişiler (Sprint 02) ----
+       Organization backing = physical `customers` (D-212 / D-227).
+       Gerçek iş kişileri yalnız `contacts` tablosundadır; legacy
+       `customers.ilgili_kisi` Contact değildir (S02_001). */
+    case 'contacts_list':{
+      let sel=sb.from('contacts').select('*');
+      if(q.customer_id) sel=sel.eq('customer_id',q.customer_id);
+      const {data,error}=await sel.order('is_primary',{ascending:false}).order('name');
+      if(error)throw error; return ok(data); }
+    case 'contact_save':{
+      const row={...body};
+      /* Tek primary kuralı DB'de partial unique index ile korunur; burada
+         önce eskisini düşürüp yarış durumunu engelliyoruz. */
+      if(row.is_primary && row.customer_id){
+        const {error:e0}=await sb.from('contacts').update({is_primary:false})
+          .eq('customer_id',row.customer_id).neq('id',row.id||0);
+        if(e0)throw e0; }
+      const r=await saveRow('contacts',row); logYaz(act,body); return ok(r); }
+    case 'org_detail':{
+      const [c,ct]=await Promise.all([
+        sb.from('customers').select('*').eq('id',q.id).single(),
+        sb.from('contacts').select('*').eq('customer_id',q.id)
+          .order('is_primary',{ascending:false}).order('name')]);
+      if(c.error)throw c.error; if(ct.error)throw ct.error;
+      return ok({org:c.data, contacts:ct.data||[]}); }
+    case 'orgs_overview':{
+      const [cu,ct]=await Promise.all([
+        sb.from('customers').select('id,firma,telefon,eposta,adres,vergi_no,active,relationship_evidence,relationship_roles,entity_kind,puan,created_at'),
+        sb.from('contacts').select('id,customer_id,name,is_primary,active')]);
+      if(cu.error)throw cu.error; if(ct.error)throw ct.error;
+      const byOrg={}; (ct.data||[]).forEach(k=>{ (byOrg[k.customer_id]=byOrg[k.customer_id]||[]).push(k); });
+      return ok((cu.data||[]).map(o=>{
+        const ks=byOrg[o.id]||[];
+        return {...o, contact_count:ks.length,
+                primary_contact:(ks.find(k=>k.is_primary)||ks[0]||{}).name||''}; })); }
+
     /* Canonical internal identity (06 §4.2): auth.users.id -> team.auth_user_id.
        E-posta eşleştirmesi görüntüleme verisidir, yetkilendirme için kullanılmaz. */
     case 'me':{
@@ -497,6 +538,7 @@ const NAVG=[
  ['Satış','quotes',[
    ['teklifler','Teklifler','quotes'],
    ['talepler','Planlama Talepleri','notes'],
+   ['kurumlar','Kurumlar','customers'],
    ['musteriler','Müşteriler','customers']]],
  ['Operasyon','jobs',[
    ['is-takibi','İş Takibi','jobs'],
@@ -535,7 +577,7 @@ function navCiz(){
       <div class="nav-gb">${items}</div></div>`;
   }).join('');
 }
-const TITLES={dashboard:'Dashboard',anasayfa:'Anasayfa Karşılama','is-takibi':'İş Takibi',urunler:'Ürünler',mecralar:'Mecralar',harita:'Harita',listeler:'Doluluk',musteriler:'Müşteriler',tedarikciler:'Tedarikçiler',raporlar:'Raporlar',teklifler:'Teklifler',talepler:'Medya Planlama Talepleri',ekip:'Ekip',sayfalar:'Sayfalar',notlar:'Notlar',ayarlar:'Ayarlar'};
+const TITLES={dashboard:'Dashboard',kurumlar:'Kurumlar',anasayfa:'Anasayfa Karşılama','is-takibi':'İş Takibi',urunler:'Ürünler',mecralar:'Mecralar',harita:'Harita',listeler:'Doluluk',musteriler:'Müşteriler',tedarikciler:'Tedarikçiler',raporlar:'Raporlar',teklifler:'Teklifler',talepler:'Medya Planlama Talepleri',ekip:'Ekip',sayfalar:'Sayfalar',notlar:'Notlar',ayarlar:'Ayarlar'};
 function userChip(){
   const me=ui._me||{}; const ad=me.name||(ui._email||'').split('@')[0]||'Kullanıcı';
   /* Mevcut serbest metin unvan korunur; yoksa canonical app_role etiketi (D-203). */
@@ -598,7 +640,7 @@ async function go(s){ if(typeof dirtyGuard==='function' && !(await dirtyGuard())
 
 async function renderSection(){
   const c=document.getElementById('content'); c.innerHTML='<p class="muted">Yükleniyor…</p>';
-  const F={dashboard,'is-takibi':isTakibi,urunler,mecralar,listeler,musteriler,teklifler,ekip,
+  const F={dashboard,'is-takibi':isTakibi,urunler,mecralar,listeler,musteriler,kurumlar,teklifler,ekip,
            sayfalar,notlar,anasayfa:anasayfaBolum,tedarikciler,raporlar,harita,ayarlar,talepler};
   try{
     const fn=F[ui.section]; if(!fn)return;
@@ -923,7 +965,7 @@ async function jobForm(st,id){
   <input type="hidden" id="jid" value="${id||0}">
   <div class="field"><label class="flabel">Başlık *</label><input class="inp" id="jt" value="${esc(j.title)}" placeholder="ör. M1 AVM Megalight baskı"></div>
   <div class="row2">
-    <div class="field"><label class="flabel">Müşteri</label><select class="inp" id="jc">${opt(cu,j.customer_id,x=>x.firma||x.ilgili_kisi)}</select></div>
+    <div class="field"><label class="flabel">Müşteri</label><select class="inp" id="jc">${opt(cu,j.customer_id,x=>x.firma||('#'+x.id))}</select></div>
     <div class="field"><label class="flabel">Mecra</label><select class="inp" id="jm">${opt(mc,j.mecra_id,x=>x.name)}</select></div>
   </div>
   <div class="row2">
@@ -1430,13 +1472,16 @@ async function rapVeri(){
   const b=gv('rb'), e=gv('re');
   if(!b||!e){ mpAlert('Tarih aralığı seçin.'); return null; }
   if(b>e){ mpAlert('Başlangıç tarihi bitişten sonra olamaz.'); return null; }
-  const [jb,cu,su,mc,al,un,bk,qs]=await Promise.all([
+  const [jb,cu,su,mc,al,un,bk,qs,ct]=await Promise.all([
     sb.from('jobs').select('*').order('start_day'),
     api('customers_list'), api('suppliers_list'), api('mecra_list'),
     sb.from('alt_mecralar').select('*'), sb.from('units').select('*').order('sort').order('id'),
-    sb.from('bookings').select('*'), sb.from('quotes').select('*').order('created_at',{ascending:false})
+    sb.from('bookings').select('*'), sb.from('quotes').select('*').order('created_at',{ascending:false}),
+    api('contacts_list')
   ]);
   const cm={}; cu.forEach(x=>cm[x.id]=x);
+  /* "İlgili Kişi" sütunu artık gerçek Contact'tan gelir (S02_001). */
+  const km={}; (ct||[]).forEach(k=>{ if(k.active!==false && (!km[k.customer_id]||k.is_primary)) km[k.customer_id]=k.name; });
   const sm={}; su.forEach(x=>sm[x.id]=x);
   const mm={}; mc.forEach(x=>mm[x.id]=x);
   const am={}; (al.data||[]).forEach(x=>am[x.id]=x);
@@ -1448,7 +1493,7 @@ async function rapVeri(){
   };
   const jrow=j=>({
     is:j.title||'', asama:JOBLBL[j.status]||j.status||'',
-    firma:(cm[j.customer_id]||{}).firma||'', kisi:(cm[j.customer_id]||{}).ilgili_kisi||'',
+    firma:(cm[j.customer_id]||{}).firma||'', kisi:km[j.customer_id]||'',
     mecra:(mm[j.mecra_id]||{}).name||'', tedarikci:(sm[j.supplier_id]||{}).firma||'',
     bas:j.start_day||'', bit:j.end_day||'', not:j.note||''
   });
@@ -2284,7 +2329,7 @@ async function listeler(c){
   if(!ui._lyear) ui._lyear=new Date().getFullYear();
   const y=ui._lyear;
   const [mlist,alts,prods,custs,bks]=await Promise.all([api('mecra_list'),api('alt_all'),api('products_list'),api('customers_list'),api('bookings_all')]);
-  const cmap={}; custs.forEach(x=>cmap[x.id]=x.firma||x.ilgili_kisi||('#'+x.id)); window.__lcmap=cmap;
+  const cmap={}; custs.forEach(x=>cmap[x.id]=x.firma||('#'+x.id)); window.__lcmap=cmap;
   const pmap={}; prods.forEach(p=>pmap[p.id]=p.name);
   const uByAlt={}; mlist.forEach(m=>(m.units||[]).forEach(u=>{ if(u.alt_mecra_id!=null)(uByAlt[u.alt_mecra_id]=uByAlt[u.alt_mecra_id]||[]).push(u); }));
   const altByMec={}; alts.forEach(a=>(altByMec[a.mecra_id]=altByMec[a.mecra_id]||[]).push(a));
@@ -2292,7 +2337,7 @@ async function listeler(c){
   const umap={}; mlist.forEach(m=>(m.units||[]).forEach(u=>umap[u.id]=u)); window.__lumap=umap;
   ui._L={mlist,altByMec,uByAlt,pmap,cmap,custs,y};
 
-  const custOpts=custs.map(x=>`<option value="${x.id}">${esc(x.firma||x.ilgili_kisi||('#'+x.id))}</option>`).join('');
+  const custOpts=custs.map(x=>`<option value="${x.id}">${esc(x.firma||('#'+x.id))}</option>`).join('');
   const mecOpts=mlist.map(m=>`<option value="${m.id}">${esc(m.name)}</option>`).join('');
   c.innerHTML=`<div class="sec-head"><h3>Doluluk / Kiralama</h3>
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
@@ -2420,7 +2465,7 @@ function rezCiz(){
   const ay=AY_UZUN[+ym.slice(5,7)-1]+' '+ym.slice(0,4);
   const custs=(ui._L&&ui._L.custs)||[];
   const t=(q||'').toLocaleLowerCase('tr');
-  const bul=t?custs.filter(c=>[c.firma,c.ilgili_kisi,c.telefon].some(v=>String(v||'').toLocaleLowerCase('tr').includes(t))).slice(0,7):[];
+  const bul=t?custs.filter(c=>[c.firma,c.telefon].some(v=>String(v||'').toLocaleLowerCase('tr').includes(t))).slice(0,7):[];
   const secili=cid?(window.__lcmap[cid]||('#'+cid)):null;
   p.innerHTML=`<div class="rz-h"><b>${esc(u.name||'')}</b><span>${esc(ay)}</span>
       <button class="rz-x" onclick="rezKapat()">✕</button></div>
@@ -2435,7 +2480,7 @@ function rezCiz(){
       : yeni? `
         <input class="inp inp-sm" id="rzF" placeholder="Firma adı *" style="margin-bottom:6px">
         <div style="display:flex;gap:6px;margin-bottom:6px">
-          <input class="inp inp-sm" id="rzK" placeholder="İlgili kişi">
+          <input class="inp inp-sm" id="rzK" placeholder="İlgili kişi (Kişi kaydı açılır)">
           <input class="inp inp-sm" id="rzT" placeholder="Telefon"></div>
         <div style="display:flex;gap:6px">
           <button class="btn btn-primary btn-sm" onclick="rezYeniKaydet()">Müşteriyi Ekle</button>
@@ -2443,7 +2488,7 @@ function rezCiz(){
       : `
         <input class="inp inp-sm" id="rzQ" placeholder="Müşteri ara — firma, kişi, telefon" value="${esc(q||'')}"
           oninput="ui._rez.q=this.value;rezCiz();document.getElementById('rzQ').focus();const v=this.value;const e=document.getElementById('rzQ');e.setSelectionRange(v.length,v.length)">
-        ${bul.length?`<div class="rz-list">${bul.map(c=>`<button onclick="ui._rez.cid=${c.id};ui._rez.q='';rezCiz()">${esc(c.firma||c.ilgili_kisi||('#'+c.id))}${c.ilgili_kisi&&c.firma?`<span>${esc(c.ilgili_kisi)}</span>`:''}</button>`).join('')}</div>`
+        ${bul.length?`<div class="rz-list">${bul.map(c=>`<button onclick="ui._rez.cid=${c.id};ui._rez.q='';rezCiz()">${esc(c.firma||('#'+c.id))}${c.telefon?`<span>${esc(c.telefon)}</span>`:''}</button>`).join('')}</div>`
           :(t?'<p class="rz-not">Eşleşen müşteri yok.</p>':'')}
         <button class="btn btn-outline btn-sm" style="margin-top:6px" onclick="ui._rez.yeni=true;rezCiz()">＋ Yeni müşteri ekle</button>`}
     </div>`}
@@ -2454,9 +2499,13 @@ function rezCiz(){
 async function rezYeniKaydet(){
   const firma=(gv('rzF')||'').trim();
   if(!firma){ mpAlert('Firma adı gerekli.','Yeni Müşteri'); return; }
-  const r=await guard(()=>api('customer_save',{firma,ilgili_kisi:gv('rzK'),telefon:gv('rzT')}),'Müşteri eklenemedi');
+  /* S02_001: girilen kişi adı artık customers.ilgili_kisi'ye yazılmaz —
+     gerçek bir Contact kaydı olarak `contacts` tablosuna gider. */
+  const r=await guard(()=>api('customer_save',{firma,telefon:gv('rzT')}),'Müşteri eklenemedi');
   if(r===null)return;
-  const yeniM={id:r.id,firma,ilgili_kisi:gv('rzK'),telefon:gv('rzT')};
+  const kisi=(gv('rzK')||'').trim();
+  if(kisi){ await guard(()=>api('contact_save',{id:0,customer_id:r.id,name:kisi,phone:gv('rzT')||null,is_primary:true}),'Kişi eklenemedi'); }
+  const yeniM={id:r.id,firma,telefon:gv('rzT')};
   if(ui._L){ ui._L.custs.push(yeniM); ui._L.cmap[r.id]=firma; }
   window.__lcmap[r.id]=firma;
   ui._rez.cid=r.id; ui._rez.yeni=false; ui._rez.q='';
@@ -2522,14 +2571,15 @@ function custListe(){
   const q=(gv('cQ')||'').trim().toLocaleLowerCase('tr');
   const srt=gv('cSort')||'ad', flt=gv('cFiltre')||'';
   let list=(ui._cust||[]).slice();
-  if(q) list=list.filter(x=>[x.firma,x.ilgili_kisi,x.telefon,x.eposta,x.vergi_no,x.vergi_dairesi,x.adres,x.birim,x.fatura_basligi]
+  /* S02_001: ilgili_kisi provenance etiketidir, kişi arama alanı değildir. */
+  if(q) list=list.filter(x=>[x.firma,x.telefon,x.eposta,x.vergi_no,x.vergi_dairesi,x.adres,x.birim,x.fatura_basligi]
     .some(v=>String(v||'').toLocaleLowerCase('tr').includes(q)));
   if(flt==='tel') list=list.filter(x=>x.telefon);
   else if(flt==='mail') list=list.filter(x=>x.eposta);
   else if(flt==='eksik') list=list.filter(x=>!x.telefon&&!x.eposta);
   else if(flt==='fatura') list=list.filter(x=>x.vergi_no&&x.vergi_dairesi);
   else if(flt==='fatura-eksik') list=list.filter(x=>!x.vergi_no||!x.vergi_dairesi);
-  const ad=x=>String(x.firma||x.ilgili_kisi||'').toLocaleLowerCase('tr');
+  const ad=x=>String(x.firma||'').toLocaleLowerCase('tr');
   if(srt==='ad') list.sort((a,b)=>ad(a).localeCompare(ad(b),'tr'));
   else if(srt==='adz') list.sort((a,b)=>ad(b).localeCompare(ad(a),'tr'));
   else if(srt==='yeni') list.sort((a,b)=>String(b.created_at||'').localeCompare(String(a.created_at||'')));
@@ -2537,13 +2587,24 @@ function custListe(){
   else if(srt==='puan') list.sort((a,b)=>(b.puan||0)-(a.puan||0));
   const say=document.getElementById('cSayi');
   if(say) say.textContent=(q||flt)?`${list.length} / ${(ui._cust||[]).length} müşteri gösteriliyor`:`${list.length} müşteri`;
-  box.innerHTML=list.map(x=>`<div class="list-item"><div class="nm">${esc(x.firma||x.ilgili_kisi||('#'+x.id))}${x.puan?` <span class="pill" title="Puan">${'★'.repeat(Math.min(5,+x.puan||0))}</span>`:''}</div>
-    <div class="meta">${esc(x.ilgili_kisi||'')}${x.telefon?' · '+esc(x.telefon):''}${x.eposta?' · '+esc(x.eposta):''}${(!x.telefon&&!x.eposta)?' · <span style="color:#b3261e">iletişim yok</span>':''}</div>
+  box.innerHTML=list.map(x=>`<div class="list-item"><div class="nm">${esc(x.firma||('#'+x.id))}${x.puan?` <span class="pill" title="Puan">${'★'.repeat(Math.min(5,+x.puan||0))}</span>`:''}${evidencePill(x.relationship_evidence)}</div>
+    <div class="meta">${x.telefon?esc(x.telefon):''}${x.telefon&&x.eposta?' · ':''}${x.eposta?esc(x.eposta):''}${(!x.telefon&&!x.eposta)?'<span style="color:#b3261e">iletişim yok</span>':''}</div>
     <button class="btn btn-outline btn-sm" onclick="custForm(${x.id})">Düzenle</button><button class="btn btn-danger btn-sm" onclick="custDel(${x.id})">Sil</button></div>`).join('')
     ||'<p class="empty">Eşleşen müşteri yok.</p>';
 }
+/* S02_001 — `customers.ilgili_kisi` bir kişi değil, Organization Memory
+   provenance etiketidir. Kullanıcıya "Kayıt Niteliği" olarak gösterilir ve
+   asla Contact satırı gibi render edilmez. Gerçek kişiler `contacts`'tadır. */
+const EVIDENCE_LBL={
+  external_directory_only:'Dış dizin kaydı',
+  confirmed_historical:'Geçmiş ilişki doğrulanmış',
+  observed_historical:'Geçmişte gözlemlenmiş'};
+const evidenceLabel=v=>EVIDENCE_LBL[v]||'';
+const evidencePill=v=>v?` <span class="pill" title="Kayıt Niteliği">${esc(evidenceLabel(v))}</span>`:'';
+
+/* ilgili_kisi bilinçli olarak bu listede yok: export/import sütunu değildir. */
 const CUST_COLS=[
-  {key:'firma',label:'Firma',w:28},{key:'ilgili_kisi',label:'İlgili Kişi',w:20},
+  {key:'firma',label:'Firma',w:28},
   {key:'birim',label:'Birim',w:16},{key:'telefon',label:'Telefon',w:16},
   {key:'eposta',label:'E-posta',w:24},{key:'adres',label:'Adres',w:34},
   {key:'vergi_no',label:'Vergi No',w:14},{key:'vergi_dairesi',label:'Vergi Dairesi',w:18},
@@ -2559,7 +2620,7 @@ function custImport(){
     title:'Müşterileri Excel\'den Al',
     hint:'Firma adı zorunlu. Aynı firma adı varsa seçiminize göre güncellenir veya atlanır.',
     fields:CUST_COLS.map(c=>({key:c.key,label:c.label,required:c.key==='firma',
-      alias:{firma:['unvan','müşteri','musteri','firma adı','cari'],ilgili_kisi:['yetkili','kişi','kisi','ilgili'],
+      alias:{firma:['unvan','müşteri','musteri','firma adı','cari'],
              telefon:['tel','gsm','cep'],eposta:['email','mail','e posta'],adres:['adress','address'],
              vergi_no:['vkn','vergi numarası'],vergi_dairesi:['vd'],fatura_basligi:['fatura ünvanı','fatura unvani'],
              birim:['departman'],puan:['yıldız']}[c.key]||[]})),
@@ -2670,7 +2731,8 @@ function supImport(){
 function custForm(id){ const x=(ui._cust||[]).find(c=>c.id===id)||{};
   modal(`<h3 style="margin:0 0 14px">${id?'Müşteri Düzenle':'Yeni Müşteri'}</h3><input type="hidden" id="cid" value="${id||0}">
     <div class="row2"><div class="field"><label class="flabel">Firma</label><input class="inp" id="cf" value="${esc(x.firma)}"></div>
-    <div class="field"><label class="flabel">İlgili Kişi</label><input class="inp" id="cik" value="${esc(x.ilgili_kisi)}"></div></div>
+    <div class="field"><label class="flabel">Kayıt Niteliği</label>
+      <input class="inp" value="${esc(evidenceLabel(x.relationship_evidence)||'—')}" disabled title="Organization Memory kayıt kanıtı (S02_001). Kişi bilgisi değildir; kişiler Kurumlar ekranından eklenir."></div></div>
     <div class="row2"><div class="field"><label class="flabel">Telefon</label><input class="inp" id="ct" value="${esc(x.telefon)}"></div>
     <div class="field"><label class="flabel">E-posta</label><input class="inp" id="ce" value="${esc(x.eposta)}"></div></div>
     <div class="field"><label class="flabel">Adres</label><input class="inp" id="ca" value="${esc(x.adres)}"></div>
@@ -2679,9 +2741,154 @@ function custForm(id){ const x=(ui._cust||[]).find(c=>c.id===id)||{};
     <div class="field"><label class="flabel">Puan (0-5)</label><input class="inp" id="cp" type="number" min="0" max="5" value="${esc(x.puan||0)}"></div></div>
     <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn btn-ghost btn-sm" onclick="closeModal()">Vazgeç</button><button class="btn btn-primary btn-sm" onclick="custSave()">Kaydet</button></div>`);
 }
-async function custSave(){ await api('customer_save',{id:+gv('cid'),firma:gv('cf'),ilgili_kisi:gv('cik'),telefon:gv('ct'),eposta:gv('ce'),adres:gv('ca'),vergi_no:gv('cv'),vergi_dairesi:gv('cvd'),puan:+gv('cp')}); closeModal(); renderSection(); }
+/* ilgili_kisi bilinçli olarak gönderilmez: raw provenance evidence olarak
+   dokunulmadan kalır (S02_001 §2.4). */
+async function custSave(){ await api('customer_save',{id:+gv('cid'),firma:gv('cf'),telefon:gv('ct'),eposta:gv('ce'),adres:gv('ca'),vergi_no:gv('cv'),vergi_dairesi:gv('cvd'),puan:+gv('cp')}); closeModal(); renderSection(); }
 async function custDel(id){ if(!await mpConfirm('Bu müşteri silinsin mi? Doluluk ve iş kayıtlarındaki bağlantıları boşalır.','Müşteriyi Sil'))return;
   await guard(()=>api('customer_delete',{id}),'Müşteri silinemedi'); renderSection(); }
+
+/* ================= KURUMLAR (Sprint 02) =================
+   Canonical Organization surface. Physical backing = `customers`
+   (D-212 / D-227) — yeni `organizations` tablosu yoktur.
+
+   Gerçek iş kişileri YALNIZ `contacts` tablosundan gelir. Legacy
+   `customers.ilgili_kisi` bir kişi değil, Organization Memory kayıt
+   kanıtıdır ve burada "Kayıt Niteliği" olarak gösterilir (S02_001).
+   ======================================================== */
+const ORG_ROLES=[['customer','Müşteri'],['advertiser','Reklamveren'],['agency','Ajans'],
+  ['supplier','Tedarikçi'],['media_partner','Mecra/Venue'],['public_body','Kamu/STK'],['other','Diğer']];
+const orgRoleLabel=v=>(ORG_ROLES.find(r=>r[0]===v)||[null,v])[1];
+
+async function kurumlar(c){
+  const [orgs,jobs]=await Promise.all([api('orgs_overview'),api('jobs_list').catch(()=>[])]);
+  const isSay={}; (jobs||[]).forEach(j=>{ if(j.customer_id) isSay[j.customer_id]=(isSay[j.customer_id]||0)+1; });
+  ui._orgs=orgs.map(o=>({...o, is_sayisi:isSay[o.id]||0}));
+  c.innerHTML=`<div class="sec-head">
+      <h3>Kurumlar <span class="chip" id="orgSayi">${ui._orgs.length}</span></h3>
+      <button class="btn btn-primary btn-sm" onclick="custForm(0)">${ic('plus',15)} Yeni Kurum</button></div>
+    <div class="sec-card">
+      <div class="row2" style="margin-bottom:10px">
+        <div class="field"><label class="flabel" for="oQ">Ara</label>
+          <input class="inp" id="oQ" placeholder="Firma, kişi, telefon, e-posta" oninput="orgListe()"></div>
+        <div class="field"><label class="flabel" for="oF">Filtre</label>
+          <select class="inp" id="oF" onchange="orgListe()">
+            <option value="">Tümü</option>
+            <option value="kisi">Kişisi olanlar</option>
+            <option value="kisisiz">Kişisi olmayanlar</option>
+            <option value="is">İşi olanlar</option>
+            <option value="confirmed_historical">Kayıt: Geçmiş ilişki doğrulanmış</option>
+            <option value="external_directory_only">Kayıt: Dış dizin kaydı</option>
+            <option value="observed_historical">Kayıt: Geçmişte gözlemlenmiş</option>
+          </select></div></div>
+      <div id="orgRows"></div></div>`;
+  orgListe();
+}
+function orgListe(){
+  const box=document.getElementById('orgRows'); if(!box)return;
+  const q=(gv('oQ')||'').trim().toLocaleLowerCase('tr'), f=gv('oF')||'';
+  let list=(ui._orgs||[]).slice();
+  if(q) list=list.filter(x=>[x.firma,x.primary_contact,x.telefon,x.eposta]
+    .some(v=>String(v||'').toLocaleLowerCase('tr').includes(q)));
+  if(f==='kisi') list=list.filter(x=>x.contact_count>0);
+  else if(f==='kisisiz') list=list.filter(x=>!x.contact_count);
+  else if(f==='is') list=list.filter(x=>x.is_sayisi>0);
+  else if(f) list=list.filter(x=>x.relationship_evidence===f);
+  list.sort((a,b)=>String(a.firma||'').localeCompare(String(b.firma||''),'tr'));
+  const say=document.getElementById('orgSayi');
+  if(say) say.textContent=(q||f)?`${list.length} / ${(ui._orgs||[]).length}`:String(list.length);
+  const goster=list.slice(0,300);
+  box.innerHTML=goster.map(x=>`<div class="list-item" style="cursor:pointer" onclick="orgAc(${x.id})">
+      <div class="nm">${esc(x.firma||('#'+x.id))}${x.active===false?' <span class="pill">arşiv</span>':''}${evidencePill(x.relationship_evidence)}</div>
+      <div class="meta">${x.contact_count?`${esc(x.primary_contact||'')}${x.contact_count>1?` +${x.contact_count-1} kişi`:''}`:'<span class="muted">kişi kaydı yok</span>'}${x.is_sayisi?` · ${x.is_sayisi} iş`:''}${x.telefon?' · '+esc(x.telefon):''}</div>
+      <button class="btn btn-outline btn-sm" onclick="event.stopPropagation();orgAc(${x.id})">Aç</button></div>`).join('')
+    ||'<p class="empty">Eşleşen kurum yok.</p>';
+  if(list.length>goster.length) box.insertAdjacentHTML('beforeend','<p class="muted" style="font-size:12.5px">İlk 300 kayıt gösteriliyor — aramayı daraltın.</p>');
+}
+async function orgAc(id){
+  const d=await guard(()=>api('org_detail&id='+id),'Kurum açılamadı'); if(!d)return;
+  ui._org=d.org; ui._orgContacts=d.contacts;
+  const o=d.org, roles=Array.isArray(o.relationship_roles)?o.relationship_roles:[];
+  const c=document.getElementById('content');
+  c.innerHTML=`<div class="sec-head">
+      <h3><button class="btn btn-ghost btn-sm" onclick="go('kurumlar')">‹ Kurumlar</button> ${esc(o.firma||('#'+o.id))}</h3>
+      <button class="btn btn-outline btn-sm" onclick="custForm(${o.id})">Düzenle</button></div>
+    <div class="sec-card">
+      <div class="sec-head" style="margin-bottom:10px"><h4 style="font-size:14px;margin:0">Kurum Bilgisi</h4></div>
+      <div class="meta" style="line-height:1.9">
+        ${o.telefon?`Telefon: ${esc(o.telefon)}<br>`:''}${o.eposta?`E-posta: ${esc(o.eposta)}<br>`:''}
+        ${o.adres?`Adres: ${esc(o.adres)}<br>`:''}${o.vergi_no?`Vergi No: ${esc(o.vergi_no)}<br>`:''}
+        Kayıt Niteliği: ${o.relationship_evidence?esc(evidenceLabel(o.relationship_evidence)):'<span class="muted">—</span>'}<br>
+        İlişki Rolleri: ${roles.length?roles.map(r=>`<span class="pill">${esc(orgRoleLabel(r))}</span>`).join(' '):'<span class="muted">tanımlı değil</span>'}
+        <button class="btn btn-ghost btn-sm" onclick="orgRolForm(${o.id})">Rolleri düzenle</button>
+      </div></div>
+    <div class="sec-card">
+      <div class="sec-head" style="margin-bottom:10px">
+        <h4 style="font-size:14px;margin:0">İlgili Kişiler <span class="chip">${d.contacts.length}</span></h4>
+        <button class="btn btn-primary btn-sm" onclick="contactForm(0,${o.id})">${ic('plus',15)} Kişi Ekle</button></div>
+      <div id="orgKisiler"></div></div>`;
+  orgKisiCiz();
+}
+function orgKisiCiz(){
+  const box=document.getElementById('orgKisiler'); if(!box)return;
+  const list=ui._orgContacts||[];
+  box.innerHTML=list.map(k=>`<div class="list-item">
+      <div class="nm">${esc(k.name)}${k.is_primary?' <span class="pill">birincil</span>':''}${k.active===false?' <span class="pill">pasif</span>':''}</div>
+      <div class="meta">${[k.title,k.department].filter(Boolean).map(esc).join(' · ')}${(k.title||k.department)&&(k.phone||k.email)?' · ':''}${k.phone?esc(k.phone):''}${k.phone&&k.email?' · ':''}${k.email?esc(k.email):''}</div>
+      <button class="btn btn-outline btn-sm" onclick="contactForm(${k.id},${ui._org.id})">Düzenle</button>
+      <button class="btn btn-danger btn-sm" onclick="contactDel(${k.id})">Sil</button></div>`).join('')
+    ||'<p class="empty">Henüz kişi eklenmedi.</p>';
+}
+function contactForm(id,customerId){
+  const x=(ui._orgContacts||[]).find(k=>k.id===id)||{};
+  modal(`<h3 style="margin:0 0 14px">${id?'Kişi Düzenle':'Yeni Kişi'}</h3>
+    <input type="hidden" id="kid" value="${id||0}"><input type="hidden" id="kcid" value="${customerId||0}">
+    <div class="row2"><div class="field"><label class="flabel" for="kn">Ad Soyad *</label><input class="inp" id="kn" value="${esc(x.name)}"></div>
+    <div class="field"><label class="flabel" for="kt">Unvan</label><input class="inp" id="kt" value="${esc(x.title)}"></div></div>
+    <div class="row2"><div class="field"><label class="flabel" for="kd">Birim</label><input class="inp" id="kd" value="${esc(x.department)}"></div>
+    <div class="field"><label class="flabel" for="kp">Telefon</label><input class="inp" id="kp" value="${esc(x.phone)}"></div></div>
+    <div class="field"><label class="flabel" for="ke">E-posta</label><input class="inp" id="ke" value="${esc(x.email)}"></div>
+    <div class="field"><label class="flabel" for="kno">Not</label><textarea class="inp" id="kno">${esc(x.notes)}</textarea></div>
+    <label class="switch" style="margin-bottom:8px"><input type="checkbox" id="kpr" ${x.is_primary?'checked':''}><span class="sl"></span><span class="txt">Birincil kişi</span></label>
+    <label class="switch" style="margin-bottom:14px"><input type="checkbox" id="kak" ${x.active===false?'':'checked'}><span class="sl"></span><span class="txt">Aktif</span></label>
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button class="btn btn-ghost btn-sm" onclick="closeModal()">Vazgeç</button>
+      <button class="btn btn-primary btn-sm" onclick="contactSave()">Kaydet</button></div>`);
+  const f=document.getElementById('kn'); if(f)f.focus();
+}
+async function contactSave(){
+  const ad=(gv('kn')||'').trim();
+  if(!ad){ mpAlert('Ad Soyad zorunlu.'); return; }
+  const cid=+gv('kcid')||null;
+  const r=await guard(()=>api('contact_save',{id:+gv('kid'),customer_id:cid,name:ad,
+    title:gv('kt')||null,department:gv('kd')||null,phone:gv('kp')||null,email:gv('ke')||null,notes:gv('kno')||null,
+    is_primary:document.getElementById('kpr').checked,active:document.getElementById('kak').checked}),'Kişi kaydedilemedi');
+  if(r===null)return;
+  closeModal(); toast('Kişi kaydedildi.'); orgAc(cid||(ui._org||{}).id);
+}
+async function contactDel(id){
+  if(!await mpConfirm('Bu kişi silinsin mi?','Kişiyi Sil'))return;
+  const r=await guard(()=>api('contact_delete&id='+id),'Kişi silinemedi'); if(r===null)return;
+  toast('Kişi silindi.'); orgAc((ui._org||{}).id);
+}
+function orgRolForm(id){
+  const o=ui._org||{}; const cur=Array.isArray(o.relationship_roles)?o.relationship_roles:[];
+  modal(`<h3 style="margin:0 0 6px">İlişki Rolleri</h3>
+    <p class="muted" style="font-size:12.5px;margin:0 0 14px">Kurumun uzun dönemli, tanımlayıcı rolleri. Belirli bir işteki taraf rolü ayrıdır (BR-ORG01).</p>
+    <input type="hidden" id="orid" value="${id}">
+    ${ORG_ROLES.map(r=>`<label class="switch" style="margin-bottom:8px">
+      <input type="checkbox" class="orgRol" value="${r[0]}" ${cur.includes(r[0])?'checked':''}>
+      <span class="sl"></span><span class="txt">${esc(r[1])}</span></label>`).join('')}
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
+      <button class="btn btn-ghost btn-sm" onclick="closeModal()">Vazgeç</button>
+      <button class="btn btn-primary btn-sm" onclick="orgRolSave()">Kaydet</button></div>`);
+}
+async function orgRolSave(){
+  const id=+gv('orid');
+  const roles=[...document.querySelectorAll('.orgRol')].filter(x=>x.checked).map(x=>x.value);
+  const r=await guard(()=>api('customer_save',{id,relationship_roles:roles}),'Roller kaydedilemedi');
+  if(r===null)return;
+  closeModal(); toast('Roller kaydedildi.'); orgAc(id);
+}
 
 /* ---------- TEKLİFLER ---------- */
 async function teklifler(c){
@@ -2734,9 +2941,11 @@ function qbAra(){ const t=(gv('qbUnitQ')||'').toLocaleLowerCase('tr'); return (u
 async function qbRender(){
   const c=document.getElementById('content');
   if(!ui._qbUnits){
-    const veri=await guard(()=>Promise.all([api('units_full'),api('customers_list')]),'Veriler yüklenemedi');
+    const veri=await guard(()=>Promise.all([api('units_full'),api('customers_list'),api('contacts_list')]),'Veriler yüklenemedi');
     if(!veri) return;
     ui._qbUnits=veri[0]; ui._qbCust=veri[1];
+    /* Yetkili kisi artik gercek Contact'tan gelir (S02_001). */
+    ui._qbKisi={}; (veri[2]||[]).forEach(k=>{ if(k.active!==false && (!ui._qbKisi[k.customer_id]||k.is_primary)) ui._qbKisi[k.customer_id]=k; });
   }
   const cu=ui._qbCust||[];
   c.innerHTML=`<div class="sec-head">
@@ -2750,7 +2959,7 @@ async function qbRender(){
       <div class="field" style="max-width:420px"><label class="flabel">Kayıtlı müşteriden seç</label>
         <select class="inp" id="qbCust" onchange="qbCustPick(this.value)">
           <option value="">— elle gireceğim —</option>
-          ${cu.map(x=>`<option value="${x.id}" ${String(QB.customer_id)===String(x.id)?'selected':''}>${esc(x.firma||x.ilgili_kisi||('#'+x.id))}</option>`).join('')}
+          ${cu.map(x=>`<option value="${x.id}" ${String(QB.customer_id)===String(x.id)?'selected':''}>${esc(x.firma||('#'+x.id))}</option>`).join('')}
         </select></div>
       <div class="row2"><div class="field"><label class="flabel">Yetkili kişi</label><input class="inp" id="qbAd" value="${esc(QB.customer_name)}"></div>
       <div class="field"><label class="flabel">Firma</label><input class="inp" id="qbFirma" value="${esc(QB.firma)}"></div></div>
@@ -2779,8 +2988,9 @@ async function qbRender(){
 function qbCustPick(id){
   const x=(ui._qbCust||[]).find(c=>String(c.id)===String(id));
   QB.customer_id=x?x.id:null;
-  if(x){ document.getElementById('qbAd').value=x.ilgili_kisi||''; document.getElementById('qbFirma').value=x.firma||'';
-         document.getElementById('qbTel').value=x.telefon||''; document.getElementById('qbMail').value=x.eposta||''; }
+  const k=x?((ui._qbKisi||{})[x.id]||null):null;
+  if(x){ document.getElementById('qbAd').value=(k&&k.name)||''; document.getElementById('qbFirma').value=x.firma||'';
+         document.getElementById('qbTel').value=(k&&k.phone)||x.telefon||''; document.getElementById('qbMail').value=(k&&k.email)||x.eposta||''; }
 }
 function qbListe(){
   const box=document.getElementById('qbBulunan'); if(!box)return;
@@ -3111,8 +3321,12 @@ async function leadView(id){
 }
 async function leadMusteri(id){
   const l=(ui._leads||[]).find(x=>x.id===id); if(!l)return;
-  await api('customer_save',{firma:l.firma||l.ad,ilgili_kisi:l.ad,telefon:l.telefon,eposta:l.eposta,not:'Medya planlama talebinden: '+[l.butce,(Array.isArray(l.mecralar)?l.mecralar.join(', '):'')].filter(Boolean).join(' · ')});
-  closeModal(); toast('Müşteri kaydı oluşturuldu.');
+  /* S02_001: talepteki kisi adi provenance kolonuna degil, gercek bir
+     Contact kaydina yazilir. */
+  const r=await api('customer_save',{firma:l.firma||l.ad,telefon:l.telefon,eposta:l.eposta,not:'Medya planlama talebinden: '+[l.butce,(Array.isArray(l.mecralar)?l.mecralar.join(', '):'')].filter(Boolean).join(' · ')});
+  const ad=String(l.ad||'').trim();
+  if(r && r.id && ad){ await api('contact_save',{id:0,customer_id:r.id,name:ad,phone:l.telefon||null,email:l.eposta||null,is_primary:true,source_type:'lead',source_ref:'leads#'+l.id}); }
+  closeModal(); toast('Kurum ve ilgili kişi kaydı oluşturuldu.');
 }
 async function leadDel(id){ if(!await mpConfirm('Talep silinsin mi?','Talebi Sil'))return; await sb.from('leads').delete().eq('id',id); renderSection(); }
 
@@ -3305,7 +3519,7 @@ async function refSave(sessiz){ await api('settings_save',{refTitle:gv('refT')||
 async function saveSocial(){ await api('settings_save',{social_whatsapp:gv('soWa'),social_instagram:gv('soIg'),social_linkedin:gv('soLi'),social_facebook:gv('soFb'),social_x:gv('soTw'),social_youtube:gv('soYt')}); mpAlert('Kaydedildi.'); }
 async function saveSeo(){ await api('settings_save',{seoTitle:gv('seoT'),seoDesc:gv('seoD'),seoKeywords:gv('seoK')}); mpAlert('Kaydedildi.'); }
 async function saveFooter(){ await api('settings_save',{footer_about:gv('fAbout'),footer_news:gv('fNews'),footer_note:gv('fNote')}); mpAlert('Kaydedildi.'); }
-async function exportBackup(){ const tables=['settings','pages','products','mecralar','alt_mecralar','units','bookings','customers','quotes','quote_items','jobs','team','notes','suppliers'];
+async function exportBackup(){ const tables=['settings','pages','products','mecralar','alt_mecralar','units','bookings','customers','contacts','quotes','quote_items','jobs','team','notes','suppliers'];
   const out={_exported:new Date().toISOString()}; for(const t of tables){ try{ const {data}=await sb.from(t).select('*'); out[t]=data||[]; }catch(e){ out[t]='HATA'; } }
   const blob=new Blob([JSON.stringify(out,null,2)],{type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='medyapark-yedek-'+new Date().toISOString().slice(0,10)+'.json'; a.click(); URL.revokeObjectURL(a.href); }
 async function changePw(){ const p=gv('npw'); if(p.length<4){mpAlert('En az 4 karakter.');return;} await api('password_change',{password:p}); mpAlert('Şifre güncellendi.'); }
