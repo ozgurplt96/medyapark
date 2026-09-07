@@ -1,0 +1,26 @@
+# Supabase
+.branches
+.temp
+
+# dotenvx
+.env.keys
+.env.local
+.env.*.local
+
+# ---------------------------------------------------------------------
+# Local seed'ler: gerçek şirket verisi ve Auth password hash'leri ASLA
+# commit edilmez. Yalnız local-only dev login dosyası izinlidir.
+#
+# NOT: bu kurallar .gitignore'dadır (klonla birlikte gelir), yalnız
+# .git/info/exclude'da değildir (o dosya klonlanmaz).
+# ---------------------------------------------------------------------
+seeds/*
+!seeds/10_local_dev_auth.sql
+
+# Eski düzen (seeds/ öncesi) — geri gelmesin
+seed.sql
+seed_local_auth.sql
+
+# Salt-okunur remote dump'ları
+.dumps/
+*.dump
