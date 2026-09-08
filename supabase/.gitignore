@@ -26,6 +26,9 @@ seeds/*
 # Sprint 03: work_parties backfill + legacy phase mapping, replayed after
 # the company-data seed. Deterministic logic only - no company data.
 !seeds/50_s03_work_backfill.sql
+# Upstream reconciliation: mirrors legacy seviye from app_role and
+# translates jobs.durum to canonical phase/lifecycle. No company data.
+!seeds/97_upstream_compat_backfill.sql
 
 # Eski düzen (seeds/ öncesi) — geri gelmesin
 seed.sql
