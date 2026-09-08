@@ -1122,7 +1122,7 @@ async function isTakibi(c){
         ${idx>0?`<button title="Geri al: ${esc(JOBST[idx-1][1])}" onclick="jobMove(${j.id},'${JOBST[idx-1][0]}')">${ic('left',15)}</button>`:'<span></span>'}
         ${idx<JOBST.length-1?`<button title="İlerlet: ${esc(JOBST[idx+1][1])}" onclick="jobMove(${j.id},'${JOBST[idx+1][0]}')">${ic('right',15)}</button>`:'<span></span>'}
         <button title="Aç" onclick="workAc(${j.id})">${ic('pages',15)}</button>
-        <button class="del" title="Sil" onclick="jobDelete(${j.id})">${ic('trash',15)}</button>
+        ${isAdmin()?`<button class="del" title="Sil" onclick="jobDelete(${j.id})">${ic('trash',15)}</button>`:'<span></span>'}
       </div></article>`;}).join('');
     return `<section class="kcol ${JOBC[st]||'slate'}">
       <header class="kcol-h"><span class="kdot"></span><h4>${esc(lbl)}</h4><span class="kcount mono">${kol.length}</span></header>
@@ -1225,7 +1225,7 @@ async function workAc(id){
         <div class="nm">Teklif #${o.id}${o.revision_no>1?` <span class="pill">rev ${o.revision_no}</span>`:''}</div>
         <div class="meta"><span class="badge-st st-${esc(o.status||'yeni')}">${esc(({yeni:'Yeni',gorusuldu:'Görüşüldü',onaylandi:'Onaylandı',iptal:'İptal'})[o.status]||o.status)}</span> · ${esc(money(o.total))}${o.gecerlilik?' · geçerlilik '+esc(trTarih(o.gecerlilik)):''}</div>
         <button class="btn btn-outline btn-sm" onclick="quoteView(${o.id})">Aç</button>
-        <button class="btn btn-outline btn-sm" onclick="quoteRevise(${o.id})">Revize</button></div>`).join('')}
+        ${isAdmin()?`<button class="btn btn-outline btn-sm" onclick="quoteRevise(${o.id})">Revize</button>`:''}</div>`).join('')}
     </div>`:''}
 
     ${d.bookings.length?`<div class="sec-card">
@@ -1273,7 +1273,7 @@ function workPartyCiz(){
   box.innerHTML=(ui._workParties||[]).map(p=>`<div class="list-item">
       <div class="nm">${esc(cm[p.customer_id]||('#'+p.customer_id))}</div>
       <div class="meta"><span class="pill">${esc(RL[p.role]||p.role)}</span>${p.note?' · '+esc(p.note):''}</div>
-      <button class="btn btn-danger btn-sm" onclick="partyDel(${p.id})">Kaldır</button></div>`).join('')
+      ${isAdmin()?`<button class="btn btn-danger btn-sm" onclick="partyDel(${p.id})">Kaldır</button>`:''}</div>`).join('')
     ||'<p class="empty">Taraf eklenmedi. Kurum bağlantısı Düzenle ekranından da verilebilir.</p>';
 }
 function workTimelineCiz(){
@@ -1293,7 +1293,7 @@ function workTimelineCiz(){
       </div>
       ${aks==='open'?`<button class="btn btn-outline btn-sm" onclick="entryDone(${e.id})">Tamamla</button>`:''}
       ${sys?'':`<button class="btn btn-outline btn-sm" onclick="entryForm(${e.id},${e.job_id},${!!aks})">Düzenle</button>`}
-      ${sys?'':`<button class="btn btn-danger btn-sm" onclick="entryDel(${e.id})">Sil</button>`}
+      ${(sys||!isAdmin())?'':`<button class="btn btn-danger btn-sm" onclick="entryDel(${e.id})">Sil</button>`}
     </div>`;}).join('')
     ||'<p class="empty">Henüz güncelleme yok.</p>';
 }
@@ -1624,7 +1624,7 @@ async function opForm(id,jobId){
     <div class="field"><label class="flabel" for="opEv">Kanıt görseli / belge bağlantıları (her satıra bir URL)</label>
       <textarea class="inp" id="opEv" rows="2" placeholder="https://drive.google.com/...">${esc((Array.isArray(o.evidence_urls)?o.evidence_urls:[]).join('\n'))}</textarea></div>
     <div style="display:flex;gap:8px;justify-content:flex-end">
-      ${id?`<button class="btn btn-danger btn-sm" style="margin-right:auto" onclick="opDel(${id})">Sil</button>`:''}
+      ${(id&&isAdmin())?`<button class="btn btn-danger btn-sm" style="margin-right:auto" onclick="opDel(${id})">Sil</button>`:''}
       <button class="btn btn-ghost btn-sm" onclick="closeModal()">Vazgeç</button>
       <button class="btn btn-primary btn-sm" onclick="opSave()">Kaydet</button></div>`);
 }
@@ -1743,6 +1743,10 @@ const WS_NAV=[
 const WS_EXTRA=['operasyon'];
 const WS_IZIN=new Set(WS_NAV.map(n=>n[0]).concat(WS_EXTRA));
 
+/* Yıkıcı ve Admin-domain aksiyonları RLS'te admin'e kapalıdır (S07).
+   UI'da da gizlenir ki team_member reddedilecek bir düğme görmesin —
+   gizleme yetkilendirme değildir, yalnız tutarlı bir arayüzdür. */
+const isAdmin=()=>ui._role==='admin';
 function surfaceGet(){
   if(ui._role!=='admin') return 'workspace';
   try{ return localStorage.getItem('mp_surface')==='workspace'?'workspace':'yonetim'; }
@@ -3816,7 +3820,7 @@ function orgKisiCiz(){
       <div class="nm">${esc(k.name)}${k.is_primary?' <span class="pill">birincil</span>':''}${k.active===false?' <span class="pill">pasif</span>':''}</div>
       <div class="meta">${[k.title,k.department].filter(Boolean).map(esc).join(' · ')}${(k.title||k.department)&&(k.phone||k.email)?' · ':''}${k.phone?esc(k.phone):''}${k.phone&&k.email?' · ':''}${k.email?esc(k.email):''}</div>
       <button class="btn btn-outline btn-sm" onclick="contactForm(${k.id},${ui._org.id})">Düzenle</button>
-      <button class="btn btn-danger btn-sm" onclick="contactDel(${k.id})">Sil</button></div>`).join('')
+      ${isAdmin()?`<button class="btn btn-danger btn-sm" onclick="contactDel(${k.id})">Sil</button>`:''}</div>`).join('')
     ||'<p class="empty">Henüz kişi eklenmedi.</p>';
 }
 function contactForm(id,customerId){

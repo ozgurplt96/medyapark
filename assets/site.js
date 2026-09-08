@@ -1010,11 +1010,25 @@ function renderCart(){
 }
 function toggleCart(){ document.getElementById('drawer').classList.toggle('open'); document.getElementById('overlay').classList.toggle('open'); renderCart(); }
 async function sendQuote(){
-  if(!cart.length)return; const total=cartTotal();
-  const {data:q,error}=await sb.from('quotes').insert({customer_name:val('qName'),firma:val('qFirma'),telefon:val('qTel'),eposta:val('qMail'),total}).select('id').single();
+  if(!cart.length)return;
+  /* Teklif talebi tek transactional RPC ile gönderilir. Doğrudan insert
+     kullanılmaz: anon'un quotes/quote_items üzerinde SELECT hakkı yoktur
+     (ve olmamalıdır), bu yüzden .select('id') RETURNING'i RLS tarafından
+     reddediliyordu. RPC yalnız yeni referans numarasını döner. */
+  const items=cart.map(c=>({unit_id:c.unitId,ym:c.ym,mecra_name:(c.mecra+(c.alt?' / '+c.alt:'')),
+    unit_name:c.unit,product_name:c.product,olcu:c.olcu,start_day:c.ym+'-01',
+    period:c.monthLabel,price:c.price}));
+  const {data:res,error}=await sb.rpc('submit_quote_request',{p_payload:{
+    customer_name:val('qName'),firma:val('qFirma'),telefon:val('qTel'),eposta:val('qMail'),items}});
   if(error){ alert('Gönderilemedi: '+error.message); return; }
-  const items=cart.map(c=>({quote_id:q.id,unit_id:c.unitId,ym:c.ym,mecra_name:(c.mecra+(c.alt?' / '+c.alt:'')),unit_name:c.unit,product_name:c.product,olcu:c.olcu,start_day:c.ym+'-01',period:c.monthLabel,price:c.price}));
-  const {error:e2}=await sb.from('quote_items').insert(items); if(e2){ alert('Kalemler kaydedilemedi: '+e2.message); return; }
+  if(!res||!res.ok){
+    const HATA={items_empty:'Sepetiniz boş görünüyor.',items_too_many:'Çok fazla alan seçildi.',
+      contact_required:'Telefon veya e-posta girin.',name_required:'Ad Soyad veya firma girin.',
+      field_too_long:'Girdiğiniz bilgiler çok uzun.',unit_invalid:'Seçilen alanlardan biri artık müsait değil.',
+      ym_invalid:'Seçilen dönem geçersiz.',items_invalid:'Seçim okunamadı.'};
+    alert(HATA[res&&res.error]||'Talebiniz gönderilemedi. Lütfen tekrar deneyin.');
+    return; }
+  const q={id:res.quote_id};
   const st=D.settings||{}; const ad=val('qName')||val('qFirma')||'';
   const wa=st.social_whatsapp||'';
   const mesaj=encodeURIComponent(`Merhaba, ${ad} olarak #${q.id} numaralı teklif talebini gönderdim. Bilgi alabilir miyim?`);
