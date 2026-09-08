@@ -266,7 +266,13 @@ const URUN_IKON={
  totem:'<rect x="8" y="2.5" width="8" height="14" rx="1.5"/><path d="M12 16.5v5M8.5 21.5h7"/>',
  diger:'<circle cx="12" cy="12" r="8.5"/><path d="M12 8v5M12 16h.01"/>'
 };
-function uIkon(ad,sz){ const p=URUN_IKON[ad||'diger']||URUN_IKON.diger;
+function uIkon(ad,sz){
+  /* panelden yüklenen SVG: 'svg:<id>' anahtarı */
+  if(ad && String(ad).startsWith('svg:')){
+    const ic=((D.settings||{}).icons||[]).find(x=>'svg:'+x.id===ad);
+    if(ic&&ic.url) return `<img class="ui-ic ui-svg" src="${esc(ic.url)}" alt="" width="${sz||17}" height="${sz||17}" loading="lazy">`;
+  }
+  const p=URUN_IKON[ad||'diger']||URUN_IKON.diger;
   return `<svg class="ui-ic" viewBox="0 0 24 24" width="${sz||17}" height="${sz||17}" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`; }
 
 function homeListe(){
@@ -562,130 +568,134 @@ function renderMec(){
   const aktif=view.tab && alts.some(a=>String(a.id)===String(view.tab)) ? view.tab : alts[0].id;
   renderMecPage(m,aktif);
 }
-/* ---- Lokasyon sayfası: her şey tek sayfada (lokasyon değeri → ürün → aksiyon) ---- */
+/* ---- Lokasyon sayfası (çizime göre): kapak → künye → konum → alanlar → tablo → aksiyon → diğer ---- */
+function birimAdi(a){ const p=a.product||{}; const n=(p.name||a.name||'').toLocaleLowerCase('tr');
+  const cift=groupUnits(a.units||[]).some(g=>!!g.B);
+  if(cift) return 'Yüzey';
+  if(/led|ekran/.test(n)) return 'Ekran';
+  if(/araç|arac|giydirme|servis/.test(n)) return 'Araç';
+  return 'Pozisyon'; }
+function birimSay(a){ const cift=groupUnits(a.units||[]).some(g=>!!g.B);
+  return cift?groupUnits(a.units||[]).reduce((k,g)=>k+(g.A?1:0)+(g.B?1:0),0):(a.units||[]).length; }
+
 function renderMecPage(m,aktifAltId){
   const alts=m.alts||[]; const st=D.settings||{};
   const nav=`<a href="${BASE}" onclick="goHome();return false;">Medyapark Adana</a> <i>/</i> <span>${esc(m.name)}</span>`;
+  const bobj=Object.assign({},m,{kapak_height:(m.kapak_height&&m.kapak_height!==600)?m.kapak_height:350});
 
-  /* ① kapak altı kanıt şeridi */
+  /* künye şeridi */
   const units=alts.reduce((n,a)=>n+(a.units||[]).length,0);
-  const yuzey=alts.reduce((n,a)=>n+groupUnits(a.units||[]).reduce((k,g)=>k+(g.A?1:0)+(g.B?1:0),0),0);
-  const now=curYm(); let musait=0;
-  alts.forEach(a=>(a.units||[]).forEach(u=>{ const mp={}; (u.booked||[]).forEach(b=>mp[b.ym]=b.status); if(!mp[now])musait++; }));
-  const kanit=[
-    m.gunluk_gosterim?[m.gunluk_gosterim,'Gösterim']:null,
-    [alts.length+' tip','Reklam alanı'],
-    [yuzey>units?(yuzey+' yüzey'):(units+' pozisyon'),'Envanter'],
-    musait?[musait,'Bu ay müsait']:null,
-    m.toplam_alan?[m.toplam_alan,'Kapsam']:null
-  ].filter(Boolean).slice(0,4);
-  const heroBar=`<div class="mp-bar"><div class="mp-bar-in">
+  const kunye=`<div class="mp-bar"><div class="mp-bar-in">
       ${m.logo?`<div class="mp-logo">${picture(m.logo,null,'','logo')}</div>`:''}
-      <div class="mp-kanit">${kanit.map(k=>`<div class="mp-k"><b>${esc(String(k[0]))}</b><span>${esc(k[1])}</span></div>`).join('')}</div>
+      ${m.gunluk_gosterim?`<div class="mp-k2">${uIkon('diger',26)}<b>${esc(m.gunluk_gosterim)}</b></div>`:''}
+      <div class="mp-k2">${uIkon((alts[0]&&alts[0].product||{}).ikon,26)}<b>${units} Pozisyon</b></div>
       <div class="mp-bar-btn">
-        ${alts.length?`<a class="btn btn-outline" href="#mp-alanlar" onclick="mpScroll('mp-alanlar');return false;">Müsait alanları gör ↓</a>`:''}
-        <a class="btn btn-primary" href="#mp-teklif" onclick="mpScroll('mp-teklif');return false;">Teklif İste</a></div>
+        ${alts.length?`<a class="mp-lnk" onclick="mpScroll('mp-alanlar')">Müsait Alanları Gör ↓</a>`:''}
+        <a class="btn btn-primary btn-sm" onclick="mpTeklif()">Teklif İste</a></div>
     </div></div>`;
 
-  /* ② neden burası */
-  const adv=Array.isArray(m.avantajlar)?m.avantajlar.filter(a=>a&&(a.t||a.title)):[];
-  const advHTML = vis(m,'avantajlar',adv.length>0)
-    ? `<div class="hub-adv mp-adv">${adv.map(a=>`<div class="adv"><b>${esc(a.t||a.title)}</b>${(a.d||a.desc)?`<span>${esc(a.d||a.desc)}</span>`:''}</div>`).join('')}</div>` : '';
-  const fotolar=(Array.isArray(m.galeri)?m.galeri:[]).filter(Boolean);
-  const fotoHTML=fotolar.length?`<div class="mp-photos">${fotolar.map(u=>`<figure onclick="lightbox('${esc(u)}')"><img loading="lazy" src="${esc(u)}" alt=""></figure>`).join('')}</div>`:'';
-  const nedenIc=[introBlock(m,true),
-    m.intro_image?`<figure class="hub-introimg" onclick="lightbox('${esc(m.intro_image)}')">${picture(m.intro_image,null,'','Tanıtım görseli')}<span class="kroki-zoom">Büyütmek için tıklayın</span></figure>`:'',
-    advHTML, fotoHTML].join('');
-  const neden = nedenIc.trim() ? `<section class="mp-sec" id="mp-neden"><h2 class="mp-h2">Neden bu lokasyon?</h2>${nedenIc}</section>` : '';
-
-  /* ③ konum & yerleşim */
+  /* konum bilgisi: harita (+kroki geçişi) | künye kartı */
   const pts=[]; alts.forEach(a=>(a.units||[]).forEach(u=>{const la=parseFloat(u.lat),ln=parseFloat(u.lng);
-    if(isFinite(la)&&isFinite(ln))pts.push({lat:la,lng:ln,name:u.name||'',alt:a.id});}));
+    if(isFinite(la)&&isFinite(ln))pts.push({lat:la,lng:ln,name:u.name||'',konum:u.konum||'',alt:a.id,img:(a.image||m.image||''),urun:((a.product||{}).name||a.name)});}));
   const haritaVar = pts.length>0 && visMode(m,'maps')!=='off';
   const krokiVar = vis(m,'kroki',!!m.yerlesim_plani);
-  const lejant = alts.map((a,i)=>`<button class="kl-chip${String(a.id)===String(aktifAltId)?' on':''}" data-alt="${a.id}" style="--kc:${altRenk(i)}" onclick="mpTab('${a.id}')"><i></i>${esc((a.product||{}).name||a.name)}</button>`).join('');
-  const konum = (haritaVar||krokiVar) ? `<section class="mp-sec" id="mp-konum"><h2 class="mp-h2">Konum ve yerleşim</h2>
-    <div class="mp-loc${(haritaVar&&krokiVar)?'':' solo'}">
-      ${haritaVar?`<div class="mp-map"><div id="hubMap"></div><button class="hs-mapall" onclick="openMapPage()">Tüm lokasyonları haritada gör →</button></div>`:''}
-      ${krokiVar?`<div class="mp-kroki"><div class="kroki-box" onclick="lightbox('${esc(m.yerlesim_plani)}')">${picture(m.yerlesim_plani,m.kroki_mobil,'kroki-img','Yerleşim krokisi')}<span class="kroki-zoom">Büyütmek için tıklayın</span></div>
-        ${alts.length>1?`<div class="kl">${lejant}</div>`:''}
-        <p class="mp-not">Krokideki pozisyon numaraları, aşağıdaki rezervasyon tablosuyla aynıdır.</p></div>`:''}
-    </div></section>` : '';
+  const konumSol = (haritaVar||krokiVar) ? `<div class="mp-map-wrap">
+      ${(haritaVar&&krokiVar)?`<div class="mp-swi"><button class="on" onclick="mpGorunum('harita',this)">Harita</button><button onclick="mpGorunum('kroki',this)">Kroki</button></div>`:''}
+      ${haritaVar?`<div class="mp-map" id="mpHarita"><div id="hubMap"></div></div>`:''}
+      ${krokiVar?`<div class="mp-kroki" id="mpKroki" ${haritaVar?'style="display:none"':''}><div class="kroki-box" onclick="lightbox('${esc(m.yerlesim_plani)}')">${picture(m.yerlesim_plani,m.kroki_mobil,'kroki-img','Yerleşim krokisi')}<span class="kroki-zoom">Büyütmek için tıklayın</span></div></div>`:''}
+    </div>` : `<div class="mp-map-wrap mp-map-bos">${m.intro_image?`<img src="${esc(m.intro_image)}" alt="">`:'<span>Konum bilgisi yakında</span>'}</div>`;
+  const konum=`<section class="mp-sec" id="mp-konum"><h2 class="mp-h2">Konum Bilgisi</h2>
+    <div class="mp-konum">${konumSol}
+      <div class="mp-kunye"><h3>${esc(m.baslik||m.name)}</h3>
+        ${m.aciklama?`<p>${esc(m.aciklama)}</p>`:''}
+        ${(Array.isArray(m.avantajlar)?m.avantajlar.filter(a=>a&&(a.t||a.title)):[]).slice(0,4).map(a=>`<div class="mp-avm">${a.i?uIkon(a.i,16):'<i>✓</i>'}<span>${esc(a.t||a.title)}</span></div>`).join('')}
+      </div></div></section>`;
 
-  /* ④ reklam alanları (sekmeli) */
-  const tabs=alts.map((a,i)=>{ const p=a.product||{}; const n=(a.units||[]).length;
-    return `<button class="mp-tab${String(a.id)===String(aktifAltId)?' on':''}" data-alt="${a.id}" style="--kc:${altRenk(i)}" onclick="mpTab('${a.id}')">
-      <i></i><span>${esc(p.name||a.name)}</span><small>${n} pozisyon</small></button>`;}).join('');
-  const paneller=alts.map((a,i)=>{ const p=a.product||{};
+  /* reklam alanları: sekmeler + slider|metin */
+  const tabs=alts.map((a,i)=>`<button class="mp-tab${String(a.id)===String(aktifAltId)?' on':''}" data-alt="${a.id}" onclick="mpTab('${a.id}')">
+      <span>${esc((a.product||{}).name||a.name)}</span><small>${birimSay(a)} ${birimAdi(a)}</small></button>`).join('');
+  const paneller=alts.map(a=>{ const p=a.product||{};
+    const gal=(Array.isArray(a.galeri)?a.galeri:[]).filter(Boolean); if(!gal.length&&a.image)gal.push(a.image);
+    const slider=gal.length?`<div class="mp-sl" data-i="0" data-n="${gal.length}">
+        ${gal.map((u,i)=>`<img src="${esc(u)}" alt="" class="${i?'':'on'}" loading="lazy" onclick="lightbox('${esc(u)}')">`).join('')}
+        ${gal.length>1?`<button class="mp-sl-b l" onclick="mpSl(this,-1)">‹</button><button class="mp-sl-b r" onclick="mpSl(this,1)">›</button>`:''}
+      </div>`:`<div class="mp-sl bos">${uIkon(p.ikon,54)}</div>`;
     const prices=altPrices(a,p);
-    const capa=(showPrices()&&prices.length)?`<div class="mp-capa">Aylık <b>${money(prices.find(x=>/^1 Ay/i.test(x[0]))?prices.find(x=>/^1 Ay/i.test(x[0]))[1]:prices[0][1])}</b>'den başlayan fiyatlar</div>`:'';
-    const specRows=[['Ölçü',p.olcu],['Yüzey',p.yuzey],['Aydınlatma',p.isikli],['Baskı malzemesi',p.baski_malzemesi],['Baskı formatı',p.baski_format],['Yayın formatı',p.yayin_format]]
-      .filter(x=>x[1]&&x[1]!=='—').map(x=>`<div class="spec"><span class="k">${esc(x[0])}</span><span class="v">${esc(x[1])}</span></div>`).join('');
-    const fiyatAcc=!showPrices()?'':`<details class="acc"><summary>Tüm fiyatlar</summary><div>${prices.map(([k,v])=>`<div class="priceitem"><span class="muted">${esc(k)}</span><span class="amt">${money(v)}</span></div>`).join('')||'<p class="muted">—</p>'}<p class="muted" style="font-size:12px;margin-top:8px">Belediye vergi dahil, dijital baskı hariç · KDV hariç.</p></div></details>`;
-    const gal=(Array.isArray(a.galeri)?a.galeri:[]).filter(Boolean);
-    const galHTML=gal.length?`<div class="mp-photos sm">${gal.map(u=>`<figure onclick="lightbox('${esc(u)}')"><img loading="lazy" src="${esc(u)}" alt=""></figure>`).join('')}</div>`:'';
-    const foto=a.image||p.ikon||'';
+    const capa=(showPrices()&&prices.length)?`<div class="mp-capa">Aylık <b>${money((prices.find(x=>/^1 Ay/i.test(x[0]))||prices[0])[1])}</b>'den başlayan fiyatlar</div>`:'';
+    const spec=[['Ölçü',p.olcu],['Yüzey',p.yuzey],['Aydınlatma',p.isikli],['Baskı Malzemesi',p.baski_malzemesi],['Baskı Formatı',p.baski_format],['Yayın Formatı',p.yayin_format]]
+      .filter(x=>x[1]&&x[1]!=='—').map(x=>`<div class="mp-sp"><span>${esc(x[0])}</span><b>${esc(x[1])}</b></div>`).join('');
     return `<div class="mp-panel${String(a.id)===String(aktifAltId)?' on':''}" data-alt="${a.id}">
-      <div class="mp-prod">
-        ${foto?`<div class="mp-prod-img"><img src="${esc(foto)}" alt="${esc(p.name||a.name)}" onclick="lightbox('${esc(foto)}')"></div>`:''}
-        <div class="mp-prod-b">
-          <h3>${esc(p.name||a.name)}</h3>
-          ${a.aciklama?`<p>${esc(a.aciklama)}</p>`:''}
-          ${capa}
-          ${specRows?`<div class="mp-spec">${specRows}</div>`:''}
-          ${fiyatAcc}
-        </div></div>
-      ${galHTML}
-      ${rezTableHTML(a)}
-    </div>`;}).join('');
-  const alanlar = alts.length ? `<section class="mp-sec" id="mp-alanlar"><h2 class="mp-h2">Reklam alanları</h2>
-      <div class="mp-tabs">${tabs}</div>${paneller}</section>`
-    : `<section class="mp-sec" id="mp-alanlar"><p class="muted">Bu lokasyonda henüz alan tanımlı değil.</p></section>`;
+      <div class="mp-prod2">${slider}
+        <div class="mp-prod2-b"><h3>${esc(p.name||a.name)}</h3>
+          ${a.aciklama?`<p>${esc(a.aciklama)}</p>`:''}${capa}
+          <div class="mp-specs">${spec}</div></div></div></div>`;}).join('');
+  const alanlar = alts.length ? `<section class="mp-sec" id="mp-alanlar"><h2 class="mp-h2">Reklam Alanları</h2>
+      <div class="mp-tabs">${tabs}</div>${paneller}</section>` : '';
 
-  /* ⑤ teklif / iletişim */
+  /* rezervasyon tablosu (aktif sekmenin) */
+  const tablolar=alts.map(a=>`<div class="mp-tbl${String(a.id)===String(aktifAltId)?' on':''}" data-alt="${a.id}">${rezTableHTML(a)}</div>`).join('');
+  const tablo = alts.length ? `<section class="mp-sec" id="mp-tablo"><h2 class="mp-h2">Rezervasyon Tablosu</h2>${tablolar}
+      <div class="mp-sepet" id="mpSepet"></div></section>` : '';
+
+  /* aksiyon bandı */
   const katalogUrl=m.katalog||st.catalogPdf||'';
-  const teklif=`<section class="mp-sec" id="mp-teklif"><div class="mp-cta">
-      <div class="mp-cta-l"><h2 class="mp-h2" style="margin-top:0">Teklif alın</h2>
-        <p>Tabloda ayları seçip sepete ekleyin; teklif talebiniz anında bize düşer. Ya da doğrudan arayın.</p>
-        <div class="mp-cta-btn">
-          ${st.phone?`<a class="hs-btn" href="tel:${esc(String(st.phone).replace(/\s/g,''))}">${esc(st.phone)}</a>`:''}
-          ${st.social_whatsapp?`<a class="hs-btn wa" href="${esc(st.social_whatsapp)}" target="_blank" rel="noopener">WhatsApp</a>`:''}
-          ${katalogUrl?`<a class="hs-btn pdfk" href="${esc(katalogUrl)}" target="_blank" rel="noopener" download>PDF Katalog</a>`:''}
-        </div></div>
-      <div class="mp-cta-r"><div class="sepetbox"><h4>Sepet</h4><div id="sepetInner"></div></div></div>
-    </div></section>`;
+  const bandImg=m.intro_image||m.image||'';
+  const band=`<section class="mp-band" id="mp-teklif"><div class="mp-band-in">
+      ${bandImg?`<div class="mp-band-img"><img src="${esc(bandImg)}" alt=""></div>`:''}
+      <div class="mp-band-b">
+        <h2>${esc(m.name)} için teklif alın</h2>
+        <p>Tabloda ayları seçip teklif isteyin ya da bize bırakın, sizin için planlayalım.</p>
+        <div class="mp-band-btn">
+          <a class="btn btn-primary" onclick="mpTeklif()">Teklif Al</a>
+          ${st.social_whatsapp?`<a class="btn btn-wa" href="${esc(st.social_whatsapp)}" target="_blank" rel="noopener">WhatsApp</a>`:''}
+          ${katalogUrl?`<a class="btn btn-outline" href="${esc(katalogUrl)}" target="_blank" rel="noopener" download>PDF Katalog</a>`:''}
+          <a class="btn btn-outline" href="${BASE}medya-planlama" onclick="openPlan();return false;">Biz Planlayalım</a>
+        </div></div></div></section>`;
 
-  /* ⑥ diğer lokasyonlar */
+  /* diğer lokasyonlar */
   const digerler=D.mecralar.filter(x=>String(x.id)!==String(m.id));
-  const relCards=digerler.map(x=>`<div class="carslide">${gcard(`openMec('${x.id}')`,x.name,(x.gunluk_gosterim||((x.alts||[]).length+' reklam alanı')),x.image,x.theme_color,'Keşfet',x.image_mobil,BASE+'mecra/'+mSlug(x))}</div>`).join('');
-  const diger = digerler.length ? `<section class="mp-sec" id="mp-diger"><h2 class="mp-h2">Diğer lokasyonlar</h2>
+  const relCards=digerler.map(x=>{ const al=x.alts||[]; const poz=al.reduce((n,a)=>n+(a.units||[]).length,0);
+    const ozet=al.slice(0,2).map(a=>`${birimSay(a)} ${birimAdi(a)}`).join(' · ')||(poz+' pozisyon');
+    return `<div class="carslide"><a class="mp-dc" href="${BASE}mecra/${mSlug(x)}" onclick="openMec('${x.id}');return false;">
+      <span class="mp-dc-top">${esc(ozet)}</span>
+      ${x.image?`<img src="${esc(x.image)}" alt="" loading="lazy">`:''}
+      <span class="mp-dc-b"><small>${esc(x.badge||'')}</small><b>${esc(x.name)}</b><em>Keşfet</em></span></a></div>`;}).join('');
+  const diger = digerler.length ? `<section class="mp-sec" id="mp-diger"><h2 class="mp-h2">Diğer Mecralara Göz Atın</h2>
       <div class="carousel"><div class="cnav l" onclick="carScroll(-1)">‹</div><div class="cartrack" id="cartrack">${relCards}</div><div class="cnav r" onclick="carScroll(1)">›</div></div></section>` : '';
 
-  /* yapışkan çubuk */
   const sticky=`<div class="mp-sticky" id="mpSticky"><div class="mp-sticky-in">
       <b class="mp-sn">${esc(m.name)}</b>
-      <nav class="mp-anch">
-        ${neden?'<a onclick="mpScroll(\'mp-neden\')">Neden burası</a>':''}
-        ${konum?'<a onclick="mpScroll(\'mp-konum\')">Yerleşim</a>':''}
-        ${alts.length?'<a onclick="mpScroll(\'mp-alanlar\')">Alanlar</a>':''}
-        <a onclick="mpScroll('mp-teklif')">Teklif</a></nav>
+      <nav class="mp-anch"><a onclick="mpScroll('mp-konum')">Konum</a>${alts.length?'<a onclick="mpScroll(\'mp-alanlar\')">Alanlar</a><a onclick="mpScroll(\'mp-tablo\')">Rezervasyon</a>':''}</nav>
       <span class="mp-cart" id="mpCart"></span>
-      <a class="btn btn-primary btn-sm" onclick="mpScroll('mp-teklif')">Teklif İste</a>
-    </div></div>`;
+      <a class="btn btn-primary btn-sm" onclick="mpTeklif()">Teklif İste</a></div></div>`;
 
-  app().innerHTML=`${banner(m,(m.baslik||m.name),nav)}${heroBar}${sticky}
-    <div class="mp">${neden}${konum}${alanlar}${teklif}${diger}</div>`;
-  renderSepetInline(); mpCartSay();
+  app().innerHTML=`${banner(bobj,(m.baslik||m.name),nav)}${kunye}${sticky}
+    <div class="mp">${konum}${alanlar}${tablo}</div>${band}<div class="mp">${diger}</div>`;
+  mpSepetCiz(); mpCartSay();
   if(haritaVar) initHubMap(pts, m.theme_color||'#0071e3', true);
   mpStickyKur();
 }
+function mpGorunum(k,btn){ const h=document.getElementById('mpHarita'), kr=document.getElementById('mpKroki');
+  if(h)h.style.display=k==='harita'?'':'none'; if(kr)kr.style.display=k==='kroki'?'':'none';
+  document.querySelectorAll('.mp-swi button').forEach(b=>b.classList.toggle('on',b===btn));
+  if(k==='harita'&&hubMapObj)setTimeout(()=>hubMapObj.invalidateSize(),50); }
+function mpSl(btn,d){ const sl=btn.closest('.mp-sl'); const imgs=sl.querySelectorAll('img'); let i=+sl.dataset.i||0;
+  i=(i+d+imgs.length)%imgs.length; imgs.forEach((im,k)=>im.classList.toggle('on',k===i)); sl.dataset.i=i; }
+function mpTeklif(){ if(typeof cart!=='undefined'&&cart.length){ toggleCart(); } else { mpScroll('mp-tablo'); } }
+/* tablo altındaki mini sepet: yalnız dolu olunca görünür */
+function mpSepetCiz(){ const box=document.getElementById('mpSepet'); if(!box)return;
+  const n=(typeof cart!=='undefined'&&cart)?cart.length:0;
+  box.innerHTML=n?`<div class="mp-sepet-in"><b>${n} ay seçildi</b>${showPrices()?`<span>Tahmini ${money(cartTotal())}</span>`:''}
+    <button class="btn btn-primary btn-sm" onclick="toggleCart()">Sepeti Aç ve Teklif İste</button></div>`:''; }
+/* harita pini: görsel + başlık + tabloya git */
+function mpPinGit(altId){ mpTab(altId); setTimeout(()=>mpScroll('mp-tablo'),80); }
 function altRenk(i){ return ['#0e7c66','#2f6fe4','#c2410c','#7c3aed','#0891b2','#b91c1c'][i%6]; }
 function mpScroll(id){ const el=document.getElementById(id); if(!el)return;
   const y=el.getBoundingClientRect().top+window.scrollY-70; window.scrollTo({top:y,behavior:'smooth'}); }
 function mpTab(altId){
   view.tab=altId;
   document.querySelectorAll('.mp-tab,.kl-chip').forEach(b=>b.classList.toggle('on',String(b.dataset.alt)===String(altId)));
-  document.querySelectorAll('.mp-panel').forEach(p=>p.classList.toggle('on',String(p.dataset.alt)===String(altId)));
+  document.querySelectorAll('.mp-panel,.mp-tbl').forEach(p=>p.classList.toggle('on',String(p.dataset.alt)===String(altId)));
   const m=mec(view.id||view.mecId); const a=m&&(m.alts||[]).find(x=>String(x.id)===String(altId));
   if(m&&a){ try{ history.replaceState(null,'',BASE+'mecra/'+mSlug(m)+'/'+aSlug(a)); }catch(e){} }
   const sec=document.getElementById('mp-alanlar');
@@ -759,9 +769,12 @@ function initHubMap(pts,color,buyuk){
     if(hubMapObj){ try{hubMapObj.remove();}catch(e){} hubMapObj=null; }
     hubMapObj=L.map('hubMap',{scrollWheelZoom:false,zoomControl:!!buyuk,dragging:!!buyuk,attributionControl:false});
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:18}).addTo(hubMapObj);
-    const ms=pts.map(p=>L.marker([p.lat,p.lng],{icon:pinIcon(color)}));
+    const ms=pts.map(p=>{ const mk=L.marker([p.lat,p.lng],{icon:pinIcon(color)});
+      if(buyuk) mk.bindPopup(`<div class="mp-pop">${p.img?`<img src="${esc(p.img)}" alt="">`:''}<b>${esc(p.urun||'')} · ${esc(p.name)}</b>${p.konum?`<span>${esc(p.konum)}</span>`:''}
+        <button class="btn btn-primary btn-sm" onclick="mpPinGit('${p.alt}')">Müsaitliğe bak</button></div>`,{maxWidth:240});
+      return mk; });
     const grp=L.featureGroup(ms).addTo(hubMapObj);
-    try{ hubMapObj.fitBounds(grp.getBounds().pad(0.5),{maxZoom:15}); }
+    try{ hubMapObj.fitBounds(grp.getBounds().pad(buyuk?0.25:0.5),{maxZoom:buyuk?17:15}); }
     catch(e){ hubMapObj.setView([pts[0].lat,pts[0].lng],14); }
     setTimeout(()=>hubMapObj.invalidateSize(),160);
   },60);
@@ -836,7 +849,7 @@ function updateCell(uid,ym){ const el=document.querySelector(`.rcell[data-u='${u
   el.classList.remove('sel','bos'); el.classList.add(sel?'sel':'bos');
   if(el.title) el.title=el.title.replace(/—.*$/, '— '+(sel?'Sepette':'Müsait')); }
 
-function renderSepetInline(){ if(typeof mpCartSay==='function')mpCartSay(); const box=document.getElementById('sepetInner'); if(!box)return;
+function renderSepetInline(){ if(typeof mpCartSay==='function')mpCartSay(); if(typeof mpSepetCiz==='function')mpSepetCiz(); const box=document.getElementById('sepetInner'); if(!box)return;
   if(!cart.length){ box.innerHTML='<div class="empty2">Sepetiniz boş. Tablodan müsait ay seçtikçe burada güncellenir.</div>'; return; }
   box.innerHTML=cart.map((c,i)=>`<div class="si-item"><div><b>${esc(c.mecra)}</b><br><span class="muted" style="font-size:12.5px">${esc(c.product)}${c.unit?' › '+esc(c.unit):''} · ${esc(c.monthLabel)}</span></div><div style="text-align:right;white-space:nowrap">${showPrices()?c.priceLabel+'<br>':''}<span class="x" onclick="removeItem(${i})">kaldır ×</span></div></div>`).join('')
     +`${showPrices()?`<div class="tot"><span>Toplam</span><span>${money(cartTotal())}</span></div>`:'<div style="height:10px"></div>'}<button class="btn btn-primary" style="width:100%" onclick="toggleCart()">Teklif Al</button>`; }
@@ -1398,11 +1411,20 @@ function renderFooter(){ const s=D.settings||{};
       <div><h5>MECRALARIMIZ</h5><div class="meccols">${mecLinks}</div></div>`;
   }
   const iletisim=(cfg&&cfg.hideContact)?'':`<div><h5>İLETİŞİM</h5><div class="il"><b>Adres:</b> ${esc(s.address||'')}<br><br><b>Telefon:</b> ${esc(s.phone||'')}<br><br><b>E-Posta:</b> ${esc(s.email||'')}<br><br>${esc(s.socials||'')}</div></div>`;
-  const bulten=(cfg&&cfg.hideNews)?'':`<div class="news"><h5 style="text-align:center">${esc(s.footer_news||"Kampanya ve yeniliklerden haberdar olmak için;")}</h5><input class="inp" placeholder="E-Posta"><button class="abone" onclick="alert('Teşekkürler! Kaydınız alındı.')">Abone Ol</button></div>`;
+  const bulten=(cfg&&cfg.hideNews)?'':`<div class="news"><h5 style="text-align:center">${esc(s.footer_news||"Kampanya ve yeniliklerden haberdar olmak için;")}</h5><input class="inp" id="nlMail" type="email" placeholder="E-Posta" onkeydown="if(event.key==='Enter')aboneOl()"><button class="abone" onclick="aboneOl()">Abone Ol</button><div id="nlMsg" class="nl-msg"></div></div>`;
   document.getElementById('foot').innerHTML=`<div class="ftr"><div class="ftr-in">
     <div><div class="brand">${logo(s.logoText)}</div><p style="font-size:13px;color:#8a8a90;max-width:26ch">${esc(s.footer_about||"Adana açık hava reklam çözümleri.")}</p></div>
     ${cols}${iletisim}${bulten}
   </div><div class="ftr-bottom"><div class="inner">${esc(s.footer_note||"Tüm hakları saklıdır. Polat Medya Tanıtım Paz. Org. San. ve Tic. Ltd. Şti.")}</div></div></div>`;
+}
+
+async function aboneOl(){
+  const e=(document.getElementById('nlMail')||{}).value||''; const msg=document.getElementById('nlMsg');
+  if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e.trim())){ if(msg){msg.textContent='Geçerli bir e-posta girin.';msg.className='nl-msg err';} return; }
+  const {error}=await sb.from('aboneler').insert({eposta:e.trim().toLowerCase(),kaynak:'footer'});
+  if(msg){ if(error&&/duplicate|unique/i.test(error.message||'')){ msg.textContent='Bu adres zaten kayıtlı.'; msg.className='nl-msg ok'; }
+    else if(error){ msg.textContent='Kaydedilemedi, lütfen tekrar deneyin.'; msg.className='nl-msg err'; }
+    else { msg.textContent='Teşekkürler! Kampanyalardan haberdar olacaksınız.'; msg.className='nl-msg ok'; document.getElementById('nlMail').value=''; } }
 }
 
 /* ---- Google Analytics (GA4) ---- */

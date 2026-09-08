@@ -331,8 +331,11 @@ async function api(action, body){
     case 'job_save': {
       try{ const r=await saveRow('jobs',body); logYaz(act,body); return ok(r); }
       catch(e){
-        if(body && body.assignee_id!==undefined && /assignee_id/.test(String(e.message||''))){
-          const b={...body}; delete b.assignee_id;
+        /* Uyumluluk: eski kolonlar yoksa onları düşürüp tekrar dene.
+           `pazarlama` canonical bir Work phase DEĞİLDİR (D-206), bu yüzden
+           asla legacy bir status'e geri düşürmeyiz. */
+        if(body && /assignee_id|durum/.test(String(e.message||''))){
+          const b={...body}; delete b.assignee_id; delete b.durum;
           const r=await saveRow('jobs',b); logYaz(act,b);
           toast('İş kaydedildi; atama için veritabanı güncellemesi gerekli (talimat dosyasındaki SQL).');
           return ok(r);
@@ -640,14 +643,16 @@ const NAVG=[
    ['teklifler','Teklifler','quotes'],
    ['talepler','Planlama Talepleri','notes'],
    ['kurumlar','Kurumlar','customers'],
-   ['musteriler','Müşteriler','customers']]],
+   ['musteriler','Müşteriler','customers'],
+   ['aboneler','Bülten Aboneleri','customers']]],
  ['Operasyon','jobs',[
    ['is-takibi','İş Takibi','jobs'],
    ['operasyon','Baskı & Montaj','truck'],
    ['tedarikciler','Tedarikçiler','truck']]],
  ['Site İçeriği','home',[
    ['anasayfa','Anasayfa','home'],
-   ['sayfalar','Sayfalar','pages']]],
+   ['sayfalar','Sayfalar','pages'],
+   ['ikonlar','İkonlar','media']]],
  ['Yönetim','settings',[
    ['ekip','Ekip','team'],
    ['notlar','Notlar','notes'],
@@ -665,6 +670,18 @@ function navGrupTogle(ad){
   try{ localStorage.setItem('mp_nav_acik',JSON.stringify([...set])); }catch(e){}
   navCiz();
 }
+const GIZLI_GRUP=['Site İçeriği','Yönetim'];       /* üye seviyesinin görmediği gruplar */
+/* TEK yetkilendirme otoritesi: team.app_role (D-203).
+   Upstream'in `team.seviye` alanı legacy/uyumluluk verisi olarak kalır
+   fakat yetki kaynağı DEĞİLDİR. Nihai zorlama her durumda RLS'tedir;
+   buradaki kontroller yalnız arayüzü tutarlı tutar (08 §9). */
+function yoneticiMi(){ return isAdmin(); }
+function navGorunur(){
+  if(yoneticiMi()) return NAVG;
+  const g=NAVG.filter(g=>!GIZLI_GRUP.includes(g[0])).map(g=>[g[0],g[1],g[2].slice()]);
+  g[0][2].push(['ekip','Profilim','team']);   /* üye kendi profilini görebilsin */
+  return g;
+}
 function navCiz(){
   const box=document.getElementById('navScroll'); if(!box)return;
   /* Workspace yüzeyi düz ve kısa: dört birincil kavram (07 §2.1). */
@@ -675,7 +692,7 @@ function navCiz(){
     return;
   }
   const acik=navAcikGruplar();
-  box.innerHTML=NAVG.map(g=>{
+  box.innerHTML=navGorunur().map(g=>{
     const ac=acik.has(g[0]);
     const items=g[2].map(n=>`<button class="navi${ui.section===n[0]?' on':''}" data-s="${n[0]}" onclick="go('${n[0]}')">
       ${ic(n[2],17)}<span>${esc(n[1])}</span>${n[0]==='teklifler'?'<i class="nav-badge" id="qBadge"></i>':''}${n[0]==='talepler'?'<i class="nav-badge" id="lBadge"></i>':''}</button>`).join('');
@@ -687,7 +704,7 @@ function navCiz(){
       <div class="nav-gb">${items}</div></div>`;
   }).join('');
 }
-const TITLES={dashboard:'Dashboard',kurumlar:'Kurumlar',operasyon:'Baskı & Montaj','workspace-home':'Ana Sayfa','ws-mecralar':'Mecralar',anasayfa:'Anasayfa Karşılama','is-takibi':'İş Takibi',urunler:'Ürünler',mecralar:'Mecralar',harita:'Harita',listeler:'Doluluk',musteriler:'Müşteriler',tedarikciler:'Tedarikçiler',raporlar:'Raporlar',teklifler:'Teklifler',talepler:'Medya Planlama Talepleri',ekip:'Ekip',sayfalar:'Sayfalar',notlar:'Notlar',ayarlar:'Ayarlar'};
+const TITLES={dashboard:'Dashboard',kurumlar:'Kurumlar',operasyon:'Baskı & Montaj','workspace-home':'Ana Sayfa','ws-mecralar':'Mecralar',anasayfa:'Anasayfa Karşılama','is-takibi':'İş Takibi',urunler:'Ürünler',mecralar:'Mecralar',harita:'Harita',listeler:'Doluluk',musteriler:'Müşteriler',tedarikciler:'Tedarikçiler',raporlar:'Raporlar',teklifler:'Teklifler',talepler:'Medya Planlama Talepleri',ekip:'Ekip',sayfalar:'Sayfalar',ikonlar:'İkon Kütüphanesi',aboneler:'Bülten Aboneleri',notlar:'Notlar',ayarlar:'Ayarlar'};
 function userChip(){
   const me=ui._me||{}; const ad=me.name||(ui._email||'').split('@')[0]||'Kullanıcı';
   /* Mevcut serbest metin unvan korunur; yoksa canonical app_role etiketi (D-203). */
@@ -759,7 +776,8 @@ async function go(s){ if(typeof dirtyGuard==='function' && !(await dirtyGuard())
 async function renderSection(){
   const c=document.getElementById('content'); c.innerHTML='<p class="muted">Yükleniyor…</p>';
   const F={dashboard,'is-takibi':isTakibi,urunler,mecralar,listeler,musteriler,kurumlar,teklifler,ekip,
-           sayfalar,notlar,anasayfa:anasayfaBolum,tedarikciler,raporlar,harita,ayarlar,talepler,operasyon,'workspace-home':workspaceHome,'ws-mecralar':wsMecralar};
+           sayfalar,notlar,anasayfa:anasayfaBolum,tedarikciler,raporlar,harita,ayarlar,talepler,
+           ikonlar,aboneler,operasyon,'workspace-home':workspaceHome,'ws-mecralar':wsMecralar};
   try{
     const fn=F[ui.section]; if(!fn)return;
     await fn(c);
@@ -920,8 +938,8 @@ function chartArea(rows,opt){
     <div class="ac-plot" style="height:${H}px">
       <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" width="100%" height="${H}">
         <defs><linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="var(--c-brand)" stop-opacity=".38"/>
-          <stop offset="100%" stop-color="var(--c-brand)" stop-opacity=".02"/></linearGradient></defs>
+          <stop offset="0%" stop-color="var(--c-green)" stop-opacity=".34"/>
+          <stop offset="100%" stop-color="var(--c-green)" stop-opacity=".02"/></linearGradient></defs>
         <path d="${fill}" fill="url(#${gid})"/><path d="${d}" class="ag-line"/></svg>
       <span class="ac-max">${max}</span>
       ${noktalar}
@@ -931,6 +949,73 @@ function chartArea(rows,opt){
 
 /* ---- İş akışı listesi: solda firma, sağda soldan sağa aşamalar ---- */
 const JOB_STEPS=[['temas_takip','Temas / Takip'],['teklif','Teklif'],['baski','Baskı'],['montaj','Montaj'],['yayinda_aktif','Yayında']];
+/* ================= BİLDİRİMLER: rezervasyon bitişi (7 gün) ================= */
+const AY_KISA=['Oca','Şub','Mar','Nis','May','Haz','Tem','Ağu','Eyl','Eki','Kas','Ara'];
+function bildirimAlicilar(){
+  /* Alıcılar canonical role'den belirlenir; `unvan`/`role` yalnız
+     tamamlayıcı bir ipucudur (S02_001 ile aynı ruhta: serbest metin
+     yetki kaynağı değildir). */
+  return [...new Set((ui._team||[]).filter(x=>x.eposta&&x.active!==false&&(x.app_role==='admin'||/sat[ıi]ş|pazarlama/i.test(x.unvan||x.role||'')))
+    .map(x=>String(x.eposta).trim()))];
+}
+async function bildirimKontrol(){
+  try{
+    const bugun=new Date(); bugun.setHours(0,0,0,0);
+    const yakin=new Date(bugun.getTime()+7*864e5);
+    const ayKey=d=>d.getFullYear()+'-'+pad(d.getMonth()+1);
+    const aylar=[...new Set([ayKey(bugun),ayKey(yakin)])];
+    const br=await sb.from('bookings').select('unit_id,ym,status,customer_id').in('ym',aylar);
+    if(br.error||!br.data||!br.data.length) return;
+    /* ay sonu önümüzdeki 7 gün içinde olanlar */
+    const adaylar=br.data.filter(b=>{ const [y,m]=b.ym.split('-').map(Number); const son=new Date(y,m,0); return son>=bugun&&son<=yakin; });
+    if(!adaylar.length) return;
+    /* sonraki ay aynı müşteriyle devam ediyorsa "bitiş" değil */
+    const sonraki=b=>{ const [y,m]=b.ym.split('-').map(Number); return ayKey(new Date(y,m,1)); };
+    const nr=await sb.from('bookings').select('unit_id,ym,customer_id').in('ym',[...new Set(adaylar.map(sonraki))]);
+    const devam=new Set((nr.data||[]).map(n=>n.unit_id+':'+n.ym+':'+n.customer_id));
+    const bitenler=adaylar.filter(b=>!devam.has(b.unit_id+':'+sonraki(b)+':'+b.customer_id));
+    if(!bitenler.length) return;
+    const [ur,mr,cr]=await Promise.all([
+      sb.from('units').select('id,name,mecra_id').in('id',[...new Set(bitenler.map(b=>b.unit_id))]),
+      sb.from('mecralar').select('id,name'),
+      sb.from('customers').select('id,firma').in('id',[...new Set(bitenler.map(b=>b.customer_id).filter(x=>x!=null))])]);
+    const um=Object.fromEntries((ur.data||[]).map(u=>[u.id,u])), mm=Object.fromEntries((mr.data||[]).map(m=>[m.id,m.name]));
+    const cm=Object.fromEntries((cr.data||[]).map(c=>[c.id,c.firma||'']));   /* ilgili_kisi bir kişi değildir (S02_001) */
+    const rows=bitenler.map(b=>{ const u=um[b.unit_id]||{}; const [y,m]=b.ym.split('-').map(Number);
+      return {tur:'rezervasyon_bitis',anahtar:'rezbitis:'+b.unit_id+':'+b.ym,
+        baslik:`${mm[u.mecra_id]||''} · ${u.name||'#'+b.unit_id} — ${AY_KISA[m-1]} ${y} sonunda bitiyor`,
+        detay:`${cm[b.customer_id]||'Müşteri atanmamış'} · ${b.status==='dolu'?'Dolu':'Rezerve'}`}; });
+    await sb.from('bildirimler').upsert(rows,{onConflict:'anahtar',ignoreDuplicates:true});
+    /* e-posta: gönderilmemişleri tek özet mesajla alıcılara yolla */
+    const gr=await sb.from('bildirimler').select('id,baslik,detay').eq('tur','rezervasyon_bitis').eq('eposta_gonderildi',false);
+    const bekleyen=gr.data||[]; const alici=bildirimAlicilar();
+    if(bekleyen.length && alici.length){
+      const metin=bekleyen.map(x=>'• '+x.baslik+' ('+x.detay+')').join('\n');
+      let tamam=true;
+      for(const a of alici){
+        try{ const r=await fetch('https://formsubmit.co/ajax/'+encodeURIComponent(a),{method:'POST',
+          headers:{'Content-Type':'application/json','Accept':'application/json'},
+          body:JSON.stringify({_subject:'Medyapark — '+bekleyen.length+' rezervasyon 7 gün içinde bitiyor',
+            'Bitiş yaklaşan rezervasyonlar':metin,'Panel':location.origin+location.pathname})});
+          if(!r.ok) tamam=false; }catch(e){ tamam=false; }
+      }
+      if(tamam) await sb.from('bildirimler').update({eposta_gonderildi:true}).in('id',bekleyen.map(x=>x.id));
+    }
+  }catch(e){ console.warn('bildirimKontrol',e); }
+}
+async function bildirimCiz(){
+  const box=document.getElementById('bildirimBox'), say=document.getElementById('bldSay'); if(!box)return;
+  const r=await sb.from('bildirimler').select('*').eq('okundu',false).order('created_at',{ascending:false}).limit(20);
+  const list=r.data||[];
+  if(say) say.textContent=list.length?list.length+' yeni':'';
+  box.innerHTML=list.length?list.map(b=>`<div class="bld">
+      <span class="bld-i">${ic('lists',15)}</span>
+      <div class="bld-b" onclick="go('listeler')"><div class="bld-t">${esc(b.baslik)}</div><div class="bld-d">${esc(b.detay||'')}${b.eposta_gonderildi?' · <i>e-posta gitti</i>':''}</div></div>
+      <button class="bld-x" title="Okundu" onclick="bildirimOkundu(${b.id})">✓</button></div>`).join('')
+    :'<p class="empty" style="margin:0">Yeni bildirim yok. Bitişine 7 gün kalan rezervasyonlar burada görünür.</p>';
+}
+async function bildirimOkundu(id){ await sb.from('bildirimler').update({okundu:true}).eq('id',id); bildirimCiz(); }
+
 /* Dashboard mini iş panosu: 4 aşama sütunu + atanan rozetleri */
 function jobsBoard(jobs){
   const AS=[['temas_takip','Temas','violet'],['teklif','Teklif','amber'],['baski','Baskı','cyan'],['montaj','Montaj','green'],['yayinda_aktif','Yayında','slate']];
@@ -980,10 +1065,12 @@ function calWidget(events){
   const gun=new Date(y,m+1,0).getDate();
   const bugun=new Date(); const bugunMu=d=>bugun.getFullYear()===y&&bugun.getMonth()===m&&bugun.getDate()===d;
   const isMap={}; (events||[]).forEach(e=>{ const dt=new Date(e.d);
-    if(dt.getFullYear()===y&&dt.getMonth()===m) (isMap[dt.getDate()]=isMap[dt.getDate()]||[]).push(e.t); });
+    if(dt.getFullYear()===y&&dt.getMonth()===m) (isMap[dt.getDate()]=isMap[dt.getDate()]||[]).push(e); });
   let hc=''; for(let i=0;i<kaydir;i++) hc+='<span></span>';
   for(let d=1;d<=gun;d++){ const ev=isMap[d];
-    hc+=`<span class="cd${ev?' has':''}${bugunMu(d)?' today':''}"${ev?` title="${esc(ev.slice(0,3).join(' · '))}"`:''}>${d}</span>`; }
+    const nk=ev?`<i class="cdots">${ev.slice(0,3).map(e=>`<u class="cdot ${esc(e.s||'')}"></u>`).join('')}${ev.length>3?'<u class="cdot more"></u>':''}</i>`:'';
+    const ym=y+'-'+pad(m+1)+'-'+pad(d);
+    hc+=`<span class="cd${ev?' has':''}${bugunMu(d)?' today':''}"${ev?` onclick="calGun('${ym}')" title="${esc(ev.map(e=>e.t).slice(0,3).join(' · '))}${ev.length>3?' +'+(ev.length-3):''}"`:''}>${d}${nk}</span>`; }
   return `<div class="calw">
     <div class="calh"><b>${AY[m]} ${y}</b>
       <span class="calnav"><button onclick="calNav(-1)">‹</button><button onclick="calNav(1)">›</button></span></div>
@@ -992,11 +1079,28 @@ function calWidget(events){
 }
 function calNav(d){ calOffset+=d; const el=document.getElementById('calBox');
   if(el) el.innerHTML=calWidget(ui._dashEvents||[]); }
+/* Takvimde bir güne tıklandı: o günün işlerini göster, oradan İş Takibi'ne geç */
+function calGun(gun){
+  const ev=(ui._dashEvents||[]).filter(e=>String(e.d).slice(0,10)===gun);
+  if(!ev.length)return;
+  const JL=JOBLBL;   /* canonical faz etiketleri (D-206) */
+  const [yy,mm,dd]=gun.split('-');
+  modal(`<h3 style="margin:0 0 4px">${dd}.${mm}.${yy}</h3>
+    <p class="muted" style="font-size:12.5px;margin:0 0 14px">${ev.length} iş başlıyor</p>
+    <div class="cal-list">${ev.map(e=>`<button class="cal-i" onclick="closeModal();go('is-takibi')">
+      <span class="cdot ${esc(e.s||'')}"></span>
+      <span class="cal-t">${esc(e.t)}</span>
+      <span class="cal-s">${esc(JL[e.s]||e.s||'')}</span></button>`).join('')}</div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+      <button class="btn btn-ghost btn-sm" onclick="closeModal()">Kapat</button>
+      <button class="btn btn-primary btn-sm" onclick="closeModal();go('is-takibi')">İş Takibine Git</button></div>`);
+}
 
 /* ---------- DASHBOARD ---------- */
 async function dashboard(c){
   const s=await api('dashboard_stats');
   ui._dashEvents=s.takvim||[];
+  setTimeout(()=>bildirimKontrol().then(bildirimCiz),50);
   const AY=['Oca','Şub','Mar','Nis','May','Haz','Tem','Ağu','Eyl','Eki','Kas','Ara'];
   const QL={yeni:'Yeni',gorusuldu:'Görüşüldü',onaylandi:'Onaylandı',iptal:'İptal'};
   const JL=JOBLBL;
@@ -1039,20 +1143,23 @@ async function dashboard(c){
       <section class="card">
         <div class="card-h"><h3>İş Takibi</h3>
           <div style="display:flex;gap:8px;align-items:center">
-            <button class="btn btn-outline btn-sm" onclick="go('is-takibi').then(()=>setTimeout(()=>jobForm(),200))">+ Yeni İş</button>
+            <button class="btn btn-yes btn-sm" onclick="go('is-takibi').then(()=>setTimeout(()=>jobForm(),200))">+ Yeni İş</button>
             <button class="btn-link" onclick="go('is-takibi')">Tümü</button></div></div>
         <div class="card-b">${jobsBoard(s.jobList||[])}</div>
+      </section>
+
+      <section class="card">
+        <div class="card-h"><h3>Son Teklifler</h3><button class="btn-link" onclick="go('teklifler')">Tümü</button></div>
+        ${rq?`<table class="tbl rowlink"><thead><tr><th>#</th><th>Müşteri</th><th>Durum</th><th>Tarih</th></tr></thead><tbody>${rq}</tbody></table>`:'<div class="card-b"><p class="empty">Henüz teklif yok.</p></div>'}
       </section>
       <section class="card">
         <div class="card-h" style="cursor:pointer" onclick="go('listeler')" title="Doluluk bölümüne git"><h3>Doluluk Trendi</h3><span class="chip mono">${esc(araligi)}</span></div>
         <div class="card-b">${area}</div>
       </section>
-      <section class="card">
-        <div class="card-h"><h3>Son Teklifler</h3><button class="btn-link" onclick="go('teklifler')">Tümü</button></div>
-        ${rq?`<table class="tbl rowlink"><thead><tr><th>#</th><th>Müşteri</th><th>Durum</th><th>Tarih</th></tr></thead><tbody>${rq}</tbody></table>`:'<div class="card-b"><p class="empty">Henüz teklif yok.</p></div>'}
-      </section>
     </div>
     <div class="dash-r">
+      <section class="card"><div class="card-h"><h3>Bildirimler</h3><span class="chip" id="bldSay">…</span></div>
+        <div class="card-b" id="bildirimBox"><p class="muted" style="font-size:12.5px;margin:0">Rezervasyonlar kontrol ediliyor…</p></div></section>
       <section class="card"><div class="card-b" id="calBox">${calWidget(ui._dashEvents)}</div></section>
       <section class="card">
         <div class="card-h"><h3>Son Notlar</h3><button class="btn-link" onclick="go('notlar')">Tümü</button></div>
@@ -1121,6 +1228,7 @@ async function isTakibi(c){
       <div class="kc-a" onclick="event.stopPropagation()">
         ${idx>0?`<button title="Geri al: ${esc(JOBST[idx-1][1])}" onclick="jobMove(${j.id},'${JOBST[idx-1][0]}')">${ic('left',15)}</button>`:'<span></span>'}
         ${idx<JOBST.length-1?`<button title="İlerlet: ${esc(JOBST[idx+1][1])}" onclick="jobMove(${j.id},'${JOBST[idx+1][0]}')">${ic('right',15)}</button>`:'<span></span>'}
+        <button title="Güncelleme ekle" onclick="entryForm(0,${j.id},false)">${ic('notes',15)}</button>
         <button title="Aç" onclick="workAc(${j.id})">${ic('pages',15)}</button>
         ${isAdmin()?`<button class="del" title="Sil" onclick="jobDelete(${j.id})">${ic('trash',15)}</button>`:'<span></span>'}
       </div></article>`;}).join('');
@@ -1974,7 +2082,7 @@ function prodEdit(id){ const p=(ui._products||[]).find(x=>x.id===id)||{prices:{}
     <div class="field"><label class="flabel">Aydınlatma</label><input class="inp" id="pisikli" value="${esc(p.isikli)}"></div>
     <div class="field"><label class="flabel">Baskı Malzemesi</label><input class="inp" id="pbm" value="${esc(p.baski_malzemesi)}"></div></div>
     <div class="field"><label class="flabel">İkon (filtre düğmelerinde görünür)</label>
-      <select class="inp" id="pikon" style="max-width:280px">${URUN_IKONLAR.map(x=>`<option value="${x[0]}" ${(p.ikon||'diger')===x[0]?'selected':''}>${x[1]}</option>`).join('')}</select></div>
+      ${ikonSecici('pikon',p.ikon)}</div>
     <div class="field"><label class="flabel">Arama etiketleri</label>
       <input class="inp" id="petiket" value="${esc(p.etiketler)}" placeholder="billboard, bilbord, dev pano">
       <p class="muted" style="font-size:11.5px;margin:5px 0 0">Müşterinin arama kutusuna yazabileceği diğer isimler. Virgülle ayırın; sitede görünmez, yalnızca aramada kullanılır.</p></div>
@@ -2649,7 +2757,7 @@ async function mecEdit(id){ if(ui._dirty && !(await dirtyGuard())) return;
     ${imgField('mimage', m.image, 'Kart görseli (yükle veya URL)', 'https://...')}
     ${imgField('mkapak', m.kapak, 'Kapak görseli (1920×400 — mecra sayfası üstü)', 'https://...')}
     <div class="row2"><div class="field"><label class="flabel">Kapak kaplama rengi</label><input type="color" id="mkcolor" value="${esc(m.kapak_color||'#101014')}"></div><div class="field"><label class="flabel">Kapak opasite (0–1)</label><input class="inp" type="number" min="0" max="1" step="0.05" id="mkop" value="${m.kapak_opacity!=null?m.kapak_opacity:0.4}"></div></div>
-    <div class="field"><label class="flabel">Kapak yüksekliği (px)</label><input class="inp" type="number" id="mkh" value="${m.kapak_height!=null?m.kapak_height:600}"></div>
+    <div class="field"><label class="flabel">Kapak yüksekliği (px)</label><input class="inp" type="number" id="mkh" value="${m.kapak_height!=null?m.kapak_height:350}" placeholder="350"></div>
     ${imgField('mkapakm', m.kapak_mobil, 'Kapak görseli — MOBİL sürüm (opsiyonel, 760px altı)', 'boş = masaüstü görseli kullanılır')}
     ${imgField('mimagem', m.image_mobil, 'Kart görseli — MOBİL sürüm (opsiyonel)', 'boş = masaüstü görseli kullanılır')}
     ${visSel('m',m,'kapak','Kapak görünürlüğü')}
@@ -2673,9 +2781,11 @@ async function mecEdit(id){ if(ui._dirty && !(await dirtyGuard())) return;
         <button class="btn btn-outline btn-sm" style="flex:0 0 auto" onclick="pickUpload('application/pdf',u=>{document.getElementById('mkatalog').value=u;})">Yükle</button></div></div></div>
     <div class="fld-box"><label class="flabel" style="font-weight:700">Avantajlar (mecra sayfasında kutucuklar)</label>
       ${[0,1,2,3].map(i=>{const a=(Array.isArray(m.avantajlar)?m.avantajlar:[])[i]||{};
-        return `<div class="row2" style="margin-bottom:8px">
+        return `<div class="row3av" style="margin-bottom:8px">
+          ${ikonSecici('mav_i'+i,a.i||'',' av-ic')}
           <input class="inp" id="mav_t${i}" value="${esc(a.t||a.title||'')}" placeholder="Başlık ${i+1}">
           <input class="inp" id="mav_d${i}" value="${esc(a.d||a.desc||'')}" placeholder="Kısa açıklama"></div>`;}).join('')}
+      <p class="muted" style="font-size:11.5px;margin:2px 0 0">Soldaki seçici avantajın ikonu; kendi SVG'lerinizi <b>Site İçeriği › İkonlar</b>'dan yükleyin.</p>
       ${visSel('m',m,'avantajlar','Avantajlar')}</div>
     </div>
 
@@ -2746,7 +2856,7 @@ function mecTabSay(){
 async function mecSave(){ const id=+gv('mid');
   const prev=((ui._mecralar||[]).find(x=>x.id===id)||{}).visible||{};
   const visible=collectVis('m',['kapak','aciklama','kroki','avantajlar','logo','gosterim','maps'],prev);
-  const avantajlar=[]; for(let i=0;i<4;i++){ const t=(gv('mav_t'+i)||'').trim(), d=(gv('mav_d'+i)||'').trim(); if(t||d)avantajlar.push({t,d}); }
+  const avantajlar=[]; for(let i=0;i<4;i++){ const t=(gv('mav_t'+i)||'').trim(), d=(gv('mav_d'+i)||'').trim(), ik=(gv('mav_i'+i)||'').trim(); if(t||d)avantajlar.push({t,d,i:(ik&&ik!=='diger')?ik:''}); }
   const r=await guard(()=>api('mecra_save',{id,name:gv('mname'),theme_color:gv('mcolor'),badge:gv('mbadge'),
     hidden:!(document.getElementById('mpub')||{checked:true}).checked,
     intro_image:gv('mintroimg'),katalog:gv('mkatalog'),
@@ -4104,20 +4214,137 @@ async function quoteDel(id){ if(await mpConfirm('Teklif ve kalemleri silinsin mi
 /* ---------- EKİP ---------- */
 async function ekip(c){
   const list=await api('team_list'); ui._team=list;
-  const rows=list.map(x=>`<div class="list-item"><div class="nm">${esc(x.name)}</div><div class="meta">${esc(x.role||'')} · ${esc(x.yetki||'')}</div>
-    <button class="btn btn-outline btn-sm" onclick="teamForm(${x.id})">Düzenle</button><button class="btn btn-danger btn-sm" onclick="teamDel(${x.id})">Sil</button></div>`).join('');
-  c.innerHTML=`<div class="sec-head"><h3>Ekip</h3><button class="btn btn-primary btn-sm" onclick="teamForm(0)">+ Kişi</button></div>${rows||'<p class="muted">Kişi yok.</p>'}`;
+  if(!yoneticiMi() && ui._me) ui._teamOpen=ui._me.id;
+  if(ui._teamOpen){ const t=list.find(x=>x.id===ui._teamOpen); if(t){ return teamProfil(c,t); } ui._teamOpen=null; }
+  const rows=list.map(x=>`<div class="tm-card" onclick="ui._teamOpen=${x.id};renderSection()">
+    ${teamAvatar(x,44)}
+    <div class="tm-b"><div class="tm-n">${esc(x.name)}${x.app_role==='admin'?'<span class="pill pil-on">yönetici</span>':''}</div>
+      <div class="tm-r">${esc(x.unvan||x.role||'')}</div>
+      <div class="tm-m">${esc(x.eposta||'e-posta yok')}${x.telefon?' · '+esc(x.telefon):''}</div></div>
+    <span class="tm-go">›</span></div>`).join('');
+  const epostasiz=list.filter(x=>!x.eposta).length;
+  c.innerHTML=`<div class="sec-head"><div><h3>Ekip</h3><p class="sub">${list.length} üye · profile girmek için karta tıklayın</p></div>
+      <button class="btn btn-primary btn-sm" onclick="teamForm(0)">+ Kişi</button></div>
+    ${epostasiz?`<div class="banner">${epostasiz} üyenin e-posta adresi yok. Yetki sınırlaması ve bildirim e-postaları, panele giriş yapılan adresle eşleştiği için çalışmaz — profilden e-posta ekleyin.</div>`:''}
+    <div class="tm-grid">${rows||'<p class="muted">Kişi yok.</p>'}</div>`;
+}
+function teamAvatar(x,sz){
+  sz=sz||40;
+  const bas=String(x.name||'?').trim().split(/\s+/).map(w=>w[0]).slice(0,2).join('').toLocaleUpperCase('tr');
+  return x.photo? `<img class="tm-av" src="${esc(x.photo)}" alt="" style="width:${sz}px;height:${sz}px">`
+    : `<span class="tm-av tm-av-t" style="width:${sz}px;height:${sz}px;font-size:${Math.round(sz/2.6)}px">${esc(bas)}</span>`;
+}
+/* ---- Üye özet sayfası ---- */
+async function teamProfil(c,t){
+  const jobs=await api('jobs_list').catch(()=>[]);
+  const mine=jobs.filter(j=>j.assignee_id===t.id);
+  const JL=JOBLBL;   /* canonical faz etiketleri (D-206) */
+  const bugun=new Date().toISOString().slice(0,10);
+  /* Canonical: "yapılan" phase değil LIFECYCLE ile belirlenir (D-207);
+     kapanmamış her iş takiptedir. */
+  const kapali=j=>(j.lifecycle_status||'acik')==='kapandi';
+  const grup={
+    takip:mine.filter(j=>!kapali(j)),
+    yapilan:mine.filter(kapali),
+    planli:mine.filter(j=>j.start_day&&j.start_day>bugun)};
+  const kart=(baslik,list,bos)=>`<section class="card">
+    <div class="card-h"><h3>${baslik}</h3><span class="chip">${list.length}</span></div>
+    <div class="card-b">${list.length?list.map(j=>`<button class="tp-j" onclick="go('is-takibi')">
+        <span class="tp-jt">${esc(j.title)}</span>
+        <span class="badge-st st-${esc(j.status)}">${esc(JL[j.status]||j.status)}</span>
+        ${j.start_day?`<span class="tp-jd">${esc(String(j.start_day).slice(0,10))}</span>`:''}</button>`).join('')
+      :`<p class="empty">${bos}</p>`}</div></section>`;
+  c.innerHTML=`
+    <div class="sec-head">${yoneticiMi()?`<button class="btn btn-ghost btn-sm" onclick="ui._teamOpen=null;renderSection()">‹ Ekip listesi</button>
+      <button class="btn btn-danger btn-sm" onclick="teamDel(${t.id})">Üyeyi Sil</button>`:'<h3>Profilim</h3>'}</div>
+    <div class="tp-top">
+      ${teamAvatar(t,78)}
+      <div class="tp-i"><h2>${esc(t.name)}${t.app_role==='admin'?'<span class="pill pil-on">yönetici</span>':''}</h2>
+        <div class="tp-r">${esc(t.unvan||t.role||'—')}</div>
+        <div class="tp-m">${esc(t.eposta||'e-posta yok')}${t.telefon?' · '+esc(t.telefon):''}</div></div>
+      <button class="btn btn-outline btn-sm" onclick="teamForm(${t.id})">Profili Düzenle</button>
+    </div>
+    <div class="tp-kpi">
+      <div class="tp-k"><b>${grup.takip.length}</b><span>Takip ettiği iş</span></div>
+      <div class="tp-k"><b>${grup.yapilan.length}</b><span>Tamamlanan</span></div>
+      <div class="tp-k"><b>${grup.planli.length}</b><span>Planlanan</span></div>
+    </div>
+    <div class="dash-grid"><div class="dash-l">
+      ${kart('Takip Ettiği İşler',grup.takip,'Atanmış aktif iş yok.')}
+      ${kart('Planlanan İşler',grup.planli,'İleri tarihli iş yok.')}
+      ${kart('Tamamlananlar',grup.yapilan,'Henüz tamamlanan iş yok.')}
+    </div><div class="dash-r">
+      <section class="card"><div class="card-h"><h3>Not Defteri</h3>
+        <span class="chip">kişisel</span></div>
+        <div class="card-b">
+          <textarea class="inp" id="tmNot" style="min-height:230px" placeholder="Günlük notlar, hatırlatmalar, görüşme özetleri…">${esc(t.notlar||'')}</textarea>
+          <p class="muted" style="font-size:11.5px;margin:8px 0 10px">Bu defter yalnız bu profilde durur. "Panoya Gönder" dediğinizde seçtiğiniz not, Dashboard'daki Son Notlar bölümüne düşer ve tüm ekip görür.</p>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn btn-primary btn-sm" onclick="teamNotKaydet(${t.id})">Kaydet</button>
+            <button class="btn btn-outline btn-sm" onclick="teamNotPaylas(${t.id})">Panoya Gönder</button></div>
+        </div></section>
+    </div></div>`;
+}
+async function teamNotKaydet(id){
+  const r=await guard(()=>api('team_save',{id,notlar:gv('tmNot')}),'Not kaydedilemedi');
+  if(r===null)return;
+  const t=(ui._team||[]).find(x=>x.id===id); if(t)t.notlar=gv('tmNot');
+  toast('Not defteri kaydedildi.');
+}
+async function teamNotPaylas(id){
+  const t=(ui._team||[]).find(x=>x.id===id)||{};
+  const tam=gv('tmNot')||'';
+  modal(`<h3 style="margin:0 0 4px">Panoya Gönder</h3>
+    <p class="muted" style="font-size:12.5px;margin:0 0 14px">Bu not Dashboard'daki Son Notlar bölümüne düşer, tüm ekip görür.</p>
+    <div class="field"><label class="flabel">Başlık</label><input class="inp" id="pnK" placeholder="ör. Tüyap görüşmesi"></div>
+    <div class="field"><label class="flabel">Not</label><textarea class="inp" id="pnB" style="min-height:120px">${esc(tam)}</textarea></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button class="btn btn-ghost btn-sm" onclick="closeModal()">Vazgeç</button>
+      <button class="btn btn-primary btn-sm" onclick="teamNotPaylasKaydet(${id})">Gönder</button></div>`);
+}
+async function teamNotPaylasKaydet(id){
+  const t=(ui._team||[]).find(x=>x.id===id)||{};
+  const konu=(gv('pnK')||'').trim(), body=(gv('pnB')||'').trim();
+  if(!body){ mpAlert('Not boş olamaz.','Panoya Gönder'); return; }
+  const r=await guard(()=>api('note_save',{konu:konu||('Not — '+(t.name||'')),body,
+    ilgili_kisi:t.name||'',tarih:new Date().toISOString().slice(0,10)}),'Gönderilemedi');
+  if(r===null)return; closeModal(); toast('Not panoya gönderildi.');
 }
 function teamForm(id){ const x=(ui._team||[]).find(t=>t.id===id)||{};
-  modal(`<h3 style="margin:0 0 14px">${id?'Kişi Düzenle':'Yeni Kişi'}</h3><input type="hidden" id="tid" value="${id||0}">
-    <div class="row2"><div class="field"><label class="flabel">Ad Soyad</label><input class="inp" id="tn" value="${esc(x.name)}"></div>
-    <div class="field"><label class="flabel">Görev</label><input class="inp" id="tr" value="${esc(x.role)}"></div></div>
-    <div class="row2"><div class="field"><label class="flabel">Yetki</label><input class="inp" id="ty" value="${esc(x.yetki)}"></div>
+  modal(`<h3 style="margin:0 0 14px">${id?'Profili Düzenle':'Yeni Kişi'}</h3><input type="hidden" id="tid" value="${id||0}">
+    <div class="field"><label class="flabel">Profil fotoğrafı</label>
+      <div class="imgf">
+        <span class="imgf-pv${x.photo?'':' bos'}" id="tph_pv" onclick="imgAc('tph')">${x.photo?`<img src="${esc(x.photo)}" alt="">`:''}</span>
+        <input class="inp" id="tph" value="${esc(x.photo)}" placeholder="https://..." oninput="imgPv('tph')">
+        <button class="btn btn-outline btn-sm" style="flex:0 0 auto" onclick="pickUpload('image/*',u=>{document.getElementById('tph').value=u;imgPv('tph');})">Yükle</button>
+        <button class="btn btn-ghost btn-sm imgf-x" onclick="imgSil('tph')">✕</button></div></div>
+    <div class="row2"><div class="field"><label class="flabel">Ad Soyad *</label><input class="inp" id="tn" value="${esc(x.name)}"></div>
+    <div class="field"><label class="flabel">Ünvan</label><input class="inp" id="tu" value="${esc(x.unvan||x.role||'')}" placeholder="Satış Uzmanı"></div></div>
+    <div class="row2"><div class="field"><label class="flabel">E-posta (panele giriş adresi)</label><input class="inp" id="te" value="${esc(x.eposta)}" placeholder="ad@medyapark.com"></div>
     <div class="field"><label class="flabel">Telefon</label><input class="inp" id="tt" value="${esc(x.telefon)}"></div></div>
+    <div class="row2"><div class="field"><label class="flabel">Yetki seviyesi</label>
+      <select class="inp" id="tsv" ${yoneticiMi()?'':'disabled title="Yetki seviyesini yalnız yönetici değiştirebilir"'}>
+        <option value="team_member" ${x.app_role!=='admin'?'selected':''}>Ekip Üyesi — Team Workspace</option>
+        <option value="admin" ${x.app_role==='admin'?'selected':''}>Yönetici — Yönetim Paneli + Workspace</option></select></div>
+    <div class="field"><label class="flabel">Görev/Departman</label><input class="inp" id="tr" value="${esc(x.role)}" placeholder="Satış &amp; Pazarlama"></div></div>
+    <p class="muted" style="font-size:11.5px;margin:2px 0 14px">Yetki, panele giriş yapılan e-posta ile bu adres eşleştiğinde uygulanır. Bildirim e-postaları da Satış &amp; Pazarlama görevli üyelere ve yöneticilere gider.</p>
     <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn btn-ghost btn-sm" onclick="closeModal()">Vazgeç</button><button class="btn btn-primary btn-sm" onclick="teamSave()">Kaydet</button></div>`);
 }
-async function teamSave(){ await api('team_save',{id:+gv('tid'),name:gv('tn'),role:gv('tr'),yetki:gv('ty'),telefon:gv('tt')}); closeModal(); renderSection(); }
-async function teamDel(id){ if(await mpConfirm('Ekip üyesi silinsin mi?','Üyeyi Sil')){ await api('team_delete&id='+id); renderSection(); } }
+async function teamSave(){
+  if(!gv('tn').trim()){ mpAlert('Ad Soyad zorunlu.','Ekip'); return; }
+  const body={id:+gv('tid'),name:gv('tn'),role:gv('tr'),unvan:gv('tu'),eposta:gv('te'),telefon:gv('tt'),photo:gv('tph')};
+  /* Tek yetki otoritesi canonical app_role'dür (D-203). Legacy `seviye`
+     yalnız ondan TÜRETİLEN bir ayna olarak yazılır: hiçbir yerde
+     yetkilendirme için OKUNMAZ, sadece Halil'in eski ekranları tutarlı
+     kalsın diye güncel tutulur. Çift otorite yoktur. */
+  if(yoneticiMi()){
+    body.app_role=gv('tsv');
+    body.seviye=(gv('tsv')==='admin')?'yonetici':'uye';
+  }
+  const r=await guard(()=>api('team_save',body),'Kaydedilemedi');
+  if(r===null)return; closeModal(); renderSection(); toast('Profil kaydedildi.');
+}
+async function teamDel(id){ if(await mpConfirm('Ekip üyesi silinsin mi?','Üyeyi Sil')){ await api('team_delete&id='+id); ui._teamOpen=null; renderSection(); } }
 
 /* ---------- SAYFALAR ---------- */
 async function sayfalar(c){
@@ -4331,6 +4558,67 @@ async function leadMusteri(id){
   closeModal(); toast('Kurum ve ilgili kişi kaydı oluşturuldu.');
 }
 async function leadDel(id){ if(!await mpConfirm('Talep silinsin mi?','Talebi Sil'))return; await sb.from('leads').delete().eq('id',id); renderSection(); }
+
+/* ---------- BÜLTEN ABONELERİ ---------- */
+async function aboneler(c){
+  const {data,error}=await sb.from('aboneler').select('*').order('created_at',{ascending:false});
+  if(error){ c.innerHTML='<div class="banner">Okunamadı: '+esc(error.message)+'</div>'; return; }
+  const list=data||[];
+  c.innerHTML=`<div class="sec-head"><div><h3>Bülten Aboneleri</h3><p class="sub">${list.length} adres · sitedeki footer formundan gelir</p></div>
+      <button class="btn btn-outline btn-sm" onclick="aboneDisa()">${ic('download',15)} CSV indir</button></div>
+    ${list.length?`<table class="tbl"><thead><tr><th>E-posta</th><th>Kaynak</th><th>Tarih</th><th></th></tr></thead><tbody>
+      ${list.map(a=>`<tr><td>${esc(a.eposta)}</td><td>${esc(a.kaynak||'')}</td><td>${esc(String(a.created_at||'').slice(0,10))}</td>
+        <td><button class="btn btn-danger btn-sm" onclick="aboneSil(${a.id})">Sil</button></td></tr>`).join('')}</tbody></table>`:'<p class="empty">Henüz abone yok.</p>'}`;
+  ui._aboneler=list;
+}
+async function aboneSil(id){ if(!await mpConfirm('Abone silinsin mi?','Aboneyi Sil'))return; await sb.from('aboneler').delete().eq('id',id); renderSection(); }
+function aboneDisa(){ const rows=[['E-posta','Kaynak','Tarih'],...(ui._aboneler||[]).map(a=>[a.eposta,a.kaynak||'',String(a.created_at||'').slice(0,10)])];
+  const csv='\ufeff'+rows.map(r=>r.map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(';')).join('\n');
+  const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'})); a.download='aboneler.csv'; a.click(); }
+
+/* ---------- İKON KÜTÜPHANESİ ---------- */
+function ikonListe(){ const st=ui._settings||{}; return Array.isArray(st.icons)?st.icons:[]; }
+async function ikonlar(c){
+  const st=await api('settings_get'); ui._settings=st; const list=ikonListe();
+  const kart=list.map((ic,i)=>`<div class="ik-card">
+      <div class="ik-pv"><img src="${esc(ic.url)}" alt=""></div>
+      <input class="inp inp-sm" value="${esc(ic.name||'')}" placeholder="İkon adı" onchange="ikonAd(${i},this.value)">
+      <div class="ik-act">
+        <button class="btn btn-ghost btn-sm" title="Bu ikonun anahtarını kopyala" onclick="navigator.clipboard&&navigator.clipboard.writeText('svg:${esc(ic.id)}');toast('Kopyalandı: svg:${esc(ic.id)}')">svg:${esc(ic.id)}</button>
+        <button class="btn btn-danger btn-sm" onclick="ikonSil(${i})">Sil</button></div></div>`).join('');
+  c.innerHTML=`<div class="sec-head"><div><h3>İkon Kütüphanesi</h3><p class="sub">${list.length} ikon · SVG yükleyin, ürünlerde ve mecra avantajlarında seçin</p></div>
+      <button class="btn btn-primary btn-sm" onclick="ikonYukle()">+ SVG Yükle</button></div>
+    <div class="banner">Yüklediğiniz ikonlar <b>Ürünler</b> formundaki ikon seçicide ve <b>Mecra &gt; Tanıtım &gt; Avantajlar</b> satırlarında "Yüklenen ikonlar" başlığıyla listelenir. Sitede ürün sekmelerinde, filtre düğmelerinde ve avantaj kutularında görünürler. Tek renk, 24×24 kare, çizgi tabanlı SVG'ler siteyle en uyumlu sonucu verir; birden fazla dosyayı aynı anda seçebilirsiniz.</div>
+    <div class="ik-grid">${kart||'<p class="muted">Henüz ikon yok. "+ SVG Yükle" ile başlayın.</p>'}</div>`;
+}
+function ikonYukle(){
+  const inp=document.createElement('input'); inp.type='file'; inp.accept='image/svg+xml,.svg'; inp.multiple=true;
+  inp.onchange=async()=>{ const files=[...inp.files]; if(!files.length)return;
+    toast(files.length+' ikon yükleniyor…');
+    const list=ikonListe().slice();
+    for(const f of files){
+      if(!/svg/i.test(f.type)&&!/\.svg$/i.test(f.name)){ toast(f.name+' SVG değil, atlandı'); continue; }
+      try{ const url=await uploadFile(f,{});
+        const ad=f.name.replace(/\.svg$/i,'').replace(/[-_]+/g,' ');
+        list.push({id:Date.now().toString(36)+Math.random().toString(36).slice(2,5),name:ad,url}); }
+      catch(e){ mpAlert(f.name+': '+(e.message||e),'Yükleme'); }
+    }
+    ui._settings.icons=list; await api('settings_save',{icons:list}); renderSection(); toast('İkonlar kaydedildi.');
+  };
+  inp.click();
+}
+async function ikonAd(i,v){ const list=ikonListe().slice(); if(!list[i])return; list[i].name=v.trim(); ui._settings.icons=list; await api('settings_save',{icons:list}); }
+async function ikonSil(i){ const list=ikonListe().slice(); const ic=list[i]; if(!ic)return;
+  if(!await mpConfirm(`"${ic.name||ic.id}" ikonu kütüphaneden silinsin mi? Bu ikonu kullanan ürün/avantajlar varsayılan ikona döner.`,'İkonu Sil'))return;
+  list.splice(i,1); ui._settings.icons=list; await api('settings_save',{icons:list}); renderSection(); }
+/* Ürün ve avantaj formları için ikon seçici: hazır set + yüklenenler */
+function ikonSecici(id,secili,ekstraClass){
+  const yuk=ikonListe();
+  return `<select class="inp ${ekstraClass||''}" id="${id}">
+    <optgroup label="Hazır ikonlar">${URUN_IKONLAR.map(x=>`<option value="${x[0]}" ${(secili||'diger')===x[0]?'selected':''}>${x[1]}</option>`).join('')}</optgroup>
+    ${yuk.length?`<optgroup label="Yüklenen ikonlar">${yuk.map(x=>`<option value="svg:${esc(x.id)}" ${secili==='svg:'+x.id?'selected':''}>${esc(x.name||x.id)}</option>`).join('')}</optgroup>`:''}
+  </select>`;
+}
 
 /* ---------- NOTLAR ---------- */
 async function notlar(c){

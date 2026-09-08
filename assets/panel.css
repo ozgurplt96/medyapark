@@ -211,7 +211,7 @@ textarea.inp{resize:vertical;min-height:70px;}
 .kdot{width:8px;height:8px;border-radius:2px;background:var(--kc,var(--c-slate));}
 .kcount{font-size:11.5px;color:var(--c-ink3);background:#fff;border:1px solid var(--c-line);border-radius:var(--r-sm);padding:1px 7px;}
 .kcol.violet{--kc:var(--c-violet);} .kcol.amber{--kc:var(--c-amber);} .kcol.cyan{--kc:var(--c-cyan);}
-.kcol.green{--kc:var(--c-green);} .kcol.slate{--kc:var(--c-slate);}
+.kcol.green{--kc:var(--c-green);} .kcol.slate{--kc:var(--c-slate);} .kcol.rose{--kc:var(--c-accent);}
 .kcol-b{padding:10px;display:flex;flex-direction:column;gap:8px;flex:1;}
 .kcard{background:#fff;border:1px solid var(--c-hair);border-left:3px solid var(--kc,var(--c-slate));
   border-radius:10px;padding:11px 12px;transition:border-color .14s;}
@@ -785,6 +785,84 @@ details.grp>summary:hover .chev{color:var(--c-accent);}
 .kc-t .asg{float:right;}
 @media(max-width:900px){ .jb{grid-template-columns:repeat(2,1fr);} }
 
+/* ===== v54 ===== */
+/* KPI tipografisi — belirgin */
+.kpi2-n{font-size:40px;font-weight:800;letter-spacing:-.04em;line-height:1;}
+.kpi2-t{font-size:13.5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;margin-top:8px;}
+.kpi2-s{font-size:12.5px;font-weight:500;margin-top:4px;}
+/* yeşil buton + pazarlama rengi */
+.btn-yes{background:var(--c-green);color:#fff !important;border-color:var(--c-green);}
+.btn-yes:hover{background:#15803d;border-color:#15803d;}
+.btn-yes .ic{color:#fff;}
+.kcol.rose .kcol-h i,.st-pazarlama{background:var(--c-accent-soft);color:var(--c-accent-d);}
+.kcol.rose .kcol-h i{background:var(--c-accent);}
+.pzd{display:inline-block;font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:999px;margin:2px 0 6px;}
+.pzd.amber{background:var(--c-amber-soft);color:var(--c-amber);} .pzd.cyan{background:var(--c-cyan-soft);color:var(--c-cyan);}
+.pzd.slate{background:var(--c-alt);color:var(--c-ink2);} .pzd.green{background:var(--c-green-soft);color:var(--c-green);}
+.pzd.red{background:var(--c-red-soft);color:var(--c-red);}
+/* doluluk trendi çizgisi yeşil */
+.ag-line{stroke:var(--c-green);}
+/* takvim noktaları */
+.cd{position:relative;}
+.cd.has{cursor:pointer;font-weight:700;}
+.cd.has:hover{background:var(--c-accent-soft);}
+.cdots{position:absolute;left:0;right:0;bottom:3px;display:flex;justify-content:center;gap:2px;}
+.cdot{display:inline-block;width:5px;height:5px;border-radius:50%;background:var(--c-accent);}
+.cdot.pazarlama{background:var(--c-accent);} .cdot.tasarim{background:var(--c-violet);} .cdot.baski{background:var(--c-amber);}
+.cdot.montaj{background:var(--c-cyan);} .cdot.yayin{background:var(--c-green);} .cdot.arsiv{background:var(--c-ink3);}
+.cdot.more{background:var(--c-ink3);width:4px;height:4px;}
+.cal-list{display:flex;flex-direction:column;gap:6px;}
+.cal-i{display:flex;align-items:center;gap:10px;text-align:left;padding:9px 11px;border-radius:10px;background:var(--c-alt);}
+.cal-i:hover{background:var(--c-accent-soft);}
+.cal-i .cdot{width:8px;height:8px;flex:0 0 auto;}
+.cal-t{flex:1;font-size:13px;font-weight:600;}
+.cal-s{font-size:11.5px;color:var(--c-ink3);}
+/* ekip kartları */
+.tm-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;}
+.tm-card{display:flex;align-items:center;gap:12px;background:#fff;border:1px solid var(--c-line);border-radius:14px;padding:14px;cursor:pointer;transition:.13s;}
+.tm-card:hover{border-color:var(--c-accent);box-shadow:0 6px 18px rgba(15,20,35,.07);transform:translateY(-1px);}
+.tm-av{border-radius:50%;object-fit:cover;flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;}
+.tm-av-t{background:var(--c-accent-soft);color:var(--c-accent-d);font-weight:800;}
+.tm-b{flex:1;min-width:0;}
+.tm-n{font-weight:700;font-size:14.5px;display:flex;align-items:center;gap:8px;}
+.tm-r{font-size:12.5px;color:var(--c-ink2);margin-top:2px;}
+.tm-m{font-size:11.5px;color:var(--c-ink3);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.tm-go{color:var(--c-ink3);font-size:20px;}
+/* profil sayfası */
+.tp-top{display:flex;align-items:center;gap:18px;background:#fff;border:1px solid var(--c-line);border-radius:16px;padding:20px;margin-bottom:14px;flex-wrap:wrap;}
+.tp-i{flex:1;min-width:200px;}
+.tp-i h2{margin:0;font-size:22px;letter-spacing:-.02em;display:flex;align-items:center;gap:10px;}
+.tp-r{color:var(--c-ink2);font-weight:500;margin-top:3px;}
+.tp-m{color:var(--c-ink3);font-size:12.5px;margin-top:3px;}
+.tp-kpi{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:14px;}
+.tp-k{background:#fff;border:1px solid var(--c-line);border-radius:14px;padding:16px;text-align:center;}
+.tp-k b{display:block;font-size:30px;font-weight:800;letter-spacing:-.03em;}
+.tp-k span{font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--c-ink3);}
+.tp-j{display:flex;align-items:center;gap:10px;width:100%;text-align:left;padding:9px 10px;border-radius:10px;margin-bottom:4px;}
+.tp-j:hover{background:var(--c-alt);}
+.tp-jt{flex:1;font-size:13.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.tp-jd{font-size:11.5px;color:var(--c-ink3);font-variant-numeric:tabular-nums;}
+/* bildirimler */
+.bld{display:flex;align-items:flex-start;gap:10px;padding:9px 0;border-bottom:1px solid var(--c-line2);}
+.bld:last-child{border-bottom:0;}
+.bld-i{flex:0 0 auto;width:28px;height:28px;border-radius:9px;background:var(--c-amber-soft);color:var(--c-amber);display:flex;align-items:center;justify-content:center;}
+.bld-b{flex:1;min-width:0;cursor:pointer;}
+.bld-t{font-size:13px;font-weight:600;line-height:1.35;}
+.bld-d{font-size:11.5px;color:var(--c-ink3);margin-top:2px;}
+.bld-x{flex:0 0 auto;width:26px;height:26px;border-radius:8px;color:var(--c-ink3);}
+.bld-x:hover{background:var(--c-green-soft);color:var(--c-green);}
+@media(max-width:760px){ .tp-kpi{grid-template-columns:1fr;} }
+
+/* --- ikon kütüphanesi --- */
+.ik-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:12px;}
+.ik-card{background:#fff;border:1px solid var(--c-line);border-radius:14px;padding:12px;display:flex;flex-direction:column;gap:8px;}
+.ik-pv{height:74px;display:flex;align-items:center;justify-content:center;background:var(--c-alt);border-radius:10px;}
+.ik-pv img{width:40px;height:40px;object-fit:contain;}
+.ik-act{display:flex;justify-content:space-between;gap:6px;}
+.ik-act .btn-ghost{font-family:var(--mono,monospace);font-size:11px;padding:4px 8px;}
+.row3av{display:grid;grid-template-columns:150px 1fr 1.4fr;gap:8px;}
+@media(max-width:760px){.row3av{grid-template-columns:1fr;}}
+
 /* ==========================================================
    TEAM WORKSPACE (Sprint 06)
    Yeni tasarım dili DEĞİL: mevcut token/komponent sistemini
@@ -828,3 +906,4 @@ details.grp>summary:hover .chev{color:var(--c-accent);}
 .tbl.rowlink tbody tr:focus-visible,.msg:focus-visible,.kadd:focus-visible,
 .kc-a button:focus-visible,.nav-gh:focus-visible,.uchip:focus-visible{
   outline:2px solid var(--c-accent);outline-offset:2px;border-radius:8px;}
+
