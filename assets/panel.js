@@ -711,8 +711,12 @@ function userChip(){
   const rol=me.role||me.yetki||(ui._role==='admin'?'Yönetici':'Ekip Üyesi');
   const av=me.photo?`<img src="${esc(me.photo)}" alt="">`
     :`<span class="uc-i">${esc((ad.trim()[0]||'K').toLocaleUpperCase('tr'))}</span>`;
-  return `<div class="uchip" title="${esc(ui._email||'')}">${av}
-    <div class="uc-b"><b>${esc(ad)}</b><span>${esc(rol)}</span></div></div>`;
+  /* Profilim'e giriş noktası: yeni bir birincil nav ögesi yerine header
+     chip'i üzerinden (07 §16; parity audit S1 §7). ekip() zaten admin
+     olmayanı kendi profiline yönlendiriyor; ayrı bir profil renderer'ı
+     eklenmedi. */
+  return `<button type="button" class="uchip" title="${esc(ui._email||'')}" onclick="go('ekip')">${av}
+    <div class="uc-b"><b>${esc(ad)}</b><span>${esc(rol)}</span></div></button>`;
 }
 function showApp(){
   const st=ui._settings||{};
@@ -777,7 +781,7 @@ async function renderSection(){
   const c=document.getElementById('content'); c.innerHTML='<p class="muted">Yükleniyor…</p>';
   const F={dashboard,'is-takibi':isTakibi,urunler,mecralar,listeler,musteriler,kurumlar,teklifler,ekip,
            sayfalar,notlar,anasayfa:anasayfaBolum,tedarikciler,raporlar,harita,ayarlar,talepler,
-           ikonlar,aboneler,operasyon,'workspace-home':workspaceHome,'ws-mecralar':wsMecralar};
+           ikonlar,aboneler,operasyon,'workspace-home':workspaceHome,'ws-mecralar':wsMecralarHub};
   try{
     const fn=F[ui.section]; if(!fn)return;
     await fn(c);
@@ -1845,10 +1849,15 @@ const WS_NAV=[
   ['workspace-home','Ana Sayfa','dashboard'],
   ['is-takibi','İşler','jobs'],
   ['kurumlar','Kurumlar','customers'],
-  ['ws-mecralar','Mecralar','media']];
+  ['ws-mecralar','Mecralar','media'],
+  ['raporlar','Raporlar','report']];
 /* Workspace'ten ulaşılabilen ek rotalar: ana navigasyona yeni birincil
-   kavram eklemeden Baskı & Montaj tablosuna geçiş (07 §13). */
-const WS_EXTRA=['operasyon'];
+   kavram eklemeden Baskı & Montaj tablosuna (07 §13) ve kendi profiline
+   (header'daki kullanıcı chip'i üzerinden, 07 §16) geçiş. `ekip` zaten
+   admin olmayan görüntüleyiciyi kendi profiline yönlendiriyor — bkz.
+   ekip() içindeki yoneticiMi() kontrolü; burada yalnız rota izni açılır,
+   ayrı bir profil renderer'ı eklenmez (parity audit S1 §7/§14). */
+const WS_EXTRA=['operasyon','ekip'];
 const WS_IZIN=new Set(WS_NAV.map(n=>n[0]).concat(WS_EXTRA));
 
 /* Yıkıcı ve Admin-domain aksiyonları RLS'te admin'e kapalıdır (S07).
@@ -2018,50 +2027,26 @@ function wsBekleyenler(){
   isFiltreYaz({life:['bekliyor'],q:'',mine:false}); go('is-takibi');
 }
 
-/* ---------- Workspace Mecralar — read-only (07 §10) ---------- */
-async function wsMecralar(c){
-  const ay=(ui._wsAy||new Date().toISOString().slice(0,7));
-  const [mlist,bookings,custs]=await Promise.all([
-    api('mecra_list'), api('bookings_all'), api('customers_list')]);
-  const cm={}; (custs||[]).forEach(x=>cm[x.id]=x.firma);
-  const bm={}; (bookings||[]).forEach(b=>{ if(b.ym===ay) bm[b.unit_id]=b; });
-  ui._wsAy=ay;
-
-  let toplam=0, dolu=0, rez=0, pasif=0;
-  const bloklar=(mlist||[]).map(m=>{
-    const us=(m.units||[]);
-    const satir=us.map(u=>{
-      toplam++;
-      const b=bm[u.id];
-      if(u.active===false) pasif++;
-      else if(b&&b.status==='dolu') dolu++;
-      else if(b&&b.status==='rezerve') rez++;
-      const durum=u.active===false
-        ? '<span class="pill">Pasif</span>'
-        : b&&b.status==='dolu'    ? '<span class="pill clay">Dolu</span>'
-        : b&&b.status==='rezerve' ? '<span class="pill sand">Rezerve</span>'
-        : '<span class="pill teal">Boş</span>';
-      const kurum=b&&b.customer_id?cm[b.customer_id]:'';
-      return `<div class="list-item">
-        <div class="nm">${esc(u.name||('#'+u.id))}</div>
-        <div class="meta">${durum}${kurum?' · '+esc(kurum):''}${u.olcu?' · '+esc(u.olcu):''}</div></div>`;
-    }).join('');
-    return us.length?`<div class="sec-card">
-      <div class="sec-head" style="margin-bottom:10px"><h4 style="font-size:14px;margin:0">${esc(m.name)} <span class="chip">${us.length}</span></h4></div>
-      ${satir}</div>`:'';
-  }).join('');
-
-  c.innerHTML=`<div class="sec-head">
-      <div><h3>Mecralar</h3><p class="sub">Envanter ve doluluk görünümü — düzenleme Yönetim tarafındadır</p></div>
-      <div class="field" style="margin:0;min-width:180px">
-        <label class="flabel" for="wsAy">Dönem</label>
-        <input class="inp" type="month" id="wsAy" value="${esc(ay)}" onchange="ui._wsAy=this.value;renderSection()"></div>
-    </div>
-    <div class="sec-card">
-      <div class="meta">${toplam} pozisyon · <b>${dolu}</b> dolu · <b>${rez}</b> rezerve · <b>${toplam-dolu-rez-pasif}</b> boş${pasif?` · ${pasif} pasif`:''}
-        <br><span class="muted">Rezervasyon ve pozisyon yönetimi mecra yetkisindedir (BR-M03); burası salt okunur bir görünümdür.</span></div>
-    </div>
-    ${bloklar||'<div class="sec-card"><p class="empty">Mecra kaydı yok.</p></div>'}`;
+/* ---------- Workspace Mecralar hub (parity audit S1 §2/§9) ----------
+   Retired: the old flat-list `wsMecralar` (Sprint 06) duplicated a
+   sliver of what `listeler` already computed, worse. This hub renders
+   NO business data itself — it is pure routing chrome (a 3-way tab)
+   that delegates entirely to the same renderers Admin uses:
+   listeler (Doluluk, default), harita, mecralar. Each of those already
+   gates its own mutation surface via isAdmin() (see their definitions);
+   nothing new is gated here. */
+function wsMecSub(){ return ui._mecSub||'doluluk'; }
+function wsMecTab(sub){ ui._mecSub=sub; wsMecralarHub(document.getElementById('content')); }
+async function wsMecralarHub(c){
+  const sub=wsMecSub();
+  const tab=(key,label)=>`<button type="button" class="${sub===key?'on':''}" aria-pressed="${sub===key}" onclick="wsMecTab('${key}')">${esc(label)}</button>`;
+  c.innerHTML=`<div class="ws-switch inline" role="group" aria-label="Mecra görünümü">
+      ${tab('doluluk','Doluluk')}${tab('harita','Harita')}${tab('mecralar','Mecralar')}</div>
+    <div id="mecSubBody"><p class="muted">Yükleniyor…</p></div>`;
+  const body=document.getElementById('mecSubBody');
+  if(sub==='harita') await harita(body);
+  else if(sub==='mecralar') await mecralar(body);
+  else await listeler(body);
 }
 
 /* ---------- ÜRÜNLER ---------- */
@@ -2717,9 +2702,16 @@ async function hmSave(){
 async function mecralar(c){
   const list=await api('mecra_list'); ui._mecralar=list; ui._products=await api('products_list');
   const alls=await api('alt_all'); const cnt={}; alls.forEach(a=>cnt[a.mecra_id]=(cnt[a.mecra_id]||0)+1);
+  /* mecEdit() içerik/görsel/koordinat düzenleme formudur (site CMS'i),
+     salt okuma modu taşımaz; team_member için hiyerarşi/alan sayısı
+     görünür kalır, düzenleme/sıralama/silme ve yeni mecra oluşturma
+     admin'e kapalıdır. Pozisyon/doluluk detayı zaten Doluluk sekmesinde
+     (parity audit S1 §5). */
   const rows=list.map(m=>`<div class="list-item"><span class="dot" style="background:${esc(m.theme_color)}"></span><div class="nm">${esc(m.name)}</div><div class="meta">${cnt[m.id]||0} alt mecra</div>
-    <button class="btn btn-outline btn-sm" onclick="mecReorder(${m.id},-1)" title="Yukarı">↑</button><button class="btn btn-outline btn-sm" onclick="mecReorder(${m.id},1)" title="Aşağı">↓</button><button class="btn btn-outline btn-sm" onclick="mecEdit(${m.id})">Düzenle</button><button class="btn btn-danger btn-sm" onclick="mecDel(${m.id})">Sil</button></div>`).join('');
-  c.innerHTML=`<div class="sec-head"><h3>Mecralar</h3><button class="btn btn-primary btn-sm" onclick="mecEdit(0)">+ Mecra ekle</button></div>${rows||'<p class="muted">Mecra yok.</p>'}<div id="mecEd"></div>`;
+    ${isAdmin()?`<button class="btn btn-outline btn-sm" onclick="mecReorder(${m.id},-1)" title="Yukarı">↑</button><button class="btn btn-outline btn-sm" onclick="mecReorder(${m.id},1)" title="Aşağı">↓</button><button class="btn btn-outline btn-sm" onclick="mecEdit(${m.id})">Düzenle</button><button class="btn btn-danger btn-sm" onclick="mecDel(${m.id})">Sil</button>`:''}</div>`).join('');
+  c.innerHTML=`<div class="sec-head"><h3>Mecralar</h3>${isAdmin()?`<button class="btn btn-primary btn-sm" onclick="mecEdit(0)">+ Mecra ekle</button>`:''}</div>
+    ${!isAdmin()?'<p class="muted" style="margin:-4px 0 12px">Mecra içerik/görsel düzenlemesi Yönetim yüzeyindedir; pozisyon ve doluluk detayı için Doluluk sekmesine bakın.</p>':''}
+    ${rows||'<p class="muted">Mecra yok.</p>'}<div id="mecEd"></div>`;
 }
 
 async function mecEdit(id){ if(ui._dirty && !(await dirtyGuard())) return;
@@ -2968,8 +2960,12 @@ async function harita(c){
             lat:u.lat,lng:u.lng,konum:u.konum||''}; });
   const yes=hRows.filter(r=>r.lat!=null&&r.lng!=null).length;
 
+  /* Harita: sayfa metni CMS'i, Google Maps anahtarı ve koordinat
+     işaretleme mutation'dır — admin'e kapalı. Pozisyon listesi + harita
+     (pinler, arama, hover) salt okuma context'i olarak team_member'a
+     da açık kalır (parity audit S1 §4). */
   c.innerHTML=`
-  <div class="sec-card"><h3 style="margin:0 0 6px;font-size:16px">Harita Sayfası Metinleri</h3>
+  ${isAdmin()?`<div class="sec-card"><h3 style="margin:0 0 6px;font-size:16px">Harita Sayfası Metinleri</h3>
     <p class="muted" style="font-size:13px;margin:0 0 12px">Header'daki <b>Maps</b> butonuyla açılan sayfanın başlığı ve açıklaması.</p>
     <div class="field"><label class="flabel">Sayfa başlığı</label><input class="inp" id="mapTitle" value="${esc(st.mapTitle||'')}" placeholder="Reklam Alanlarımız — Adana Haritası"></div>
     <div class="field"><label class="flabel">Açıklama</label><textarea class="inp" id="mapDesc" placeholder="Kısa tanıtım metni…">${esc(st.mapDesc||'')}</textarea></div>
@@ -2982,12 +2978,12 @@ async function harita(c){
     <div class="field"><label class="flabel">API anahtarı</label><input class="inp" id="gmKey" value="${esc(st.googleMapsKey||'')}" placeholder="AIza… (boş = OpenStreetMap)"></div>
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
       <button class="btn btn-primary btn-sm" onclick="saveGmKey()">Kaydet</button>
-      <span class="muted" style="font-size:12.5px">Şu anki motor: <b>${st.googleMapsKey?'Google Maps':'OpenStreetMap (ücretsiz)'}</b></span></div></div>
+      <span class="muted" style="font-size:12.5px">Şu anki motor: <b>${st.googleMapsKey?'Google Maps':'OpenStreetMap (ücretsiz)'}</b></span></div></div>`:''}
 
-  <div class="sec-card"><h3 style="margin:0 0 6px;font-size:16px">Konum İşaretleme</h3>
-    <p class="muted" style="font-size:13px;margin:0 0 14px">Soldan bir pozisyon seçin, sonra <b>haritaya tıklayarak</b> yerini işaretleyin ve kaydedin. Kaydedince liste otomatik olarak <b>sıradaki işaretsiz pozisyona</b> geçer; aynı direğin A/B yüzeyleri için tek işaretleme yeter.
-      <br>İşaretli konumlar sitedeki harita sayfasında pin olarak çıkar; yakın olanlar otomatik gruplanır.
-      <br><b id="hCount">${yes}</b> / ${hRows.length} pozisyonun konumu işaretli.</p>
+  <div class="sec-card"><h3 style="margin:0 0 6px;font-size:16px">${isAdmin()?'Konum İşaretleme':'Konumlar'}</h3>
+    <p class="muted" style="font-size:13px;margin:0 0 14px">${isAdmin()
+      ?'Soldan bir pozisyon seçin, sonra <b>haritaya tıklayarak</b> yerini işaretleyin ve kaydedin. Kaydedince liste otomatik olarak <b>sıradaki işaretsiz pozisyona</b> geçer; aynı direğin A/B yüzeyleri için tek işaretleme yeter.<br>İşaretli konumlar sitedeki harita sayfasında pin olarak çıkar; yakın olanlar otomatik gruplanır.<br>'
+      :'Soldan bir pozisyon seçin veya haritadaki pinlere tıklayın; konum işaretleme mecra yetkisindedir (BR-M03).<br>'}<b id="hCount">${yes}</b> / ${hRows.length} pozisyonun konumu işaretli.</p>
     <div class="hmap-grid">
       <div class="hmap-side">
         <input class="inp" id="hSearch" placeholder="Pozisyon / mecra ara…" oninput="hFilter(this.value)" style="margin-bottom:10px">
@@ -2995,14 +2991,14 @@ async function harita(c){
       </div>
       <div>
         <div id="hMapNote" class="banner" style="display:none;margin-bottom:10px"></div>
-        <div class="hbar">
+        ${isAdmin()?`<div class="hbar">
           <input class="inp" id="hGeo" placeholder="Adres / yer ara — ör. M1 Adana AVM" onkeydown="if(event.key==='Enter'){event.preventDefault();hGeoSearch()}">
           <button class="btn btn-outline btn-sm" onclick="hGeoSearch()">Bul</button>
           <input class="inp" id="hPaste" placeholder="Koordinat veya Maps linki yapıştır" onkeydown="if(event.key==='Enter'){event.preventDefault();hPasteCoord()}">
           <button class="btn btn-outline btn-sm" onclick="hPasteCoord()">Uygula</button>
         </div>
-        <div id="hGeoRes" class="hgeores" style="display:none"></div>
-        <div id="hSelBar" class="hselbar">Önce soldan bir pozisyon seçin.</div>
+        <div id="hGeoRes" class="hgeores" style="display:none"></div>`:''}
+        <div id="hSelBar" class="hselbar">${isAdmin()?'Önce soldan bir pozisyon seçin.':'Bir pozisyon seçin.'}</div>
         <div id="hMapCanvas" class="hmap"></div>
       </div>
     </div></div>`;
@@ -3085,6 +3081,7 @@ function hInitGoogle(){
     center:{lat:37.0000,lng:35.3213}, zoom:12, mapTypeId:'hybrid',
     mapTypeControl:true, streetViewControl:true, fullscreenControl:true, tilt:0});
   hgMap.addListener('click',e=>{
+    if(!isAdmin())return;   /* konum işaretleme mutation'dır (parity audit S1 §4) */
     if(hSel==null){ mpAlert('Önce soldaki listeden bir pozisyon seçin.'); return; }
     hPlace(e.latLng.lat(), e.latLng.lng());
   });
@@ -3098,7 +3095,7 @@ function hInitLeaflet(){
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'&copy; OpenStreetMap'}).addTo(hMap);
   hCluster=L.markerClusterGroup({showCoverageOnHover:false,maxClusterRadius:50});
   hMap.addLayer(hCluster);
-  hMap.on('click',e=>{ if(hSel==null){ mpAlert('Önce soldaki listeden bir pozisyon seçin.'); return; } hPlace(e.latlng.lat,e.latlng.lng); });
+  hMap.on('click',e=>{ if(!isAdmin())return; if(hSel==null){ mpAlert('Önce soldaki listeden bir pozisyon seçin.'); return; } hPlace(e.latlng.lat,e.latlng.lng); });
   hDrawAll(); setTimeout(()=>hMap.invalidateSize(),200);
 }
 function hDrawAll(){
@@ -3119,9 +3116,9 @@ function hDrawAll(){
 function hPick(id){ hSel=id; hRenderList(); const r=hRows.find(x=>x.id===id); if(!r)return;
   const bar=document.getElementById('hSelBar');
   bar.innerHTML=`<b>${esc(r.unit)}</b> <span class="muted">— ${esc(r.mec)} › ${esc(r.alt)}</span>
-    <span class="hcoord" id="hCoord">${r.lat!=null?(+r.lat).toFixed(6)+', '+(+r.lng).toFixed(6):'konum yok — haritaya tıklayın'}</span>
-    <button class="btn btn-primary btn-sm" onclick="hSave()">Konumu Kaydet</button>
-    ${r.lat!=null?`<button class="btn btn-danger btn-sm" onclick="hClear()">Konumu Sil</button>`:''}`;
+    <span class="hcoord" id="hCoord">${r.lat!=null?(+r.lat).toFixed(6)+', '+(+r.lng).toFixed(6):'konum yok'}</span>
+    ${isAdmin()?`<button class="btn btn-primary btn-sm" onclick="hSave()">Konumu Kaydet</button>
+    ${r.lat!=null?`<button class="btn btn-danger btn-sm" onclick="hClear()">Konumu Sil</button>`:''}`:''}`;
   hDrawAll();
   if(hEngine==='google'){
     if(hgSel){ hgSel.setMap(null); hgSel=null; }
@@ -3263,8 +3260,12 @@ function lCell(u,ym,cmap,bmap,solo){
   const who=rec&&rec.c?(cmap[rec.c]||''):'';
   const surf=posParts(u.name).surf;
   const kod = who? String(who).trim().slice(0,3).toLocaleUpperCase('tr') : (solo?'':surf);
-  return `<span class="rcell ${st}" data-u="${u.id}" data-ym="${ym}" data-surf="${surf}"
-    onclick="rezAc(${u.id},'${ym}',event)"
+  /* Doluluk hücresi tıklaması rezervasyon/durum/müşteri mutation'ına
+     açılan tek giriş noktasıdır (rezAc -> rezCiz). team_member için
+     kapalı; hover bilgi kartı (salt okuma) her iki rol için de açık
+     kalır (parity audit S1 §3/§9). */
+  const tik=isAdmin()?` onclick="rezAc(${u.id},'${ym}',event)"`:'';
+  return `<span class="rcell ${st}${isAdmin()?'':' ro'}" data-u="${u.id}" data-ym="${ym}" data-surf="${surf}"${tik}
     onmouseenter="lTip(this)" onmouseleave="lTipHide()"><i>${esc(kod)}</i></span>`;
 }
 
@@ -3418,13 +3419,18 @@ async function listeler(c){
 
   const custOpts=custs.map(x=>`<option value="${x.id}">${esc(x.firma||('#'+x.id))}</option>`).join('');
   const mecOpts=mlist.map(m=>`<option value="${m.id}">${esc(m.name)}</option>`).join('');
+  /* Excel içe aktarma değişiklik yazan bir mutation'dır; team_member'a
+     kapalı. Dışa aktarma salt okuma/rapor işlemidir, her iki role de
+     açık kalır (parity audit S1 §3). */
   c.innerHTML=`<div class="sec-head"><h3>Doluluk / Kiralama</h3>
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
       <button class="btn btn-ghost btn-sm" onclick="bookExport()">${ic('download',15)} Excel'e Aktar</button>
-      <button class="btn btn-outline btn-sm" onclick="bookImport()">${ic('upload',15)} Excel'den Al</button>
+      ${isAdmin()?`<button class="btn btn-outline btn-sm" onclick="bookImport()">${ic('upload',15)} Excel'den Al</button>`:''}
       <div class="year-nav" style="margin:0"><button onclick="lYear(-1)">‹</button><span class="yr">${y}</span><button onclick="lYear(1)">›</button></div>
     </div></div>
-    <div class="banner">Aya tıklayın: açılan pencereden <b>durumu seçin</b> (Boş / Dolu / Rezerve), <b>müşteri atayın</b> ya da oracıkta <b>yeni müşteri ekleyin</b> — eklenen müşteri, Müşteriler bölümünde de oluşur. Çift yüzlü pozisyonlarda (M1 megalight ve raketleri) her ayın altında iki kutu vardır: soldaki A (ön yüz), sağdaki B (arka yüz). Ziyaretçi firma adını görmez, yalnızca durumu görür.</div>
+    <div class="banner">${isAdmin()
+      ?'Aya tıklayın: açılan pencereden <b>durumu seçin</b> (Boş / Dolu / Rezerve), <b>müşteri atayın</b> ya da oracıkta <b>yeni müşteri ekleyin</b> — eklenen müşteri, Müşteriler bölümünde de oluşur. Çift yüzlü pozisyonlarda (M1 megalight ve raketleri) her ayın altında iki kutu vardır: soldaki A (ön yüz), sağdaki B (arka yüz). Ziyaretçi firma adını görmez, yalnızca durumu görür.'
+      :'Bu görünüm salt okunurdur; durum/müşteri/pozisyon değişikliği mecra yetkisindedir (BR-M03). Çift yüzlü pozisyonlarda (M1 megalight ve raketleri) her ayın altında iki kutu vardır: soldaki A (ön yüz), sağdaki B (arka yüz).'}</div>
     <div class="sec-card fbar">
       <div class="fbar-row">
         <input class="inp" id="lQ" placeholder="Ara: pozisyon, alan, mecra veya kiralayan firma…" oninput="lFiltre()">
@@ -3490,7 +3496,7 @@ function lFiltre(){
       });
       if(!groups.length && aktif) continue;    /* filtre varken boş alanları gizle */
       mecPoz+=groups.length;
-      inner+=`<div class="sec-head" style="margin-top:10px"><h4 style="font-size:14px;margin:0">${esc(a.name)} <span class="muted">· ${esc(L.pmap[a.product_id]||'')}</span></h4><button class="btn btn-outline btn-sm" onclick="lAddPos(${a.id},${m.id},${a.product_id})">+ Pozisyon</button></div>`;
+      inner+=`<div class="sec-head" style="margin-top:10px"><h4 style="font-size:14px;margin:0">${esc(a.name)} <span class="muted">· ${esc(L.pmap[a.product_id]||'')}</span></h4>${isAdmin()?`<button class="btn btn-outline btn-sm" onclick="lAddPos(${a.id},${m.id},${a.product_id})">+ Pozisyon</button>`:''}</div>`;
       if(!us.length){ inner+='<p class="muted" style="font-size:12px">Pozisyon yok.</p>'; continue; }
       if(!groups.length){ inner+='<p class="muted" style="font-size:12px">Filtreyle eşleşen pozisyon yok.</p>'; continue; }
       const rows=groups.map(g=>{
@@ -4262,7 +4268,7 @@ async function teamProfil(c,t){
       <div class="tp-i"><h2>${esc(t.name)}${t.app_role==='admin'?'<span class="pill pil-on">yönetici</span>':''}</h2>
         <div class="tp-r">${esc(t.unvan||t.role||'—')}</div>
         <div class="tp-m">${esc(t.eposta||'e-posta yok')}${t.telefon?' · '+esc(t.telefon):''}</div></div>
-      <button class="btn btn-outline btn-sm" onclick="teamForm(${t.id})">Profili Düzenle</button>
+      ${isAdmin()?`<button class="btn btn-outline btn-sm" onclick="teamForm(${t.id})">Profili Düzenle</button>`:''}
     </div>
     <div class="tp-kpi">
       <div class="tp-k"><b>${grup.takip.length}</b><span>Takip ettiği iş</span></div>
@@ -4277,11 +4283,12 @@ async function teamProfil(c,t){
       <section class="card"><div class="card-h"><h3>Not Defteri</h3>
         <span class="chip">kişisel</span></div>
         <div class="card-b">
-          <textarea class="inp" id="tmNot" style="min-height:230px" placeholder="Günlük notlar, hatırlatmalar, görüşme özetleri…">${esc(t.notlar||'')}</textarea>
-          <p class="muted" style="font-size:11.5px;margin:8px 0 10px">Bu defter yalnız bu profilde durur. "Panoya Gönder" dediğinizde seçtiğiniz not, Dashboard'daki Son Notlar bölümüne düşer ve tüm ekip görür.</p>
+          <textarea class="inp" id="tmNot" style="min-height:230px" placeholder="Günlük notlar, hatırlatmalar, görüşme özetleri…" ${isAdmin()?'':'disabled'}>${esc(t.notlar||'')}</textarea>
+          ${isAdmin()?`<p class="muted" style="font-size:11.5px;margin:8px 0 10px">Bu defter yalnız bu profilde durur. "Panoya Gönder" dediğinizde seçtiğiniz not, Dashboard'daki Son Notlar bölümüne düşer ve tüm ekip görür.</p>
           <div style="display:flex;gap:8px;flex-wrap:wrap">
             <button class="btn btn-primary btn-sm" onclick="teamNotKaydet(${t.id})">Kaydet</button>
-            <button class="btn btn-outline btn-sm" onclick="teamNotPaylas(${t.id})">Panoya Gönder</button></div>
+            <button class="btn btn-outline btn-sm" onclick="teamNotPaylas(${t.id})">Panoya Gönder</button></div>`
+          :`<p class="muted" style="font-size:11.5px;margin:8px 0 0">Salt okunur — kaydetme şu an Yönetim yüzeyinde yapılır.</p>`}
         </div></section>
     </div></div>`;
 }
