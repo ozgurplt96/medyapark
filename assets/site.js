@@ -91,19 +91,27 @@ async function load(){
   /* favicon (panelden yüklenir) */
   if(s.favicon){ let l=document.head.querySelector("link[rel~='icon']");
     if(!l){ l=document.createElement('link'); l.rel='icon'; document.head.appendChild(l); } l.href=s.favicon; }
+  /* header: yalnız WhatsApp · Instagram · LinkedIn (sepetin solunda) */
+  const pdfB=document.getElementById('pdfBtn'); if(pdfB) pdfB.style.display='none';
+  const waB=document.getElementById('waBtn'); if(waB) waB.style.display='none';
+  const sbx=document.getElementById('socialBtns');
+  if(sbx){ const IC={
+    whatsapp:'<svg viewBox="0 0 24 24" fill="currentColor"><path d="M17.5 14.4c-.3-.1-1.8-.9-2-1-.3-.1-.5-.1-.7.1-.2.3-.8 1-.9 1.2-.2.2-.3.2-.6.1-.3-.1-1.3-.5-2.4-1.5-.9-.8-1.5-1.8-1.7-2.1-.2-.3 0-.5.1-.6l.5-.5.3-.5c.1-.2 0-.4 0-.5l-.9-2.2c-.2-.6-.5-.5-.7-.5h-.6c-.2 0-.5.1-.8.4-.3.3-1 1-1 2.5s1.1 2.9 1.2 3.1c.1.2 2.1 3.2 5.1 4.5.7.3 1.3.5 1.7.6.7.2 1.4.2 1.9.1.6-.1 1.8-.7 2-1.4.2-.7.2-1.3.2-1.4-.1-.2-.3-.3-.6-.4zM12 21.8c-1.8 0-3.5-.5-5-1.4l-.4-.2-3.7 1 1-3.6-.2-.4A9.8 9.8 0 1 1 12 21.8zm8.4-18.2A11.8 11.8 0 0 0 12 .2C5.5.2.2 5.5.2 12c0 2.1.5 4.1 1.6 5.9L0 24l6.3-1.7a11.8 11.8 0 0 0 5.7 1.5c6.5 0 11.8-5.3 11.8-11.8 0-3.2-1.2-6.1-3.4-8.4z"/></svg>',
+    instagram:'<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.2c3.2 0 3.6 0 4.8.1 1.2.1 1.8.2 2.2.4.6.2 1 .5 1.4.9.4.4.7.8.9 1.4.2.4.4 1 .4 2.2.1 1.3.1 1.6.1 4.8s0 3.6-.1 4.8c-.1 1.2-.2 1.8-.4 2.2-.2.6-.5 1-.9 1.4-.4.4-.8.7-1.4.9-.4.2-1 .4-2.2.4-1.3.1-1.6.1-4.8.1s-3.6 0-4.8-.1c-1.2-.1-1.8-.2-2.2-.4-.6-.2-1-.5-1.4-.9-.4-.4-.7-.8-.9-1.4-.2-.4-.4-1-.4-2.2C2.2 15.6 2.2 15.2 2.2 12s0-3.6.1-4.8c.1-1.2.2-1.8.4-2.2.2-.6.5-1 .9-1.4.4-.4.8-.7 1.4-.9.4-.2 1-.4 2.2-.4C8.4 2.2 8.8 2.2 12 2.2M12 0C8.7 0 8.3 0 7.1.1 5.8.1 4.9.3 4.1.6c-.8.3-1.5.7-2.1 1.4C1.3 2.6.9 3.3.6 4.1.3 4.9.1 5.8.1 7.1 0 8.3 0 8.7 0 12s0 3.7.1 4.9c.1 1.3.3 2.2.6 3 .3.8.7 1.5 1.4 2.1.6.7 1.3 1.1 2.1 1.4.8.3 1.7.5 3 .6 1.2.1 1.6.1 4.9.1s3.7 0 4.9-.1c1.3-.1 2.2-.3 3-.6.8-.3 1.5-.7 2.1-1.4.7-.6 1.1-1.3 1.4-2.1.3-.8.5-1.7.6-3 .1-1.2.1-1.6.1-4.9s0-3.7-.1-4.9c-.1-1.3-.3-2.2-.6-3-.3-.8-.7-1.5-1.4-2.1C21.4 1.3 20.7.9 19.9.6c-.8-.3-1.7-.5-3-.6C15.7 0 15.3 0 12 0zm0 5.8a6.2 6.2 0 1 0 0 12.4 6.2 6.2 0 0 0 0-12.4zM12 16a4 4 0 1 1 0-8 4 4 0 0 1 0 8zm6.4-11.8a1.4 1.4 0 1 0 0 2.9 1.4 1.4 0 0 0 0-2.9z"/></svg>',
+    linkedin:'<svg viewBox="0 0 24 24" fill="currentColor"><path d="M20.5 2h-17A1.5 1.5 0 0 0 2 3.5v17A1.5 1.5 0 0 0 3.5 22h17a1.5 1.5 0 0 0 1.5-1.5v-17A1.5 1.5 0 0 0 20.5 2zM8 19H5v-9h3zM6.5 8.3A1.8 1.8 0 1 1 6.5 4.7a1.8 1.8 0 0 1 0 3.6zM19 19h-3v-4.7c0-1.4-.6-2.1-1.6-2.1-1.1 0-1.9.8-1.9 2.1V19h-3v-9h2.9v1.3c.5-.8 1.5-1.5 2.9-1.5 2.1 0 3.7 1.3 3.7 4.1z"/></svg>'};
+    const links=[[s.social_whatsapp,'whatsapp','WhatsApp'],[s.social_instagram,'instagram','Instagram'],[s.social_linkedin,'linkedin','LinkedIn']].filter(x=>x[0]);
+    sbx.innerHTML=links.map(x=>`<a class="iconbtn soc ${x[1]}" href="${esc(x[0])}" target="_blank" rel="noopener" title="${x[2]}" aria-label="${x[2]}">${IC[x[1]]}</a>`).join(''); }
+  /* yukarı git oku */
+  if(!document.getElementById('toTop')){ const t=document.createElement('button'); t.id='toTop'; t.title='Yukarı git';
+    t.innerHTML='<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5m0 0l-6 6m6-6l6 6"/></svg>';
+    t.onclick=()=>window.scrollTo({top:0,behavior:'smooth'}); document.body.appendChild(t);
+    window.addEventListener('scroll',()=>t.classList.toggle('on',window.scrollY>500),{passive:true}); }
+  /* favicon (panelden yüklenir) */
+  if(s.favicon){ let l=document.head.querySelector("link[rel~='icon']");
+    if(!l){ l=document.createElement('link'); l.rel='icon'; document.head.appendChild(l); } l.href=s.favicon; }
   /* header: whatsapp + sosyal ikonlar */
   if(s.social_whatsapp){ const w=document.getElementById('waBtn'); if(w){ w.href=s.social_whatsapp; w.style.display='flex'; } }
-  const sbx=document.getElementById('socialBtns');
-  if(sbx){ const ic={
-    instagram:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="3" width="18" height="18" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.2" cy="6.8" r="1.1" fill="currentColor" stroke="none"/></svg>',
-    facebook:'<svg viewBox="0 0 24 24" fill="currentColor"><path d="M13.5 21v-7h2.4l.4-3h-2.8V9.1c0-.9.3-1.5 1.6-1.5h1.3V4.9c-.2 0-1-.1-1.9-.1-1.9 0-3.2 1.2-3.2 3.3V11H9v3h2.3v7h2.2z"/></svg>',
-    linkedin:'<svg viewBox="0 0 24 24" fill="currentColor"><path d="M6.4 8.6H3.7V20h2.7V8.6zM5 7.4a1.6 1.6 0 1 0 0-3.2 1.6 1.6 0 0 0 0 3.2zM20.3 20h-2.7v-5.6c0-1.4-.5-2.3-1.7-2.3-.9 0-1.5.6-1.7 1.2-.1.2-.1.5-.1.8V20h-2.7V8.6h2.7v1.2c.4-.6 1.1-1.5 2.8-1.5 2 0 3.4 1.3 3.4 4.1V20z"/></svg>',
-    x:'<svg viewBox="0 0 24 24" fill="currentColor"><path d="M17.3 3H20l-6.6 7.6L21 21h-5.9l-4.6-6-5.3 6H2.5l7.1-8.1L3 3h6l4.1 5.5L17.3 3zm-1 16.2h1.6L7.7 4.7H6l10.3 14.5z"/></svg>',
-    youtube:'<svg viewBox="0 0 24 24" fill="currentColor"><path d="M21.6 7.2a2.8 2.8 0 0 0-2-2C17.9 4.8 12 4.8 12 4.8s-5.9 0-7.6.4a2.8 2.8 0 0 0-2 2A29 29 0 0 0 2 12a29 29 0 0 0 .4 4.8 2.8 2.8 0 0 0 2 2c1.7.4 7.6.4 7.6.4s5.9 0 7.6-.4a2.8 2.8 0 0 0 2-2A29 29 0 0 0 22 12a29 29 0 0 0-.4-4.8zM10 15.2V8.8L15.5 12 10 15.2z"/></svg>'};
-    const links=[[s.social_instagram,'instagram','Instagram'],[s.social_facebook,'facebook','Facebook'],
-      [s.social_linkedin,'linkedin','LinkedIn'],[s.social_x,'x','X'],[s.social_youtube,'youtube','YouTube']]
-      .filter(x=>x[0]);
-    sbx.innerHTML=links.map(x=>`<a class="iconbtn soc" href="${esc(x[0])}" target="_blank" rel="noopener" title="${x[2]}">${ic[x[1]]}</a>`).join(''); }
+  
   buildFilter(); renderFooter(); renderMenu(); initAnalytics();
   view=pathToView(location.pathname);
   render(); pushRoute(true);
@@ -422,7 +430,7 @@ function initHomeGoogle(){
   hgHome=new google.maps.Map(document.getElementById('homeMap'),{
     center:{lat:ADANA[0],lng:ADANA[1]}, zoom:13,
     mapTypeControl:false, streetViewControl:false, fullscreenControl:true,
-    scrollwheel:false, gestureHandling:'cooperative',
+    scrollwheel:true, gestureHandling:'greedy',
     styles:[{featureType:'poi.business',stylers:[{visibility:'off'}]},
             {featureType:'transit',elementType:'labels.icon',stylers:[{visibility:'off'}]}]});
   hgHomeInfo=new google.maps.InfoWindow({maxWidth:270});
@@ -437,7 +445,7 @@ function initHomeLeaflet(){
   const el=document.getElementById('homeMap'); if(!el||typeof L==='undefined')return;
   homeEngine='leaflet';
   if(homeMapObj){ try{homeMapObj.remove();}catch(e){} homeMapObj=null; }
-  homeMapObj=L.map('homeMap',{scrollWheelZoom:false,zoomControl:true,attributionControl:false}).setView(ADANA,13);
+  homeMapObj=L.map('homeMap',{scrollWheelZoom:true,zoomControl:true,attributionControl:false}).setView(ADANA,13);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19}).addTo(homeMapObj);
   homeCluster=L.markerClusterGroup({showCoverageOnHover:false,maxClusterRadius:52,
     iconCreateFunction:c=>{ const n=c.getChildCount(); const sz=n<10?36:(n<50?44:52);
@@ -585,31 +593,40 @@ function renderMecPage(m,aktifAltId){
 
   /* künye şeridi */
   const units=alts.reduce((n,a)=>n+(a.units||[]).length,0);
-  const kunye=`<div class="mp-bar"><div class="mp-bar-in">
+  const kunye=!vis(m,'bar',true)?'':`<div class="mp-bar"><div class="mp-bar-in">
       ${m.logo?`<div class="mp-logo">${picture(m.logo,null,'','logo')}</div>`:''}
-      ${m.gunluk_gosterim?`<div class="mp-k2">${uIkon('diger',26)}<b>${esc(m.gunluk_gosterim)}</b></div>`:''}
-      <div class="mp-k2">${uIkon((alts[0]&&alts[0].product||{}).ikon,26)}<b>${units} Pozisyon</b></div>
+      ${alts.map(a=>{ const p=a.product||{}; const ad=p.name||a.name; const bir=birimAdi(a);
+        const ek=new RegExp(bir,'i').test(ad)?'':` <small>/ ${esc(bir)}</small>`;
+        return `<div class="mp-k2">${uIkon(p.ikon,26)}<b>${birimSay(a)} ${esc(ad)}${ek}</b></div>`; }).join('')}
       <div class="mp-bar-btn">
         ${alts.length?`<a class="mp-lnk" onclick="mpScroll('mp-alanlar')">Müsait Alanları Gör ↓</a>`:''}
         <a class="btn btn-primary btn-sm" onclick="mpTeklif()">Teklif İste</a></div>
     </div></div>`;
 
   /* konum bilgisi: harita (+kroki geçişi) | künye kartı */
-  const pts=[]; alts.forEach(a=>(a.units||[]).forEach(u=>{const la=parseFloat(u.lat),ln=parseFloat(u.lng);
-    if(isFinite(la)&&isFinite(ln))pts.push({lat:la,lng:ln,name:u.name||'',konum:u.konum||'',alt:a.id,img:(a.image||m.image||''),urun:((a.product||{}).name||a.name)});}));
+  const nowYm=curYm();
+  const yuzBilgi=(u,a)=>{ if(!u)return null; const mp={}; (u.booked||[]).forEach(b=>mp[b.ym]=b.status);
+    return {id:u.id,name:u.name||'',konum:u.konum||'',img:u.image||a.image||m.image||'',st:mp[nowYm]||'bos',surf:posParts(u.name).surf}; };
+  const pts=[]; window.__mpPts=pts; window.__mpSonPin=null; alts.forEach(a=>groupUnits(a.units||[]).forEach(g=>{
+    const ref=g.A||g.B; const la=parseFloat((g.A||{}).lat!=null?g.A.lat:(g.B||{}).lat), ln=parseFloat((g.A||{}).lng!=null?g.A.lng:(g.B||{}).lng);
+    if(!ref||!isFinite(la)||!isFinite(ln))return;
+    pts.push({lat:la,lng:ln,name:g.base,alt:a.id,urun:((a.product||{}).name||a.name),A:yuzBilgi(g.A,a),B:yuzBilgi(g.B,a),konum:ref.konum||''});}));
   const haritaVar = pts.length>0 && visMode(m,'maps')!=='off';
   const krokiVar = vis(m,'kroki',!!m.yerlesim_plani);
   const konumSol = (haritaVar||krokiVar) ? `<div class="mp-map-wrap">
-      ${(haritaVar&&krokiVar)?`<div class="mp-swi"><button class="on" onclick="mpGorunum('harita',this)">Harita</button><button onclick="mpGorunum('kroki',this)">Kroki</button></div>`:''}
-      ${haritaVar?`<div class="mp-map" id="mpHarita"><div id="hubMap"></div></div>`:''}
+      ${haritaVar?`<div class="mp-swi"><button class="on" onclick="mpGorunum('harita',this)">Harita</button><button onclick="mpGorunum('uydu',this)">Uydu</button><button class="gm-only" onclick="mpGorunum('sokak',this)">Sokak</button>${krokiVar?`<button onclick="mpGorunum('kroki',this)">Kroki</button>`:''}</div>`:''}
+      ${haritaVar?`<div class="mp-map" id="mpHarita"><div id="hubMap"></div></div><div class="mp-sokak" id="mpSokak" style="display:none"><div id="mpPano"></div><div class="mp-sokak-not" id="mpSokakNot"></div></div>`:''}
       ${krokiVar?`<div class="mp-kroki" id="mpKroki" ${haritaVar?'style="display:none"':''}><div class="kroki-box" onclick="lightbox('${esc(m.yerlesim_plani)}')">${picture(m.yerlesim_plani,m.kroki_mobil,'kroki-img','Yerleşim krokisi')}<span class="kroki-zoom">Büyütmek için tıklayın</span></div></div>`:''}
     </div>` : `<div class="mp-map-wrap mp-map-bos">${m.intro_image?`<img src="${esc(m.intro_image)}" alt="">`:'<span>Konum bilgisi yakında</span>'}</div>`;
-  const konum=`<section class="mp-sec" id="mp-konum"><h2 class="mp-h2">Konum Bilgisi</h2>
-    <div class="mp-konum">${konumSol}
-      <div class="mp-kunye"><h3>${esc(m.baslik||m.name)}</h3>
+  const konum=!vis(m,'konum',true)?'':`<section class="mp-sec" id="mp-konum"><h2 class="mp-h2">Konum Bilgisi</h2>
+    <div class="mp-konum${!vis(m,'kunye',true)?' solo':''}">${konumSol}
+      ${!vis(m,'kunye',true)?'':`<div class="mp-kunye"><h3>${esc(m.baslik||m.name)}</h3>
+        ${(()=>{ const av=(Array.isArray(m.avantajlar)?m.avantajlar.filter(a=>a&&(a.t||a.title)):[]);
+          const ilk=m.gunluk_gosterim?`<li class="ziy">${uIkon(st.barIkon||'diger',16)}<b>${esc(m.gunluk_gosterim)}</b></li>`:'';
+          const rest=av.map(a=>`<li>${a.i?uIkon(a.i,16):'<i>✓</i>'}<b>${esc(a.t||a.title)}</b>${(a.d||a.desc)?`<span>${esc(a.d||a.desc)}</span>`:''}</li>`).join('');
+          return (ilk||rest)?`<ul class="mp-avl">${ilk}${rest}</ul>`:''; })()}
         ${m.aciklama?`<p>${esc(m.aciklama)}</p>`:''}
-        ${(Array.isArray(m.avantajlar)?m.avantajlar.filter(a=>a&&(a.t||a.title)):[]).slice(0,4).map(a=>`<div class="mp-avm">${a.i?uIkon(a.i,16):'<i>✓</i>'}<span>${esc(a.t||a.title)}</span></div>`).join('')}
-      </div></div></section>`;
+      </div>`}</div></section>`;
 
   /* reklam alanları: sekmeler + slider|metin */
   const tabs=alts.map((a,i)=>`<button class="mp-tab${String(a.id)===String(aktifAltId)?' on':''}" data-alt="${a.id}" onclick="mpTab('${a.id}')">
@@ -629,27 +646,29 @@ function renderMecPage(m,aktifAltId){
         <div class="mp-prod2-b"><h3>${esc(p.name||a.name)}</h3>
           ${a.aciklama?`<p>${esc(a.aciklama)}</p>`:''}${capa}
           <div class="mp-specs">${spec}</div></div></div></div>`;}).join('');
-  const alanlar = alts.length ? `<section class="mp-sec" id="mp-alanlar"><h2 class="mp-h2">Reklam Alanları</h2>
-      <div class="mp-tabs">${tabs}</div>${paneller}</section>` : '';
+  const tekli=alts.length===1;
+  const alanlar = (alts.length && vis(m,'alanlar',true)) ? `<section class="mp-sec" id="mp-alanlar"><h2 class="mp-h2">${tekli?'Reklam Alanı':'Reklam Alanları'}</h2>
+      ${tekli?'':`<div class="mp-tabs">${tabs}</div>`}${paneller}</section>` : '';
 
   /* rezervasyon tablosu (aktif sekmenin) */
   const tablolar=alts.map(a=>`<div class="mp-tbl${String(a.id)===String(aktifAltId)?' on':''}" data-alt="${a.id}">${rezTableHTML(a)}</div>`).join('');
-  const tablo = alts.length ? `<section class="mp-sec" id="mp-tablo"><h2 class="mp-h2">Rezervasyon Tablosu</h2>${tablolar}
+  const tablo = (alts.length && vis(m,'tablo',true)) ? `<section class="mp-sec" id="mp-tablo">${tablolar}
       <div class="mp-sepet" id="mpSepet"></div></section>` : '';
 
   /* aksiyon bandı */
   const katalogUrl=m.katalog||st.catalogPdf||'';
-  const bandImg=m.intro_image||m.image||'';
-  const band=`<section class="mp-band" id="mp-teklif"><div class="mp-band-in">
+  const bandImg=st.bantImage||m.intro_image||m.image||'';   /* genel açıkhava görseli Ayarlar'dan; yoksa mecranın görseli */
+  const band=!vis(m,'bant',true)?'':`<section class="mp-band" id="mp-teklif"><div class="mp-band-in">
       ${bandImg?`<div class="mp-band-img"><img src="${esc(bandImg)}" alt=""></div>`:''}
       <div class="mp-band-b">
-        <h2>${esc(m.name)} için teklif alın</h2>
-        <p>Tabloda ayları seçip teklif isteyin ya da bize bırakın, sizin için planlayalım.</p>
+        <span class="mp-band-k">Teklif &amp; Planlama</span>
+        <h2>${esc(m.name)} için hemen teklif alın</h2>
+        <p>Rezervasyon tablosundan istediğiniz ayları seçin, sepete ekleyin; teklif talebiniz anında ekibimize düşer ve aynı gün içinde size dönüş yaparız. Kararsızsanız hedef kitlenizi ve bütçenizi paylaşın, mecra karmasını biz planlayalım — ücretsiz, bağlayıcılığı yok.</p>
         <div class="mp-band-btn">
           <a class="btn btn-primary" onclick="mpTeklif()">Teklif Al</a>
           ${st.social_whatsapp?`<a class="btn btn-wa" href="${esc(st.social_whatsapp)}" target="_blank" rel="noopener">WhatsApp</a>`:''}
-          ${katalogUrl?`<a class="btn btn-outline" href="${esc(katalogUrl)}" target="_blank" rel="noopener" download>PDF Katalog</a>`:''}
-          <a class="btn btn-outline" href="${BASE}medya-planlama" onclick="openPlan();return false;">Biz Planlayalım</a>
+          ${katalogUrl?`<a class="btn btn-red" href="${esc(katalogUrl)}" target="_blank" rel="noopener" download>PDF Katalog</a>`:''}
+          <a class="btn btn-glow" href="${BASE}medya-planlama" onclick="openPlan();return false;"><span>Biz Planlayalım</span></a>
         </div></div></div></section>`;
 
   /* diğer lokasyonlar */
@@ -660,10 +679,10 @@ function renderMecPage(m,aktifAltId){
       <span class="mp-dc-top">${esc(ozet)}</span>
       ${x.image?`<img src="${esc(x.image)}" alt="" loading="lazy">`:''}
       <span class="mp-dc-b"><small>${esc(x.badge||'')}</small><b>${esc(x.name)}</b><em>Keşfet</em></span></a></div>`;}).join('');
-  const diger = digerler.length ? `<section class="mp-sec" id="mp-diger"><h2 class="mp-h2">Diğer Mecralara Göz Atın</h2>
+  const diger = (digerler.length && vis(m,'diger',true)) ? `<section class="mp-sec" id="mp-diger"><h2 class="mp-h2">Diğer Mecralarımıza Göz Atın</h2>
       <div class="carousel"><div class="cnav l" onclick="carScroll(-1)">‹</div><div class="cartrack" id="cartrack">${relCards}</div><div class="cnav r" onclick="carScroll(1)">›</div></div></section>` : '';
 
-  const sticky=`<div class="mp-sticky" id="mpSticky"><div class="mp-sticky-in">
+  const sticky=!vis(m,'sticky',true)?'':`<div class="mp-sticky" id="mpSticky"><div class="mp-sticky-in">
       <b class="mp-sn">${esc(m.name)}</b>
       <nav class="mp-anch"><a onclick="mpScroll('mp-konum')">Konum</a>${alts.length?'<a onclick="mpScroll(\'mp-alanlar\')">Alanlar</a><a onclick="mpScroll(\'mp-tablo\')">Rezervasyon</a>':''}</nav>
       <span class="mp-cart" id="mpCart"></span>
@@ -672,13 +691,41 @@ function renderMecPage(m,aktifAltId){
   app().innerHTML=`${banner(bobj,(m.baslik||m.name),nav)}${kunye}${sticky}
     <div class="mp">${konum}${alanlar}${tablo}</div>${band}<div class="mp">${diger}</div>`;
   mpSepetCiz(); mpCartSay();
-  if(haritaVar) initHubMap(pts, m.theme_color||'#0071e3', true);
+  if(haritaVar){ if(gKey()) initHubMapG(pts, m.theme_color||'#0071e3'); else initHubMap(pts, m.theme_color||'#0071e3', true); }
   mpStickyKur();
 }
-function mpGorunum(k,btn){ const h=document.getElementById('mpHarita'), kr=document.getElementById('mpKroki');
-  if(h)h.style.display=k==='harita'?'':'none'; if(kr)kr.style.display=k==='kroki'?'':'none';
-  document.querySelectorAll('.mp-swi button').forEach(b=>b.classList.toggle('on',b===btn));
-  if(k==='harita'&&hubMapObj)setTimeout(()=>hubMapObj.invalidateSize(),50); }
+let mpPano=null, hubSatLayer=null, hubOsmLayer=null;
+function mpGorunum(k,btn){
+  const h=document.getElementById('mpHarita'), kr=document.getElementById('mpKroki'), sk=document.getElementById('mpSokak');
+  const haritaGoster=(k==='harita'||k==='uydu');
+  if(h)h.style.display=haritaGoster?'':'none'; if(kr)kr.style.display=k==='kroki'?'':'none'; if(sk)sk.style.display=k==='sokak'?'':'none';
+  document.querySelectorAll('.mp-swi button').forEach(b=>b.classList.toggle('on',btn?b===btn:b.textContent.trim().toLocaleLowerCase('tr')===k));
+  if(haritaGoster){
+    if(gHub&&window.google){ gHub.setMapTypeId(k==='uydu'?'hybrid':'roadmap'); setTimeout(()=>google.maps.event.trigger(gHub,'resize'),50); }
+    else if(hubMapObj){ if(k==='uydu'){ if(!hubSatLayer)hubSatLayer=L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxZoom:19});
+        if(hubOsmLayer)hubMapObj.removeLayer(hubOsmLayer); hubSatLayer.addTo(hubMapObj); }
+      else { if(hubSatLayer)hubMapObj.removeLayer(hubSatLayer); if(hubOsmLayer)hubOsmLayer.addTo(hubMapObj); }
+      setTimeout(()=>hubMapObj.invalidateSize(),50); }
+  }
+  if(k==='sokak') mpSokakAc(window.__mpSonPin||(window.__mpPts||[])[0]);
+}
+/* Sokak görünümü: seçili (ya da ilk) pinin konumunda en yakın panorama */
+function mpSokakAc(p){
+  const el=document.getElementById('mpPano'), not=document.getElementById('mpSokakNot'); if(!el||!p)return;
+  if(!window.google||!google.maps.StreetViewService){ if(not)not.textContent='Sokak görünümü için Google haritası gerekli.'; return; }
+  if(not)not.textContent='Sokak görüntüsü aranıyor…';
+  const sv=new google.maps.StreetViewService();
+  sv.getPanorama({location:{lat:p.lat,lng:p.lng},radius:90,source:google.maps.StreetViewSource.OUTDOOR},(data,status)=>{
+    if(status!=='OK'||!data||!data.location){ if(not)not.textContent=`${p.name} için sokak görüntüsü bulunamadı.`; el.innerHTML=''; mpPano=null; return; }
+    const heading=google.maps.geometry?google.maps.geometry.spherical.computeHeading(data.location.latLng,new google.maps.LatLng(p.lat,p.lng)):0;
+    if(!mpPano) mpPano=new google.maps.StreetViewPanorama(el,{addressControl:false,fullscreenControl:true,motionTracking:false,linksControl:true,panControl:true,enableCloseButton:false});
+    mpPano.setPano(data.location.pano); mpPano.setPov({heading:heading||0,pitch:0}); mpPano.setVisible(true);
+    if(not)not.textContent=`${p.urun||''} · ${p.name} — sokak görünümü`;
+  });
+}
+/* pin kartından sokak görünümü */
+function mpSokakPin(altId,base){ const p=(window.__mpPts||[]).find(x=>String(x.alt)===String(altId)&&x.name===base); if(!p)return;
+  window.__mpSonPin=p; const b=[...document.querySelectorAll('.mp-swi button')].find(x=>x.textContent.trim()==='Sokak'); mpGorunum('sokak',b); }
 function mpSl(btn,d){ const sl=btn.closest('.mp-sl'); const imgs=sl.querySelectorAll('img'); let i=+sl.dataset.i||0;
   i=(i+d+imgs.length)%imgs.length; imgs.forEach((im,k)=>im.classList.toggle('on',k===i)); sl.dataset.i=i; }
 function mpTeklif(){ if(typeof cart!=='undefined'&&cart.length){ toggleCart(); } else { mpScroll('mp-tablo'); } }
@@ -687,8 +734,49 @@ function mpSepetCiz(){ const box=document.getElementById('mpSepet'); if(!box)ret
   const n=(typeof cart!=='undefined'&&cart)?cart.length:0;
   box.innerHTML=n?`<div class="mp-sepet-in"><b>${n} ay seçildi</b>${showPrices()?`<span>Tahmini ${money(cartTotal())}</span>`:''}
     <button class="btn btn-primary btn-sm" onclick="toggleCart()">Sepeti Aç ve Teklif İste</button></div>`:''; }
-/* harita pini: görsel + başlık + tabloya git */
-function mpPinGit(altId){ mpTab(altId); setTimeout(()=>mpScroll('mp-tablo'),80); }
+/* harita pini kartı: tek yüzeyde görsel+buton; çift yüzeyde A/B yan yana, yüz seçilir */
+function mpPinKart(p){
+  const durum=y=>y.st==='dolu'?'<em class="pp-d dolu">Bu ay dolu</em>':(y.st==='rezerve'?'<em class="pp-d rez">Bu ay rezerve</em>':'<em class="pp-d bos">Bu ay müsait</em>');
+  const yuz=(y,etiket)=>`<div class="pp-y"><div class="pp-img">${y.img?`<img src="${esc(y.img)}" alt="">`:'<span>Fotoğraf yok</span>'}</div>
+      <b>${esc(etiket)}</b>${y.konum?`<span>${esc(y.konum)}</span>`:''}${durum(y)}
+      <button class="btn btn-primary btn-sm" onclick="mpPinGit('${p.alt}',${y.id})">${esc(etiket.split(' ')[0])} yüzünü seç</button></div>`;
+  const sokak=(window.google&&gHub)?`<button class="pp-sv" onclick="mpSokakPin('${p.alt}','${esc(p.name)}')">Sokak görünümü ↗</button>`:'';
+  if(p.B) return `<div class="mp-pop cift"><div class="pp-h"><b>${esc(p.urun)} · ${esc(p.name)}</b><span>Çift yüzlü pano — yüzü seçin</span>${sokak}</div>
+    <div class="pp-2">${yuz(p.A,'A yüzü (ön)')}${yuz(p.B,'B yüzü (arka)')}</div></div>`;
+  const y=p.A; return `<div class="mp-pop"><div class="pp-img">${y.img?`<img src="${esc(y.img)}" alt="">`:''}</div>
+    <b>${esc(p.urun)} · ${esc(p.name)}</b>${y.konum?`<span>${esc(y.konum)}</span>`:''}${durum(y)}
+    <button class="btn btn-primary btn-sm" onclick="mpPinGit('${p.alt}',${y.id})">Müsaitliğe bak</button>${sokak}</div>`;
+}
+/* sekmeyi aç, tabloya in, seçilen yüzeyin satırını vurgula */
+function mpPinGit(altId,unitId){
+  mpTab(altId);
+  setTimeout(()=>{ mpScroll('mp-tablo');
+    if(unitId==null)return;
+    document.querySelectorAll('.rcell.hl').forEach(e=>e.classList.remove('hl'));
+    document.querySelectorAll('.rg-row.hl').forEach(e=>e.classList.remove('hl'));
+    const cells=document.querySelectorAll(`.mp-tbl.on .rcell[data-u='${unitId}']`);
+    cells.forEach(c=>c.classList.add('hl'));
+    const row=cells[0]&&cells[0].closest('.rg-row'); if(row){ row.classList.add('hl'); setTimeout(()=>row.scrollIntoView({behavior:'smooth',block:'center'}),350); }
+    setTimeout(()=>{ cells.forEach(c=>c.classList.remove('hl')); if(row)row.classList.remove('hl'); },6000);
+  },80);
+}
+let gHub=null;
+function initHubMapG(pts,color){
+  loadGoogle().then(()=>{
+    const el=document.getElementById('hubMap'); if(!el)return;
+    gHub=new google.maps.Map(el,{mapTypeControl:false,streetViewControl:false,fullscreenControl:false,zoomControl:true,
+      scrollwheel:true,gestureHandling:'greedy',clickableIcons:false,styles:[{featureType:'poi',stylers:[{visibility:'off'}]}]});
+    const info=new google.maps.InfoWindow({maxWidth:250});
+    const b=new google.maps.LatLngBounds();
+    pts.forEach(p=>{ const mk=new google.maps.Marker({map:gHub,position:{lat:p.lat,lng:p.lng},title:p.name,
+        icon:{url:gPinSvg(color),scaledSize:new google.maps.Size(32,42),anchor:new google.maps.Point(16,41)}});
+      mk.addListener('click',()=>{ window.__mpSonPin=p; info.setOptions({maxWidth:p.B?420:250}); info.setContent(mpPinKart(p)); info.open(gHub,mk); });
+      b.extend(mk.getPosition()); });
+    document.querySelectorAll('.mp-swi .gm-only').forEach(x=>x.style.display='');
+    if(pts.length===1) { gHub.setCenter(b.getCenter()); gHub.setZoom(16); }
+    else { gHub.fitBounds(b,60); google.maps.event.addListenerOnce(gHub,'idle',()=>{ if(gHub.getZoom()>17)gHub.setZoom(17); }); }
+  }).catch(()=>{ initHubMap(pts,color,true); });   /* anahtar yok/reddedildi → Leaflet */
+}
 function altRenk(i){ return ['#0e7c66','#2f6fe4','#c2410c','#7c3aed','#0891b2','#b91c1c'][i%6]; }
 function mpScroll(id){ const el=document.getElementById(id); if(!el)return;
   const y=el.getBoundingClientRect().top+window.scrollY-70; window.scrollTo({top:y,behavior:'smooth'}); }
@@ -767,11 +855,10 @@ function initHubMap(pts,color,buyuk){
   setTimeout(()=>{
     const el=document.getElementById('hubMap'); if(!el||typeof L==='undefined')return;
     if(hubMapObj){ try{hubMapObj.remove();}catch(e){} hubMapObj=null; }
-    hubMapObj=L.map('hubMap',{scrollWheelZoom:false,zoomControl:!!buyuk,dragging:!!buyuk,attributionControl:false});
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:18}).addTo(hubMapObj);
+    hubMapObj=L.map('hubMap',{scrollWheelZoom:!!buyuk,zoomControl:!!buyuk,dragging:!!buyuk,attributionControl:false});
+    hubOsmLayer=L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:18}).addTo(hubMapObj); hubSatLayer=null;
     const ms=pts.map(p=>{ const mk=L.marker([p.lat,p.lng],{icon:pinIcon(color)});
-      if(buyuk) mk.bindPopup(`<div class="mp-pop">${p.img?`<img src="${esc(p.img)}" alt="">`:''}<b>${esc(p.urun||'')} · ${esc(p.name)}</b>${p.konum?`<span>${esc(p.konum)}</span>`:''}
-        <button class="btn btn-primary btn-sm" onclick="mpPinGit('${p.alt}')">Müsaitliğe bak</button></div>`,{maxWidth:240});
+      if(buyuk) mk.bindPopup(mpPinKart(p),{maxWidth:p.B?420:250});
       return mk; });
     const grp=L.featureGroup(ms).addTo(hubMapObj);
     try{ hubMapObj.fitBounds(grp.getBounds().pad(buyuk?0.25:0.5),{maxZoom:buyuk?17:15}); }
@@ -832,8 +919,9 @@ function initAltMap(pts,color){
 function rollNav(d){ roll+=d; render(); }
 function carScroll(d){ const t=document.getElementById('cartrack'); if(t)t.scrollBy({left:d*340,behavior:'smooth'}); }
 function pick(uid,ym){ toggleMonth(uid,ym); }
+function altOfUnit(uid){ for(const mm of (D.mecralar||[])) for(const a of (mm.alts||[])) if((a.units||[]).some(x=>String(x.id)===String(uid))) return {alt:a,m:mm}; return null; }
 function toggleMonth(uid,ym){
-  const alt=D.altById[view.altId]; if(!alt)return; const m=mec(view.mecId);
+  const bul=altOfUnit(uid); if(!bul)return; const alt=bul.alt, m=bul.m;
   const u=(alt.units||[]).find(x=>String(x.id)===String(uid)); if(!u)return; const p=alt.product||{};
   const i=cart.findIndex(c=>String(c.unitId)===String(uid)&&c.ym===ym);
   if(i>-1){ cart.splice(i,1); }
@@ -841,7 +929,8 @@ function toggleMonth(uid,ym){
     const donem=MONTHS_LONG[+mm-1]+' '+y;
     cart.push({unitId:Number(uid),mecra:m.name,alt:alt.name,unit:u.name,product:p.name,olcu:u.olcu||p.olcu||'',ym,monthLabel:donem,price,priceLabel:money(price)});
     bildir(`<b>Sepete eklendi</b><span>${esc(m.name)} · ${esc(u.name)} · ${esc(donem)}</span>`,'ok');
-    sepetCanlan(); }
+    sepetCanlan();
+    const dr=document.getElementById('drawer'); if(dr&&!dr.classList.contains('open')&&window.innerWidth>900) toggleCart(); }
   badge(); renderCart(); updateCell(uid,ym); renderSepetInline();
 }
 function updateCell(uid,ym){ const el=document.querySelector(`.rcell[data-u='${uid}'][data-ym='${ym}']`); if(!el)return;
@@ -1001,10 +1090,9 @@ function renderMenu(){
   const cfg=(D.settings||{}).menu;
   const items=(cfg&&Array.isArray(cfg.items)&&cfg.items.length)
     ? cfg.items.filter(i=>i&&i.show!==false)
-    : (D.pages||[]).filter(p=>p.in_menu!==false).map(p=>({label:p.title||p.slug,type:'sayfa',value:p.slug}));
+    : [];                                     /* panelden seçilene kadar header menüsü boş */
   const ust=document.getElementById('navMenu');
-  if(ust) ust.innerHTML=items.map(i=>menuLink(i,false)).join('')
-    +`<a class="nav-admin" href="admin.html" title="Yönetim Paneli">⚙</a>`;
+  if(ust) ust.innerHTML=items.map(i=>menuLink(i,false)).join('');
   const el=document.getElementById('menuPages');
   if(el) el.innerHTML=items.map(i=>menuLink(i,true)).join('');
 }
@@ -1196,7 +1284,7 @@ function loadGoogle(){
     };
     const g=document.createElement('script');
     g.async=true;
-    g.src='https://maps.googleapis.com/maps/api/js?key='+encodeURIComponent(key)+'&callback=__gmReady&language=tr&region=TR';
+    g.src='https://maps.googleapis.com/maps/api/js?key='+encodeURIComponent(key)+'&libraries=geometry&callback=__gmReady&language=tr&region=TR';
     g.onerror=()=>{ clearTimeout(t); rej(new Error('google maps yuklenemedi')); };
     document.head.appendChild(g);
   });
