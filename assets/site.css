@@ -1055,3 +1055,164 @@ body{overflow-x:hidden;}
   .mp-k2{font-size:15px;} .mp-bar-btn{margin-left:0;width:100%;justify-content:space-between;}
   .mp-kunye h3{font-size:21px;} .mp-prod2-b h3{font-size:22px;} .mp-tab span{font-size:14px;}
 }
+.mp-konum.solo{grid-template-columns:1fr;}
+
+/* v55: içerik genişliği header ile aynı (1290px / 20px), geçiş düğmesi sağ üst */
+.mp{max-width:none;padding:0 0 40px;}
+.mp-bar-in{max-width:none;padding:14px 0;}
+.mp-sticky-in{max-width:1290px;padding:9px 20px;}
+.mp-band{margin-left:-20px;margin-right:-20px;padding:52px 20px;}
+.mp-band-in{max-width:none;}
+.mp-swi{left:auto;right:12px;}
+@media(max-width:900px){ .mp-band{padding:36px 20px;} }
+@media(max-width:640px){ .mp-band{margin-left:-16px;margin-right:-16px;} }
+
+/* v56: geniş harita/görsel, dar metin; tam genişlik teklif bandı */
+body{overflow-x:clip;}
+.mp-konum{grid-template-columns:minmax(0,2.3fr) minmax(0,1fr);gap:20px;align-items:stretch;}
+.mp-map-wrap,.mp-map-wrap .mp-map,.mp-map-wrap #hubMap{min-height:500px;}
+.mp-kunye{height:100%;}
+.mp-prod2{grid-template-columns:minmax(0,2.2fr) minmax(0,1fr);gap:24px;}
+.mp-sl{aspect-ratio:16/9;min-height:360px;}
+.mp-prod2-b{padding:10px 10px 10px 0;display:flex;flex-direction:column;}
+.mp-prod2-b .mp-specs{margin-top:auto;}
+.mp-band{position:relative;width:100vw;margin-left:calc(50% - 50vw);margin-right:0;padding:0;background:#0b0b0d;color:#fff;overflow:hidden;}
+.mp-band-in{max-width:1290px;margin:0 auto;padding:0 20px;grid-template-columns:minmax(0,1.05fr) minmax(0,1fr);gap:48px;min-height:440px;}
+.mp-band-img{aspect-ratio:auto;height:100%;min-height:440px;border-radius:0;position:relative;background:none;}
+.mp-band-img::after{content:'';position:absolute;inset:0;background:linear-gradient(90deg,rgba(11,11,13,0) 45%,#0b0b0d 100%),linear-gradient(180deg,rgba(11,11,13,.35) 0%,rgba(11,11,13,0) 30%,rgba(11,11,13,0) 70%,#0b0b0d 100%);}
+.mp-band-img img{filter:saturate(1.05);}
+.mp-band-b{padding:56px 0;}
+.mp-band-k{display:inline-block;font-size:11.5px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:#7fb6ff;margin-bottom:12px;}
+.mp-band-b h2{font-size:32px;}
+.mp-band-b p{max-width:52ch;font-size:15px;line-height:1.7;margin-bottom:26px;}
+.btn-red{background:var(--clay,#c72c1f);color:#fff;border-color:var(--clay,#c72c1f);} .btn-red:hover{background:#a9231a;}
+.btn-glow{position:relative;background:#fff;color:var(--ink);border:0;padding:12px 22px;overflow:hidden;isolation:isolate;}
+.btn-glow span{position:relative;z-index:2;}
+.btn-glow::before{content:'';position:absolute;inset:-150%;background:conic-gradient(from 0deg,#0071e3,#c72c1f,#f5b400,#1a7f37,#0071e3);opacity:0;transition:opacity .25s;z-index:0;}
+.btn-glow::after{content:'';position:absolute;inset:2px;background:#fff;border-radius:inherit;z-index:1;transition:inset .2s;}
+.btn-glow:hover::before{opacity:1;animation:glowspin 2.2s linear infinite;}
+.btn-glow:hover::after{inset:3px;}
+@keyframes glowspin{to{transform:rotate(360deg);}}
+@media(prefers-reduced-motion:reduce){.btn-glow:hover::before{animation:none;}}
+@media(max-width:900px){
+  .mp-konum,.mp-prod2{grid-template-columns:1fr;}
+  .mp-map-wrap,.mp-map-wrap .mp-map,.mp-map-wrap #hubMap{min-height:340px;} .mp-sl{min-height:0;}
+  .mp-band-in{grid-template-columns:1fr;gap:0;min-height:0;}
+  .mp-band-img{min-height:240px;max-height:300px;}
+  .mp-band-img::after{background:linear-gradient(180deg,rgba(11,11,13,0) 40%,#0b0b0d 100%);}
+  .mp-band-b{padding:26px 0 40px;} .mp-band-b h2{font-size:24px;}
+}
+
+/* v58: bant görseli en soldan, yalnız sağa yumuşak geçiş; 4 buton yan yana */
+.mp-band-in{display:block;max-width:1290px;margin:0 auto;padding:0 20px;min-height:460px;position:relative;}
+.mp-band-img{position:absolute;left:calc(50% - 50vw);top:0;bottom:0;width:calc(50vw + 40px);min-height:0;height:auto;aspect-ratio:auto;border-radius:0;}
+.mp-band-img img{width:100%;height:100%;object-fit:cover;object-position:center;}
+.mp-band-img::after{background:linear-gradient(90deg,rgba(11,11,13,0) 58%,#0b0b0d 100%);}
+.mp-band-b{position:relative;margin-left:calc(50% + 24px);padding:60px 0;max-width:600px;}
+.mp-band-btn{flex-wrap:nowrap;gap:10px;}
+.mp-band-btn .btn{min-width:0;flex:1 1 0;padding:12px 10px;white-space:nowrap;font-size:13.5px;}
+.btn-glow{padding:12px 10px;}
+@media(max-width:1100px){ .mp-band-btn{flex-wrap:wrap;} .mp-band-btn .btn{flex:1 1 45%;} }
+@media(max-width:900px){
+  .mp-band-in{min-height:0;}
+  .mp-band-img{position:relative;left:auto;width:100vw;margin-left:-20px;height:260px;}
+  .mp-band-img::after{background:linear-gradient(180deg,rgba(11,11,13,0) 40%,#0b0b0d 100%);}
+  .mp-band-b{margin-left:0;max-width:none;padding:22px 0 40px;}
+}
+@media(max-width:640px){ .mp-band-img{margin-left:-16px;} }
+
+/* v59: avantaj maddeleri; harita = slider genişliği ve yüksekliği */
+.mp-avl{list-style:none;margin:0 22px 14px;padding:0;display:flex;flex-direction:column;gap:7px;}
+.mp-avl li{display:flex;align-items:baseline;gap:9px;font-size:14px;line-height:1.45;}
+.mp-avl li i{width:18px;height:18px;border-radius:50%;background:var(--teal-soft);color:var(--teal);font-size:11px;font-style:normal;font-weight:700;display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;position:relative;top:2px;}
+.mp-avl li .ui-ic{color:var(--teal);flex:0 0 auto;position:relative;top:3px;}
+.mp-avl li b{font-weight:700;color:var(--ink);}
+.mp-avl li span{color:var(--ink2);font-size:13px;}
+.mp-avl li span::before{content:'— ';}
+.mp-avm{display:none;}
+.mp-konum,.mp-prod2{grid-template-columns:minmax(0,2.3fr) minmax(0,1fr);gap:20px;}
+.mp-prod2{padding:0;overflow:hidden;}
+.mp-sl{border-radius:0;aspect-ratio:auto;height:500px;min-height:0;}
+.mp-prod2-b{padding:22px 22px 22px 0;}
+@media(max-width:900px){ .mp-konum,.mp-prod2{grid-template-columns:1fr;} .mp-sl{height:auto;aspect-ratio:16/10;} .mp-prod2-b{padding:16px 18px 18px;} }
+
+/* v60: bölümler arası nefes; çekmece sepeti üstte */
+.mp-sec{padding:56px 0 8px;}
+.mp-band{margin-top:64px;}
+.mp-h2{margin-bottom:20px;}
+@media(max-width:640px){ .mp-sec{padding:40px 0 6px;} .mp-band{margin-top:44px;} }
+.cbadge{animation:cb-pop .25s ease-out;}
+@keyframes cb-pop{from{transform:scale(.5);}to{transform:scale(1);}}
+
+/* v61: header sosyal ikonları — yumuşak yuvarlak zemin, markaya özel hover */
+.nav-actions{display:flex;align-items:center;gap:8px;}
+.iconbtn.soc{width:40px;height:40px;background:var(--bg2);color:var(--ink2);border-radius:50%;display:flex !important;}
+.iconbtn.soc svg{width:18px;height:18px;}
+.iconbtn.soc:hover{color:#fff;transform:translateY(-1px);}
+.iconbtn.soc.whatsapp:hover{background:#25d366;}
+.iconbtn.soc.instagram:hover{background:linear-gradient(45deg,#f58529,#dd2a7b 55%,#8134af);}
+.iconbtn.soc.linkedin:hover{background:#0a66c2;}
+.iconbtn.cart{margin-left:6px;}
+#pdfBtn,#waBtn{display:none !important;}
+@media(max-width:640px){ .iconbtn.soc{display:none !important;} }
+
+/* v62: çift yüzlü pin kartı + satır vurgusu */
+.mp-pop.cift{min-width:360px;}
+.pp-h b{display:block;font-size:14px;} .pp-h span{font-size:12px;color:var(--ink2);}
+.pp-2{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px;}
+.pp-y{display:flex;flex-direction:column;gap:4px;background:var(--bg2);border-radius:12px;padding:8px;}
+.pp-y b{font-size:13px;} .pp-y span{font-size:11.5px;color:var(--ink2);}
+.pp-img{width:100%;height:96px;border-radius:9px;overflow:hidden;background:#e4e4e8;display:flex;align-items:center;justify-content:center;color:var(--ink3);font-size:11px;}
+.pp-img img{width:100%;height:100%;object-fit:cover;display:block;}
+.pp-d{font-style:normal;font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;align-self:flex-start;margin:2px 0 4px;}
+.pp-d.bos{background:#dff3e6;color:#1a7f37;} .pp-d.dolu{background:#fbe9e7;color:#c72c1f;} .pp-d.rez{background:#fdf3d6;color:#8a6a00;}
+.pp-y .btn{margin-top:auto;}
+.rg-row.hl .rg-lbl{color:var(--teal);font-weight:800;}
+.rcell.hl{animation:cellhl 1.2s ease-in-out 3;box-shadow:0 0 0 2px var(--teal);}
+@keyframes cellhl{0%,100%{box-shadow:0 0 0 2px var(--teal);}50%{box-shadow:0 0 0 5px rgba(0,113,227,.35);}}
+.gm-style .gm-style-iw-c{border-radius:14px;padding:12px !important;}
+@media(max-width:640px){ .mp-pop.cift{min-width:0;} .pp-2{grid-template-columns:1fr;} }
+
+/* v63: uydu + sokak görünümü */
+.mp-swi .gm-only{display:none;}
+.mp-sokak{position:relative;min-height:500px;background:#111;}
+#mpPano{position:absolute;inset:0;}
+.mp-sokak-not{position:absolute;left:12px;bottom:12px;z-index:2;background:rgba(255,255,255,.94);color:var(--ink);font-size:12.5px;font-weight:600;padding:7px 12px;border-radius:9px;box-shadow:var(--sh);}
+.pp-sv{display:block;margin-top:6px;font-size:12px;font-weight:600;color:var(--teal);background:none;padding:0;cursor:pointer;text-align:left;}
+.pp-sv:hover{text-decoration:underline;}
+@media(max-width:900px){ .mp-sokak{min-height:340px;} }
+
+/* v64: künye şeridi alan rozetleri */
+.mp-k2 small{font-size:12.5px;font-weight:600;color:var(--ink3);margin-left:2px;}
+.mp-kanit,.mp-bar-in{row-gap:10px;}
+@media(max-width:900px){ .mp-k2{font-size:15px;} .mp-k2 .ui-ic{width:30px;height:30px;padding:5px;} }
+
+/* v65: künye şeridi minimal — tek satır */
+.mp-bar-in{gap:18px;padding:12px 0;flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;}
+.mp-bar-in::-webkit-scrollbar{display:none;}
+.mp-logo img{max-height:34px;max-width:110px;}
+.mp-k2{font-size:14px;font-weight:600;gap:8px;white-space:nowrap;letter-spacing:0;color:var(--ink);}
+.mp-k2 b{font-weight:700;}
+.mp-k2 small{font-size:11.5px;font-weight:500;color:var(--ink3);}
+.mp-k2 .ui-ic{width:28px;height:28px;padding:5px;border-radius:8px;}
+.mp-bar-btn{gap:10px;flex:0 0 auto;}
+.mp-lnk{font-size:13px;}
+.mp-bar-btn .btn-sm{padding:8px 14px;font-size:13px;}
+@media(max-width:900px){ .mp-k2{font-size:13px;} .mp-k2 .ui-ic{width:26px;height:26px;padding:5px;} .mp-bar-btn{margin-left:auto;width:auto;} }
+
+/* v66: ziyaretçi rakamı künye kartında başlık altı */
+.mp-ziy{display:inline-flex;align-items:center;gap:7px;margin:-2px 22px 12px;padding:6px 12px;border-radius:999px;background:var(--teal-soft);color:var(--teal);font-size:13px;font-weight:700;}
+.mp-ziy .ui-ic{color:var(--teal);}
+
+/* v67: künye kartı — başlıkla hizalı madde listesi, ferah aralık */
+.mp-ziy{display:none;}
+.mp-kunye h3{margin:22px 22px 14px;}
+.mp-avl{margin:0 22px 18px;gap:11px;}
+.mp-avl li{font-size:14px;align-items:center;}
+.mp-avl li i,.mp-avl li .ui-ic{top:0;}
+.mp-avl li i{width:20px;height:20px;}
+.mp-avl li.ziy .ui-ic{color:var(--teal);}
+.mp-avl li span::before{content:'';}
+.mp-avl li span{display:block;width:100%;padding-left:29px;margin-top:-6px;}
+.mp-avl li{flex-wrap:wrap;}
+.mp-kunye p{margin:0 22px 22px;padding-top:14px;border-top:1px solid var(--line2);}
