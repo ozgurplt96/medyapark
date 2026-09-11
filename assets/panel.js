@@ -1012,10 +1012,12 @@ async function bildirimCiz(){
   const r=await sb.from('bildirimler').select('*').eq('okundu',false).order('created_at',{ascending:false}).limit(20);
   const list=r.data||[];
   if(say) say.textContent=list.length?list.length+' yeni':'';
+  /* Satır Doluluk'a gider — yüzeye göre doğru rota (Correction Sprint 2 §8).
+     "Okundu" paylaşılan durumu değiştirir: Yönetim tarafında kalır. */
   box.innerHTML=list.length?list.map(b=>`<div class="bld">
       <span class="bld-i">${ic('lists',15)}</span>
-      <div class="bld-b" onclick="go('listeler')"><div class="bld-t">${esc(b.baslik)}</div><div class="bld-d">${esc(b.detay||'')}${b.eposta_gonderildi?' · <i>e-posta gitti</i>':''}</div></div>
-      <button class="bld-x" title="Okundu" onclick="bildirimOkundu(${b.id})">✓</button></div>`).join('')
+      <div class="bld-b" onclick="dashGo('doluluk')"><div class="bld-t">${esc(b.baslik)}</div><div class="bld-d">${esc(b.detay||'')}${b.eposta_gonderildi?' · <i>e-posta gitti</i>':''}</div></div>
+      ${isAdmin()?`<button class="bld-x" title="Okundu" onclick="bildirimOkundu(${b.id})">✓</button>`:''}</div>`).join('')
     :'<p class="empty" style="margin:0">Yeni bildirim yok. Bitişine 7 gün kalan rezervasyonlar burada görünür.</p>';
 }
 async function bildirimOkundu(id){ await sb.from('bildirimler').update({okundu:true}).eq('id',id); bildirimCiz(); }
@@ -1100,14 +1102,88 @@ function calGun(gun){
       <button class="btn btn-primary btn-sm" onclick="closeModal();go('is-takibi')">İş Takibine Git</button></div>`);
 }
 
+/* ==========================================================
+   PAYLAŞILAN DASHBOARD BİLEŞENLERİ (Correction Sprint 2)
+   Admin Dashboard ve Team Ana Sayfa aynı şirket-bağlamı
+   kartlarını kullanır. İkinci bir dashboard motoru YOKTUR:
+   her iki yüzey de tek `dashboard_stats` sorgusunu ve
+   aşağıdaki kart üreticilerini çağırır (07 §20, 08 §4).
+   Kartlar salt okunurdur; mutation taşımazlar.
+   ========================================================== */
+
+/* Aynı yetenek, yüzeye göre farklı rota: Yönetim'de Doluluk/Mecralar
+   kendi bölümleri, Workspace'te `ws-mecralar` hub'ının sekmeleri.
+   Dashboard kartı için YENİ rota açılmaz (Correction Sprint 2 §8). */
+function dashGo(hedef){
+  if(hedef==='doluluk'||hedef==='mecralar'){
+    if(isAdmin() && surfaceGet()!=='workspace'){ go(hedef==='doluluk'?'listeler':'mecralar'); return; }
+    ui._mecSub=(hedef==='doluluk'?'doluluk':'mecralar'); go('ws-mecralar'); return;
+  }
+  go(hedef);
+}
+/* İş Takibi — mevcut jobsBoard() mini panosu, iki yüzeyde de aynı */
+function dashIsTakibiCard(s){
+  return `<section class="card">
+    <div class="card-h"><h3>İş Takibi</h3>
+      <div style="display:flex;gap:8px;align-items:center">
+        <button class="btn btn-yes btn-sm" onclick="go('is-takibi').then(()=>setTimeout(()=>jobForm(),200))">+ Yeni İş</button>
+        <button class="btn-link" onclick="go('is-takibi')">Tümü</button></div></div>
+    <div class="card-b">${jobsBoard(s.jobList||[])}</div>
+  </section>`;
+}
+/* Son Teklifler — satırlar Offer'ı Work bağlamındaki aynı görüntüleyiciyle
+   açar. Standalone Teklifler bölümü Yönetim'e aittir; team_member'a
+   "Tümü" gösterilmez (bounce eden rota üretmemek için). */
+function dashTekliflerCard(s){
+  const QL={yeni:'Yeni',gorusuldu:'Görüşüldü',onaylandi:'Onaylandı',iptal:'İptal'};
+  const rq=(s.recentQuotes||[]).map(q=>`<tr onclick="quoteView(${q.id})">
+    <td class="mono dim">#${q.id}</td><td>${esc(q.customer_name||q.firma||'-')}</td>
+    <td><span class="badge-st st-${esc(q.status||'yeni')}">${esc(QL[q.status]||'Yeni')}</span></td>
+    <td class="mono dim">${(q.created_at||'').slice(0,10)}</td></tr>`).join('');
+  return `<section class="card">
+    <div class="card-h"><h3>Son Teklifler</h3>${isAdmin()?`<button class="btn-link" onclick="go('teklifler')">Tümü</button>`:''}</div>
+    ${rq?`<table class="tbl rowlink"><thead><tr><th>#</th><th>Müşteri</th><th>Durum</th><th>Tarih</th></tr></thead><tbody>${rq}</tbody></table>`:'<div class="card-b"><p class="empty">Henüz teklif yok.</p></div>'}
+  </section>`;
+}
+/* Doluluk Trendi — kayan 12 ay; mevcut chartArea() */
+function dashDolulukCard(s){
+  const area=chartArea((s.aylik||[]).map((a,i)=>({
+      l:a.label, v:(a.dolu||0)+(a.rezerve||0),
+      sub:(i===0||a.label==='Oca')?a.yil:''
+    })),{h:150});
+  const araligi=(s.rollBas&&s.rollSon)?(s.rollBas.replace('-','/')+' – '+s.rollSon.replace('-','/')):s.yil;
+  return `<section class="card">
+    <div class="card-h" style="cursor:pointer" onclick="dashGo('doluluk')" title="Doluluk bölümüne git"><h3>Doluluk Trendi</h3><span class="chip mono">${esc(araligi)}</span></div>
+    <div class="card-b">${area}</div>
+  </section>`;
+}
+/* Mecra Dağılımı — mevcut chartRows() */
+function dashMecraDagilimCard(s){
+  return `<section class="card">
+    <div class="card-h" style="cursor:pointer" onclick="dashGo('mecralar')" title="Mecralar bölümüne git"><h3>Mecra Dağılımı</h3><button class="btn-link">Tümü</button></div>
+    <div class="card-b" style="cursor:pointer" onclick="dashGo('mecralar')">${s.mecraDagilim.length?chartRows(s.mecraDagilim.map(m=>({l:m.name,v:m.adet,c:m.color}))):'<p class="empty">Mecra yok.</p>'}</div>
+  </section>`;
+}
+/* Bildirimler — kabuk; içeriği bildirimCiz() doldurur.
+   ÜRETİM (bildirimKontrol: upsert + e-posta) Yönetim tarafında kalır;
+   Team yüzeyi yalnız okur, yoksa her Ana Sayfa açılışı mükerrer
+   bildirim/e-posta üretirdi. */
+function dashBildirimCard(){
+  return `<section class="card"><div class="card-h"><h3>Bildirimler</h3><span class="chip" id="bldSay">…</span></div>
+    <div class="card-b" id="bildirimBox"><p class="muted" style="font-size:12.5px;margin:0">Rezervasyonlar kontrol ediliyor…</p></div></section>`;
+}
+/* Takvim — mevcut calWidget() */
+function dashTakvimCard(){
+  return `<section class="card"><div class="card-b" id="calBox">${calWidget(ui._dashEvents)}</div></section>`;
+}
+
 /* ---------- DASHBOARD ---------- */
 async function dashboard(c){
   const s=await api('dashboard_stats');
   ui._dashEvents=s.takvim||[];
+  /* Bildirim ÜRETİMİ (upsert + e-posta) Yönetim tarafındadır; Team Ana
+     Sayfa yalnız okur (bkz. dashBildirimCard / workspaceHome). */
   setTimeout(()=>bildirimKontrol().then(bildirimCiz),50);
-  const AY=['Oca','Şub','Mar','Nis','May','Haz','Tem','Ağu','Eyl','Eki','Kas','Ara'];
-  const QL={yeni:'Yeni',gorusuldu:'Görüşüldü',onaylandi:'Onaylandı',iptal:'İptal'};
-  const JL=JOBLBL;
 
   const tm=await api('team_list').catch(()=>[]); ui._team=tm||[];
   const kpi=[
@@ -1118,13 +1194,8 @@ async function dashboard(c){
   ].map(k=>`<div class="kpi2 ${k[3]} tik" onclick="go('${k[4]}')" title="${esc(k[1])} bölümüne git"><div class="kpi2-n">${esc(k[0])}</div>
     <div class="kpi2-t">${esc(k[1])}</div><div class="kpi2-s">${esc(k[2])}</div></div>`).join('');
 
-  /* yıl değişimini alt satırda göster (Oca'nın altında yıl yazar) */
-  const area=chartArea((s.aylik||[]).map((a,i)=>({
-      l:a.label, v:(a.dolu||0)+(a.rezerve||0),
-      sub:(i===0||a.label==='Oca')?a.yil:''
-    })),{h:150});
-  const araligi=(s.rollBas&&s.rollSon)?(s.rollBas.replace('-','/')+' – '+s.rollSon.replace('-','/')):s.yil;
-
+  /* Son Notlar yalnız Yönetim'de: legacy `notes` defteri, Team'in
+     canonical Entry hafızasıyla (Son Güncellemeler) karıştırılmaz. */
   const notlar=(s.notes||[]).length ? s.notes.map(n=>{
     const ad=n.ilgili_kisi||n.konu||'Not';
     const bas=(ad.trim()[0]||'N').toLocaleUpperCase('tr');
@@ -1135,44 +1206,22 @@ async function dashboard(c){
       <span class="msg-d">${esc(String(n.tarih||n.created_at||'').slice(5,10))}</span></div>`;}).join('')
     : '<p class="empty">Henüz not yok. Ekip notlarını Notlar bölümünden ekleyebilirsiniz.</p>';
 
-  const rq=(s.recentQuotes||[]).map(q=>`<tr onclick="quoteView(${q.id})">
-    <td class="mono dim">#${q.id}</td><td>${esc(q.customer_name||q.firma||'-')}</td>
-    <td><span class="badge-st st-${esc(q.status||'yeni')}">${esc(QL[q.status]||'Yeni')}</span></td>
-    <td class="mono dim">${(q.created_at||'').slice(0,10)}</td></tr>`).join('');
-
   c.innerHTML=`
   <div class="kpi2-row">${kpi}</div>
   <div class="dash-grid">
     <div class="dash-l">
-      <section class="card">
-        <div class="card-h"><h3>İş Takibi</h3>
-          <div style="display:flex;gap:8px;align-items:center">
-            <button class="btn btn-yes btn-sm" onclick="go('is-takibi').then(()=>setTimeout(()=>jobForm(),200))">+ Yeni İş</button>
-            <button class="btn-link" onclick="go('is-takibi')">Tümü</button></div></div>
-        <div class="card-b">${jobsBoard(s.jobList||[])}</div>
-      </section>
-
-      <section class="card">
-        <div class="card-h"><h3>Son Teklifler</h3><button class="btn-link" onclick="go('teklifler')">Tümü</button></div>
-        ${rq?`<table class="tbl rowlink"><thead><tr><th>#</th><th>Müşteri</th><th>Durum</th><th>Tarih</th></tr></thead><tbody>${rq}</tbody></table>`:'<div class="card-b"><p class="empty">Henüz teklif yok.</p></div>'}
-      </section>
-      <section class="card">
-        <div class="card-h" style="cursor:pointer" onclick="go('listeler')" title="Doluluk bölümüne git"><h3>Doluluk Trendi</h3><span class="chip mono">${esc(araligi)}</span></div>
-        <div class="card-b">${area}</div>
-      </section>
+      ${dashIsTakibiCard(s)}
+      ${dashTekliflerCard(s)}
+      ${dashDolulukCard(s)}
     </div>
     <div class="dash-r">
-      <section class="card"><div class="card-h"><h3>Bildirimler</h3><span class="chip" id="bldSay">…</span></div>
-        <div class="card-b" id="bildirimBox"><p class="muted" style="font-size:12.5px;margin:0">Rezervasyonlar kontrol ediliyor…</p></div></section>
-      <section class="card"><div class="card-b" id="calBox">${calWidget(ui._dashEvents)}</div></section>
+      ${dashBildirimCard()}
+      ${dashTakvimCard()}
       <section class="card">
         <div class="card-h"><h3>Son Notlar</h3><button class="btn-link" onclick="go('notlar')">Tümü</button></div>
         <div class="card-b msgs">${notlar}</div>
       </section>
-      <section class="card">
-        <div class="card-h" style="cursor:pointer" onclick="go('mecralar')" title="Mecralar bölümüne git"><h3>Mecra Dağılımı</h3><button class="btn-link">Tümü</button></div>
-        <div class="card-b" style="cursor:pointer" onclick="go('mecralar')">${s.mecraDagilim.length?chartRows(s.mecraDagilim.map(m=>({l:m.name,v:m.adet,c:m.color}))):'<p class="empty">Mecra yok.</p>'}</div>
-      </section>
+      ${dashMecraDagilimCard(s)}
     </div>
   </div>
 `;
@@ -1896,14 +1945,18 @@ function wsHafta(){
 }
 async function workspaceHome(c){
   const [h1,h2]=wsHafta();
-  /* Tek turda paralel çekim — kart başına sorgu yok (07 §20). */
-  const [jobs,ents,ops,custs,team]=await Promise.all([
+  /* Tek turda paralel çekim — kart başına sorgu yok (07 §20).
+     `dashboard_stats` Admin Dashboard'un ta kendisiyle aynı sorgudur:
+     şirket bağlamı klonlanmaz, paylaşılır (Correction Sprint 2 §5-6). */
+  const [jobs,ents,ops,custs,team,s]=await Promise.all([
     api('jobs_list'),
     api('entries_list&limit=400'),
     api(`operations_list&from=${h1}&to=${h2}`),
     api('customers_list'),
-    api('team_list')]);
+    api('team_list'),
+    api('dashboard_stats')]);
   ui._team=team||[]; ui._jobs=jobs||[];
+  ui._dashEvents=s.takvim||[];
   const jm={}; (jobs||[]).forEach(j=>jm[j.id]=j);
   const cm={}; (custs||[]).forEach(x=>cm[x.id]=x.firma);
   const tm={}; (team||[]).forEach(t=>tm[t.id]=t.name);
@@ -1989,6 +2042,7 @@ async function workspaceHome(c){
 
     <div class="dash-grid">
       <div class="dash-l">
+        <!-- 1. KİŞİSEL / ACİL -->
         <section class="card">
           <div class="card-h"><h3>Bana Düşenler${ad?` — ${esc(ad)}`:''}</h3>
             <button class="btn-link" onclick="wsAksiyonlarim()">Tümü</button></div>
@@ -2003,20 +2057,31 @@ async function workspaceHome(c){
           <div class="card-h"><h3>Bu Hafta Baskı &amp; Montaj</h3>
             <button class="btn-link" onclick="go('operasyon')">Tümü</button></div>
           <div class="card-b">${kartOps}</div></section>
+
+        <!-- 2. PAYLAŞILAN OPERASYON BAĞLAMI (Admin Dashboard bileşeni) -->
+        ${dashIsTakibiCard(s)}
+
+        <!-- 3. ŞİRKET GÖRÜNÜMÜ (Admin Dashboard bileşenleri) -->
+        ${dashTekliflerCard(s)}
+        ${dashDolulukCard(s)}
       </div>
 
       <div class="dash-r">
-        <section class="card">
-          <div class="card-h"><h3>Açık İşler</h3>
-            <button class="btn-link" onclick="go('is-takibi')">Panoyu aç</button></div>
-          <div class="card-b">${fazSay.map(f=>`<div class="ws-faz">
-            <span>${esc(f.lbl)}</span><b>${f.n}</b></div>`).join('')}</div></section>
-
+        <!-- 2. PAYLAŞILAN OPERASYON BAĞLAMI -->
         <section class="card">
           <div class="card-h"><h3>Son Güncellemeler</h3></div>
           <div class="card-b msgs">${kartSon}</div></section>
+
+        ${dashBildirimCard()}
+        ${dashTakvimCard()}
+
+        <!-- 3. ŞİRKET GÖRÜNÜMÜ -->
+        ${dashMecraDagilimCard(s)}
       </div>
     </div>`;
+  /* Bildirim listesi salt okunur doldurulur; üretici/e-postacı
+     (bildirimKontrol) Yönetim tarafında kalır (Correction Sprint 2 §5). */
+  bildirimCiz();
 }
 /* Ana Sayfa kısayolları — aynı kayda İşler ekranındaki filtreyle gider,
    ayrı bir liste kopyası üretmez (BR-V01). */
@@ -4073,13 +4138,21 @@ async function teklifler(c){
     ${rows?`<table class="tbl"><thead><tr><th>#</th><th>Müşteri</th><th>Telefon</th><th>Tutar</th><th>Durum</th><th>Tarih</th><th></th></tr></thead><tbody>${rows}</tbody></table>`:'<p class="muted">Henüz teklif yok.</p>'}</div>`;
 }
 async function quoteView(id){
-  sb.from('quotes').update({okundu:true}).eq('id',id).then(()=>yeniTeklifKontrol(),()=>{}); const d=await api('quote_get&id='+id); const q=d.quote;
+  /* Offer durum yönetimi Yönetim'e aittir (quotes RLS: write/modify =
+     is_admin). team_member Offer'ı Work bağlamında okur; ona RLS'in
+     reddedeceği bir kaydetme düğmesi gösterilmez (07 §11). */
+  if(isAdmin()) sb.from('quotes').update({okundu:true}).eq('id',id).then(()=>yeniTeklifKontrol(),()=>{});
+  const d=await api('quote_get&id='+id); const q=d.quote;
+  const QL={yeni:'Yeni',gorusuldu:'Görüşüldü',onaylandi:'Onaylandı',iptal:'İptal'};
   const items=d.items.map(i=>`<tr><td>${esc(i.mecra_name)} — ${esc(i.unit_name)}</td><td>${esc(i.period)}</td><td>${esc(i.start_day||'-')}</td><td style="text-align:right">${money(i.price)}</td></tr>`).join('');
   modal(`<h3 style="margin:0 0 4px">Teklif #${q.id}</h3><p class="muted" style="margin:0 0 14px">${esc(q.customer_name||'')} · ${esc(q.firma||'')} · ${esc(q.telefon||'')} · ${esc(q.eposta||'')}</p>
     <table class="tbl"><thead><tr><th>Alan</th><th>Dönem</th><th>Başlangıç</th><th style="text-align:right">Fiyat</th></tr></thead><tbody>${items}</tbody></table>
     <div style="display:flex;justify-content:space-between;margin:14px 0;font-weight:700"><span>Toplam</span><span>${money(q.total)}</span></div>
-    <div class="field"><label class="flabel">Durum</label><select class="inp" id="qs">${['yeni','gorusuldu','onaylandi','iptal'].map(s=>`<option value="${s}" ${q.status===s?'selected':''}>${s}</option>`).join('')}</select></div>
-    <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn btn-ghost btn-sm" onclick="closeModal()">Kapat</button><button class="btn btn-primary btn-sm" onclick="quoteStatus(${q.id})">Durumu Kaydet</button></div>`);
+    ${isAdmin()
+      ?`<div class="field"><label class="flabel">Durum</label><select class="inp" id="qs">${['yeni','gorusuldu','onaylandi','iptal'].map(s=>`<option value="${s}" ${q.status===s?'selected':''}>${s}</option>`).join('')}</select></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn btn-ghost btn-sm" onclick="closeModal()">Kapat</button><button class="btn btn-primary btn-sm" onclick="quoteStatus(${q.id})">Durumu Kaydet</button></div>`
+      :`<div class="meta" style="margin-bottom:14px">Durum: <span class="badge-st st-${esc(q.status||'yeni')}">${esc(QL[q.status]||'Yeni')}</span></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn btn-ghost btn-sm" onclick="closeModal()">Kapat</button></div>`}`);
 }
 async function quoteStatus(id){
   const r=await guard(()=>api('quote_status',{id,status:gv('qs')}),'Durum kaydedilemedi');
@@ -4309,6 +4382,10 @@ function teamAvatar(x,sz){
 async function teamProfil(c,t){
   const jobs=await api('jobs_list').catch(()=>[]);
   const mine=jobs.filter(j=>j.assignee_id===t.id);
+  /* Kendi profili mi? team_member yalnız kendi güvenli alanlarını
+     düzenleyebilir; asıl zorlama update_my_profile() RPC'sindedir,
+     buradaki kontrol yalnız arayüzü tutarlı tutar (08 §9). */
+  const kendiProfili=!!(ui._me && ui._me.id===t.id);
   const JL=JOBLBL;   /* canonical faz etiketleri (D-206) */
   const bugun=new Date().toISOString().slice(0,10);
   /* Canonical: "yapılan" phase değil LIFECYCLE ile belirlenir (D-207);
@@ -4333,7 +4410,7 @@ async function teamProfil(c,t){
       <div class="tp-i"><h2>${esc(t.name)}${t.app_role==='admin'?'<span class="pill pil-on">yönetici</span>':''}</h2>
         <div class="tp-r">${esc(t.unvan||t.role||'—')}</div>
         <div class="tp-m">${esc(t.eposta||'e-posta yok')}${t.telefon?' · '+esc(t.telefon):''}</div></div>
-      ${isAdmin()?`<button class="btn btn-outline btn-sm" onclick="teamForm(${t.id})">Profili Düzenle</button>`:''}
+      ${(isAdmin()||kendiProfili)?`<button class="btn btn-outline btn-sm" onclick="teamForm(${t.id})">Profili Düzenle</button>`:''}
     </div>
     <div class="tp-kpi">
       <div class="tp-k"><b>${grup.takip.length}</b><span>Takip ettiği iş</span></div>
@@ -4348,19 +4425,35 @@ async function teamProfil(c,t){
       <section class="card"><div class="card-h"><h3>Not Defteri</h3>
         <span class="chip">kişisel</span></div>
         <div class="card-b">
-          <textarea class="inp" id="tmNot" style="min-height:230px" placeholder="Günlük notlar, hatırlatmalar, görüşme özetleri…" ${isAdmin()?'':'disabled'}>${esc(t.notlar||'')}</textarea>
-          ${isAdmin()?`<p class="muted" style="font-size:11.5px;margin:8px 0 10px">Bu defter yalnız bu profilde durur. "Panoya Gönder" dediğinizde seçtiğiniz not, Dashboard'daki Son Notlar bölümüne düşer ve tüm ekip görür.</p>
+          <textarea class="inp" id="tmNot" style="min-height:230px" placeholder="Günlük notlar, hatırlatmalar, görüşme özetleri…" ${(isAdmin()||kendiProfili)?'':'disabled'}>${esc(t.notlar||'')}</textarea>
+          ${(isAdmin()||kendiProfili)?`<p class="muted" style="font-size:11.5px;margin:8px 0 10px">Bu defter yalnız bu profilde durur.${isAdmin()?' "Panoya Gönder" dediğinizde seçtiğiniz not, Dashboard\'daki Son Notlar bölümüne düşer ve tüm ekip görür.':''}</p>
           <div style="display:flex;gap:8px;flex-wrap:wrap">
             <button class="btn btn-primary btn-sm" onclick="teamNotKaydet(${t.id})">Kaydet</button>
-            <button class="btn btn-outline btn-sm" onclick="teamNotPaylas(${t.id})">Panoya Gönder</button></div>`
-          :`<p class="muted" style="font-size:11.5px;margin:8px 0 0">Salt okunur — kaydetme şu an Yönetim yüzeyinde yapılır.</p>`}
+            ${isAdmin()?`<button class="btn btn-outline btn-sm" onclick="teamNotPaylas(${t.id})">Panoya Gönder</button>`:''}</div>`
+          :`<p class="muted" style="font-size:11.5px;margin:8px 0 0">Salt okunur.</p>`}
         </div></section>
     </div></div>`;
 }
+/* Güvenli self-profil RPC sarmalayıcısı (Correction Sprint 2 §10).
+   NULL = alanı değiştirme, '' = alanı temizle. Çağıran auth.uid()'den
+   çözülür; satır id'si parametre DEĞİLDİR. */
+async function rpcProfil(p){
+  const r=await sb.rpc('update_my_profile',p);
+  if(r.error) throw r.error;
+  if(r.data && r.data.ok===false) throw new Error(r.data.error||'profil_guncellenemedi');
+  return r.data;
+}
 async function teamNotKaydet(id){
-  const r=await guard(()=>api('team_save',{id,notlar:gv('tmNot')}),'Not kaydedilemedi');
+  /* Bu kart yalnız notlar'ı gönderir; diğer profil alanları NULL geçilir
+     ve dokunulmadan kalır. team_member kendi satırını RPC ile, admin
+     mevcut team_save yoluyla yazar. */
+  const r=await guard(()=>isAdmin()
+      ? api('team_save',{id,notlar:gv('tmNot')})
+      : rpcProfil({p_name:null,p_unvan:null,p_telefon:null,p_photo:null,p_notlar:gv('tmNot')}),
+    'Not kaydedilemedi');
   if(r===null)return;
   const t=(ui._team||[]).find(x=>x.id===id); if(t)t.notlar=gv('tmNot');
+  if(ui._me && ui._me.id===id) ui._me.notlar=gv('tmNot');
   toast('Not defteri kaydedildi.');
 }
 async function teamNotPaylas(id){
@@ -4382,20 +4475,42 @@ async function teamNotPaylasKaydet(id){
     ilgili_kisi:t.name||'',tarih:new Date().toISOString().slice(0,10)}),'Gönderilemedi');
   if(r===null)return; closeModal(); toast('Not panoya gönderildi.');
 }
+/* Tek form, iki mod (Correction Sprint 2 §11):
+     admin      → mevcut tam ekip yönetimi formu (değişmedi)
+     self/üye   → yalnız güvenli profil alanları; kimlik/yetki alanları
+                  salt okunur gösterilir, forma hiç girmez.
+   Ayrı bir workspaceProfile() yoktur. */
 function teamForm(id){ const x=(ui._team||[]).find(t=>t.id===id)||{};
-  modal(`<h3 style="margin:0 0 14px">${id?'Profili Düzenle':'Yeni Kişi'}</h3><input type="hidden" id="tid" value="${id||0}">
-    <div class="field"><label class="flabel">Profil fotoğrafı</label>
+  const foto=`<div class="field"><label class="flabel">Profil fotoğrafı</label>
       <div class="imgf">
         <span class="imgf-pv${x.photo?'':' bos'}" id="tph_pv" onclick="imgAc('tph')">${x.photo?`<img src="${esc(x.photo)}" alt="">`:''}</span>
         <input class="inp" id="tph" value="${esc(x.photo)}" placeholder="https://..." oninput="imgPv('tph')">
         <button class="btn btn-outline btn-sm" style="flex:0 0 auto" onclick="pickUpload('image/*',u=>{document.getElementById('tph').value=u;imgPv('tph');})">Yükle</button>
-        <button class="btn btn-ghost btn-sm imgf-x" onclick="imgSil('tph')">✕</button></div></div>
+        <button class="btn btn-ghost btn-sm imgf-x" onclick="imgSil('tph')">✕</button></div></div>`;
+  if(!isAdmin()){
+    modal(`<h3 style="margin:0 0 14px">Profilimi Düzenle</h3><input type="hidden" id="tid" value="${id||0}">
+    ${foto}
+    <div class="row2"><div class="field"><label class="flabel">Ad Soyad *</label><input class="inp" id="tn" value="${esc(x.name)}"></div>
+    <div class="field"><label class="flabel">Ünvan</label><input class="inp" id="tu" value="${esc(x.unvan||'')}" placeholder="Satış Uzmanı"></div></div>
+    <div class="field" style="max-width:280px"><label class="flabel">Telefon</label><input class="inp" id="tt" value="${esc(x.telefon)}"></div>
+    <div class="fld-box" style="margin-top:4px"><label class="flabel" style="font-weight:700">Kimlik ve yetki</label>
+      <div class="meta" style="line-height:1.9">
+        E-posta: <b>${esc(x.eposta||'—')}</b><br>
+        Görev/Departman: <b>${esc(x.role||'—')}</b><br>
+        Yetki: <span class="pill">${x.app_role==='admin'?'Yönetici':'Ekip Üyesi'}</span></div>
+      <p class="muted" style="font-size:11.5px;margin:8px 0 0">Bu alanlar hesap kimliğini ve yetkiyi belirler; yalnız yönetici değiştirebilir.</p></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px"><button class="btn btn-ghost btn-sm" onclick="closeModal()">Vazgeç</button><button class="btn btn-primary btn-sm" onclick="teamSave()">Kaydet</button></div>`);
+    const f=document.getElementById('tn'); if(f)f.focus();
+    return;
+  }
+  modal(`<h3 style="margin:0 0 14px">${id?'Profili Düzenle':'Yeni Kişi'}</h3><input type="hidden" id="tid" value="${id||0}">
+    ${foto}
     <div class="row2"><div class="field"><label class="flabel">Ad Soyad *</label><input class="inp" id="tn" value="${esc(x.name)}"></div>
     <div class="field"><label class="flabel">Ünvan</label><input class="inp" id="tu" value="${esc(x.unvan||x.role||'')}" placeholder="Satış Uzmanı"></div></div>
     <div class="row2"><div class="field"><label class="flabel">E-posta (panele giriş adresi)</label><input class="inp" id="te" value="${esc(x.eposta)}" placeholder="ad@medyapark.com"></div>
     <div class="field"><label class="flabel">Telefon</label><input class="inp" id="tt" value="${esc(x.telefon)}"></div></div>
     <div class="row2"><div class="field"><label class="flabel">Yetki seviyesi</label>
-      <select class="inp" id="tsv" ${yoneticiMi()?'':'disabled title="Yetki seviyesini yalnız yönetici değiştirebilir"'}>
+      <select class="inp" id="tsv">
         <option value="team_member" ${x.app_role!=='admin'?'selected':''}>Ekip Üyesi — Team Workspace</option>
         <option value="admin" ${x.app_role==='admin'?'selected':''}>Yönetici — Yönetim Paneli + Workspace</option></select></div>
     <div class="field"><label class="flabel">Görev/Departman</label><input class="inp" id="tr" value="${esc(x.role)}" placeholder="Satış &amp; Pazarlama"></div></div>
@@ -4404,15 +4519,28 @@ function teamForm(id){ const x=(ui._team||[]).find(t=>t.id===id)||{};
 }
 async function teamSave(){
   if(!gv('tn').trim()){ mpAlert('Ad Soyad zorunlu.','Ekip'); return; }
+  /* team_member kendi satırını yalnız update_my_profile() üzerinden
+     düzenler: çağıran auth.uid()'den çözülür, SET listesi beş güvenli
+     alanla sınırlıdır, app_role/active/eposta/auth_user_id bu yoldan
+     erişilemez. team RLS'i gevşetilmedi (bkz. migration
+     20260911120000_s08_self_profile_rpc.sql). */
+  if(!isAdmin()){
+    /* Bu form yalnız kendi alanlarını gönderir; notlar NULL geçilir,
+       yani Not Defteri'ne dokunulmaz (RPC parametre sözleşmesi). */
+    const r=await guard(()=>rpcProfil({
+      p_name:gv('tn'), p_unvan:gv('tu'), p_telefon:gv('tt'), p_photo:gv('tph'), p_notlar:null
+    }),'Profil kaydedilemedi');
+    if(r===null)return;
+    closeModal(); await loadIdentity(); renderSection(); toast('Profil kaydedildi.');
+    return;
+  }
   const body={id:+gv('tid'),name:gv('tn'),role:gv('tr'),unvan:gv('tu'),eposta:gv('te'),telefon:gv('tt'),photo:gv('tph')};
   /* Tek yetki otoritesi canonical app_role'dür (D-203). Legacy `seviye`
      yalnız ondan TÜRETİLEN bir ayna olarak yazılır: hiçbir yerde
      yetkilendirme için OKUNMAZ, sadece Halil'in eski ekranları tutarlı
      kalsın diye güncel tutulur. Çift otorite yoktur. */
-  if(yoneticiMi()){
-    body.app_role=gv('tsv');
-    body.seviye=(gv('tsv')==='admin')?'yonetici':'uye';
-  }
+  body.app_role=gv('tsv');
+  body.seviye=(gv('tsv')==='admin')?'yonetici':'uye';
   const r=await guard(()=>api('team_save',body),'Kaydedilemedi');
   if(r===null)return; closeModal(); renderSection(); toast('Profil kaydedildi.');
 }
