@@ -1114,3 +1114,92 @@ i.tk-p{min-width:10px;height:10px;padding:0;border-radius:3px;}
   .ws-switch.inline{display:flex;flex-wrap:wrap;}
   .ws-switch.inline button{padding:7px 12px;}
 }
+
+/* ===== PS1: tek composer opsiyonel bolumleri (PS1 §7) =================
+   Chip'ler progressive disclosure'in gorsel dili: form varsayilan olarak
+   textarea + Paylas'tan ibaret; yapisal baglam ancak istendiginde acilir.
+   Mevcut .btn/.pill/.chip dilinden turetildi, yeni bir bilesen sistemi
+   getirilmedi (07 §1 - Non-Design Rule). */
+.qc-chips{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 10px;}
+.qc-chip{border:1px dashed var(--c-line);background:#fff;color:var(--c-ink2);
+  border-radius:999px;padding:5px 11px;font:600 12px/1.4 var(--f);cursor:pointer;transition:.13s;}
+.qc-chip:hover{border-color:var(--c-ink3);border-style:solid;color:var(--c-ink);background:var(--c-alt);}
+.qc-chip.on{border-style:solid;border-color:var(--c-ink);background:var(--c-ink);color:#fff;}
+.qc-sec{border:1px solid var(--c-line2);border-radius:var(--r);padding:12px 12px 2px;margin:0 0 12px;background:var(--c-alt);}
+.qc-sec .fhint{margin-top:-2px;}
+.qc-rel{display:flex;flex-wrap:wrap;gap:6px;}
+.qc-who{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--c-line);
+  background:#fff;border-radius:999px;padding:5px 11px;font-size:12.5px;cursor:pointer;user-select:none;}
+.qc-who:hover{border-color:var(--c-ink3);}
+.qc-who input{margin:0;cursor:pointer;}
+.qc-who:has(input:checked){border-color:var(--c-ink);background:var(--c-ink);color:#fff;}
+
+/* ===== PS1: Panelim guncelleme akisi (PS1 §12/§13) ====================
+   Kucuk baglam chip'leri, satir ici okuma, buyuk kart YOK. Sira gorseli
+   psKademe() ile ayni: kisisel olan one cikar, kimseden gizlenmez. */
+.ps-feed .card-h{flex-wrap:wrap;gap:10px;}
+.ps-fh{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+.ps-list{display:flex;flex-direction:column;gap:2px;}
+.ps-more{align-self:flex-start;margin-top:10px;}
+
+.ps-u{display:grid;grid-template-columns:auto minmax(0,1fr);gap:10px;padding:10px 10px 10px 8px;
+  border-radius:var(--r);border-left:2px solid transparent;transition:.13s;}
+.ps-u+.ps-u{border-top:1px solid var(--c-line2);}
+.ps-u:hover{background:var(--c-alt);}
+/* Kisisel olarak ilgili guncelleme: vurgulanir ama filtrelenmez. */
+.ps-u.mine{border-left-color:var(--c-accent);background:#fff;}
+.ps-u.sys{opacity:.78;}
+
+.ps-av{width:26px;height:26px;border-radius:50%;display:grid;place-items:center;
+  background:var(--c-line2);color:var(--c-ink2);font:700 12px/1 var(--f);}
+.ps-u.mine .ps-av{background:var(--c-accent);color:#fff;}
+.ps-b{min-width:0;}
+.ps-h{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:2px;}
+.ps-h b{font-size:12.5px;color:var(--c-ink);}
+.ps-h time{font-size:11.5px;color:var(--c-ink3);}
+.ps-tag{border-radius:var(--r-sm);padding:1px 7px;font:700 10.5px/1.5 var(--f);letter-spacing:.02em;}
+.ps-tag.ps-k1{background:var(--c-accent);color:#fff;}
+.ps-tag.ps-k2{background:var(--c-green-soft);color:var(--c-green);}
+.ps-tag.ps-k3{background:var(--c-line2);color:var(--c-ink2);}
+
+/* Uzun govde 3 satirda kirpilir; tiklayinca ayni yerde acilir - okumak
+   icin ikinci bir ekran yuklenmez (PS1 §12). */
+.ps-t{margin:0 0 5px;font-size:13.5px;color:var(--c-ink);overflow-wrap:anywhere;cursor:pointer;
+  display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;}
+.ps-t.acik{-webkit-line-clamp:unset;display:block;}
+
+.ps-c{display:flex;flex-wrap:wrap;gap:5px;}
+.ps-chip{display:inline-flex;align-items:center;gap:4px;border:1px solid var(--c-line);background:#fff;
+  color:var(--c-ink2);border-radius:999px;padding:2px 9px;font:600 11.5px/1.6 var(--f);
+  max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+button.ps-chip{cursor:pointer;transition:.13s;}
+button.ps-chip:hover{border-color:var(--c-ink);color:var(--c-ink);}
+.ps-chip svg{flex:0 0 auto;opacity:.65;}
+.ps-chip.dim{border-style:dashed;color:var(--c-ink3);}
+.ps-chip.act{background:var(--c-green-soft);border-color:transparent;color:var(--c-green);}
+.ps-chip.ovr{background:var(--c-red-soft);border-color:transparent;color:var(--c-red);}
+
+/* ===== PS1: kisisel aksiyon kovalari ve kompakt ajanda ================ */
+.ps-g+.ps-g{margin-top:10px;}
+.ps-gh{display:flex;align-items:center;gap:6px;font:700 10.5px/1.6 var(--f);letter-spacing:.06em;
+  text-transform:uppercase;color:var(--c-ink3);padding:0 0 3px;}
+.ps-gh.ovr{color:var(--c-red);}
+.ps-gh.now{color:var(--c-accent);}
+
+.ps-ajanda{display:flex;flex-direction:column;gap:10px;}
+.ps-d{border-left:2px solid var(--c-line);padding-left:10px;}
+.ps-dh{font:700 11.5px/1.6 var(--f);color:var(--c-ink2);margin-bottom:2px;}
+.ps-dh.now{color:var(--c-accent);}
+.ps-e{display:flex;align-items:center;gap:7px;width:100%;text-align:left;background:none;border:0;
+  padding:4px 6px;border-radius:var(--r-sm);cursor:pointer;font:inherit;color:var(--c-ink);}
+.ps-e:hover{background:var(--c-alt);}
+.ps-e span{flex:1;min-width:0;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.ps-e em{font-style:normal;font-size:11px;font-weight:700;}
+.ps-e em.ovr{color:var(--c-red);}
+
+@media(max-width:760px){
+  .ps-fh{width:100%;justify-content:space-between;}
+  .ps-u{padding:10px 4px 10px 6px;}
+  .ps-t{font-size:13px;}
+  .qc-rel{gap:5px;}
+}
