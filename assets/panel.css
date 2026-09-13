@@ -1031,3 +1031,86 @@ details.grp>summary:hover .chev{color:var(--c-accent);}
   .ak-m{white-space:normal;}
   .coord-f{grid-template-columns:minmax(0,1fr);}
 }
+
+/* =====================================================================
+   C4 — TAKVIM · HIZLI KAYIT · OPERASYONEL KISAYOL
+   Yeni renk/tipografi sozlugu YOK: mevcut :root token'lari ve
+   .ws-switch / .pill / .tbl dili (D-231, 07 §1).
+   ===================================================================== */
+
+/* --- operasyonel kisayol seridi (C4 §21) --- */
+.coord-sc{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 12px;}
+.coord-sc button{display:inline-flex;align-items:center;gap:7px;padding:7px 13px;border:1px solid var(--c-hair);
+  background:var(--c-panel);border-radius:999px;cursor:pointer;font:600 12.5px/1 var(--f);color:var(--c-ink2);transition:.12s;}
+.coord-sc button:hover{border-color:#d3dbea;color:var(--c-ink);}
+.coord-sc button.on{background:var(--c-accent-soft);border-color:transparent;color:var(--c-accent-d);}
+.coord-sc .ic{width:15px;height:15px;}
+
+/* --- global hizli kayit (kabuk) --- */
+.qc-top{display:flex;gap:6px;margin-right:4px;}
+@media(max-width:760px){ .qc-top .btn-outline{display:none;} }
+
+/* --- hizli kayit baglam kutusu --- */
+.qc-ctx{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;background:var(--c-alt);
+  border:1px solid var(--c-hair);border-radius:var(--r);padding:9px 12px;margin-bottom:12px;}
+.qc-ctx .qc-lbl{font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--c-ink3);}
+.qc-ctx b{font-size:13px;color:var(--c-ink);}
+.qc-ctx em{font-style:normal;font-size:12px;color:var(--c-ink3);}
+
+/* --- TAKVIM --- */
+.tk-wrap{padding:14px 16px 12px;}
+.tk-h{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:10px;}
+.tk-nav{display:flex;align-items:center;gap:8px;}
+.tk-nav b{font:700 15px/1 var(--f);min-width:118px;text-align:center;}
+.tk-src{margin:0;}
+.tk-f{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+.tk-who{width:auto;min-width:150px;padding:7px 10px;font-size:12.5px;}
+.tk-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px;}
+.tk-head span{font-size:10.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;
+  color:var(--c-ink3);text-align:center;padding:4px 0;}
+.tk-bos{min-height:10px;}
+.tk-d{display:flex;flex-direction:column;align-items:flex-start;gap:5px;min-height:62px;padding:6px 7px;
+  border:1px solid var(--c-line2);border-radius:9px;background:var(--c-panel);cursor:pointer;
+  font:inherit;text-align:left;transition:.12s;}
+.tk-d:hover{border-color:#d3dbea;background:var(--c-alt);}
+.tk-d.tk-has{border-color:var(--c-hair);}
+.tk-d.tk-today .tk-n{background:var(--c-accent);color:#fff;}
+.tk-d.tk-sel{border-color:var(--c-accent);box-shadow:0 0 0 1px var(--c-accent) inset;}
+.tk-n{display:inline-flex;align-items:center;justify-content:center;min-width:21px;height:21px;padding:0 5px;
+  border-radius:999px;font:700 11.5px/1 var(--f);font-variant-numeric:tabular-nums;color:var(--c-ink2);}
+.tk-b{display:flex;gap:4px;flex-wrap:wrap;}
+.tk-p{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:17px;padding:0 5px;
+  border-radius:5px;font:700 10.5px/1 var(--f);font-variant-numeric:tabular-nums;}
+i.tk-p{min-width:10px;height:10px;padding:0;border-radius:3px;}
+.tk-takip{background:var(--c-accent-soft);color:var(--c-accent-d);}
+.tk-takip.tk-gec{background:var(--c-red-soft);color:var(--c-red);}
+.tk-op{background:var(--c-green-soft);color:var(--c-green);}
+.tk-lgnd{display:flex;gap:16px;flex-wrap:wrap;margin-top:10px;padding-top:10px;border-top:1px solid var(--c-line2);
+  font-size:11.5px;color:var(--c-ink3);}
+.tk-lgnd span{display:inline-flex;align-items:center;gap:6px;}
+
+/* gun ajandasi */
+.tk-i{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:11px;width:100%;
+  text-align:left;background:none;border:0;border-top:1px solid var(--c-line2);padding:9px 2px;cursor:pointer;font:inherit;}
+.sec-card>.tk-i:first-of-type{border-top:0;}
+.tk-i:hover{background:var(--c-alt);}
+.tk-i-k{display:inline-flex;align-items:center;justify-content:center;padding:3px 9px;border-radius:var(--r-sm);
+  font:700 11px/1.4 var(--f);white-space:nowrap;}
+.tk-i-b{min-width:0;}
+.tk-i-b b{display:block;font:600 13px/1.35 var(--f);color:var(--c-ink);overflow-wrap:anywhere;}
+.tk-i-b em{display:block;font-style:normal;font-size:11.5px;color:var(--c-ink3);margin-top:2px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.tk-i-r{white-space:nowrap;font-size:12px;}
+
+@media(max-width:760px){
+  .tk-grid{gap:3px;}
+  .tk-d{min-height:50px;padding:4px 5px;}
+  .tk-nav b{min-width:96px;font-size:14px;}
+  .tk-i{grid-template-columns:auto minmax(0,1fr);}
+  .tk-i-r{grid-column:1/-1;}
+  .tk-i-b em{white-space:normal;}
+  /* 5. sekme (Takvim) ile birlikte tab seridi dar ekrana sigmiyordu:
+     inline-flex + flex:0 0 auto sarmiyordu. Dar ekranda sarsin. */
+  .ws-switch.inline{display:flex;flex-wrap:wrap;}
+  .ws-switch.inline button{padding:7px 12px;}
+}
