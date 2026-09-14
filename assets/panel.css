@@ -1364,3 +1364,19 @@ button.pu-chip:hover{border-color:var(--c-ink);color:var(--c-ink);}
 }
 /* §12: dikkat satirinda tarih, NEDEN rozetinin yaninda ikincil kalir. */
 .pd-d{font:500 11.5px/1.6 var(--f);color:var(--c-ink3);white-space:nowrap;}
+
+/* ===== PS4: doluluk gerçek dönem + bugün görünümü ==================== */
+.rz-per{margin-top:10px;padding-top:10px;border-top:1px solid var(--c-line2);}
+.rz-per-r{display:flex;gap:6px;align-items:center;}
+.rz-per-r .inp-sm{flex:1;min-width:0;max-width:none;}
+.rz-per-d{color:var(--c-ink3);font-weight:600;}
+.rz-per-y{margin:8px 0 0;}
+.rz-next{display:flex;flex-wrap:wrap;gap:6px;}
+.rz-next-i{display:inline-flex;flex-direction:column;gap:1px;border:1px solid var(--c-line);
+  border-radius:var(--r-sm);padding:4px 9px;font-size:12px;min-width:84px;}
+.rz-next-i b{font:600 12px/1.4 var(--f);}
+.rz-next-i em{font-style:normal;font-size:11px;color:var(--c-ink3);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.rz-next-i.dolu{background:var(--c-red-soft);border-color:transparent;}
+.rz-next-i.rezerve{background:var(--c-amber-soft);border-color:transparent;}
+.pill.ok{background:var(--c-green-soft);color:var(--c-green);}
