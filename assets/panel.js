@@ -395,7 +395,9 @@ async function api(action, body){
     case 'alt_list':{ const {data,error}=await sb.from('alt_mecralar').select('*').eq('mecra_id',q.mecra_id).order('sort').order('id'); if(error)throw error; return ok(data); }
     case 'alt_save': { const r=await saveRow('alt_mecralar',body); logYaz(act,body); return ok(r); }
     case 'unit_list':{ const {data,error}=await sb.from('units').select('*').eq('alt_mecra_id',q.alt_id).order('sort').order('id'); if(error)throw error; return ok(data); }
-    case 'bookings_all':{ const {data,error}=await sb.from('bookings').select('unit_id,ym,status,customer_id'); if(error)throw error; return ok(data); }
+    case 'bookings_all':{ const {data,error}=await sb.from('bookings')
+        .select('id,unit_id,ym,status,customer_id,note,period_start,period_end,period_note,work_id');
+      if(error)throw error; return ok(data); }
 
     case 'booking_list':{ const {data,error}=await sb.from('bookings').select('ym,status').eq('unit_id',q.unit_id); if(error)throw error; return ok(data); }
     case 'booking_toggle':{
@@ -403,6 +405,13 @@ async function api(action, body){
       if(body.status==='bos'){ const {error}=await sb.from('bookings').delete().eq('unit_id',body.unit_id).eq('ym',body.ym); if(error)throw error; }
       else { const row={unit_id:body.unit_id,ym:body.ym,status:body.status,customer_id:(body.customer_id!==undefined?body.customer_id:null)};
         if(body.note!==undefined) row.note=body.note;
+        /* PS4 §5/§16: gerçek dönem OPSİYONELDİR. Alan gönderilmediyse hiç
+           yazılmaz — yani ay-bazlı mevcut kayıt yolları (bookImport, hızlı
+           hücre değişimi) aynen çalışmaya devam eder ve var olan dönem
+           bilgisini EZMEZ. `onConflict:'unit_id,ym'` dokunulmadı. */
+        if(body.period_start!==undefined) row.period_start=body.period_start||null;
+        if(body.period_end!==undefined)   row.period_end=body.period_end||null;
+        if(body.period_note!==undefined)  row.period_note=body.period_note||null;
         const {error}=await sb.from('bookings').upsert(row,{onConflict:'unit_id,ym'}); if(error)throw error; }
       return ok();
     }
@@ -3544,17 +3553,20 @@ function wsTakipTumu(){
    listeler (Doluluk, default), harita, mecralar. Each of those already
    gates its own mutation surface via isAdmin() (see their definitions);
    nothing new is gated here. */
-function wsMecSub(){ return ui._mecSub||'doluluk'; }
+function wsMecSub(){ const v=ui._mecSub||'doluluk'; return (v==='harita')?v:'doluluk'; }
 function wsMecTab(sub){ ui._mecSub=sub; wsMecralarHub(document.getElementById('content')); }
 async function wsMecralarHub(c){
   const sub=wsMecSub();
   const tab=(key,label)=>`<button type="button" class="${sub===key?'on':''}" aria-pressed="${sub===key}" onclick="wsMecTab('${key}')">${esc(label)}</button>`;
+  /* §22: Team medya IA'sı Doluluk | Harita. Üçüncü sekme Admin'in CMS
+     mecra-hiyerarşisi ekranıydı; Sprint 2'de Doluluk'a eklenen "mecra türü"
+     filtresi onun karşıladığı keşfedilebilirlik ihtiyacını zaten kapatıyor.
+     `mecralar()` SİLİNMEDİ - Admin navigasyonunda aynen duruyor. */
   c.innerHTML=`<div class="ws-switch inline" role="group" aria-label="Mecra görünümü">
-      ${tab('doluluk','Doluluk')}${tab('harita','Harita')}${tab('mecralar','Mecralar')}</div>
+      ${tab('doluluk','Doluluk')}${tab('harita','Harita')}</div>
     <div id="mecSubBody"><p class="muted">Yükleniyor…</p></div>`;
   const body=document.getElementById('mecSubBody');
   if(sub==='harita') await harita(body);
-  else if(sub==='mecralar') await mecralar(body);
   else await listeler(body);
 }
 
@@ -4867,6 +4879,68 @@ function groupUnits(list){ const map=new Map();
     if(!g[p.surf]) g[p.surf]=u; else if(!g.B) g.B=u; });
   return [...map.values()]; }
 
+/* ============ PS4 — DOLULUK BUGÜN / NE ZAMAN BOŞALIYOR ==============
+   `ym` ile `period_start/period_end` BİRBİRİNİN YERİNE GEÇMEZ (§6):
+     ym        -> aylık doluluk kovası (uygunluk gerçeği)
+     period_*  -> gerçek iş dönemi (bağlam gerçeği), biliniyorsa
+
+   Bu yüzden iki farklı KESİNLİK seviyesi vardır ve UI bunları aynıymış
+   gibi sunmaz (§11): gün bilgisi yalnızca gerçek tarih varsa verilir,
+   yoksa dürüstçe ay seviyesinde kalınır. `ym`den gün üretilmez. */
+const _bIso=d=>{const t=new Date(d);return new Date(t.getTime()-t.getTimezoneOffset()*6e4).toISOString().slice(0,10);};
+const AY_ADI=['Ocak','Şubat','Mart','Nisan','Mayıs','Haziran','Temmuz','Ağustos','Eylül','Ekim','Kasım','Aralık'];
+function ymAdi(ym){ if(!ym) return ''; const [y,m]=String(ym).split('-'); return `${AY_ADI[+m-1]} ${y}`; }
+function ymBugun(){ const n=new Date(); return n.getFullYear()+'-'+pad(n.getMonth()+1); }
+/* Bu yardımcılar İKİ farklı satır şekliyle çağrılır: ham `bookings` satırı
+   (period_start/…) ve Doluluk'un bmap önbelleği (ps/pe/pn). Tek bir
+   normalleştirici, her çağıranın kendi alan adını bilmek zorunda kalmasını
+   önler — aksi halde biri sessizce "tarih yok" sanır. */
+function bookPer(b){
+  if(!b) return {ps:null,pe:null,pn:null,ym:null,st:null};
+  return {ps:b.period_start||b.ps||null, pe:b.period_end||b.pe||null,
+          pn:b.period_note||b.pn||null,  ym:b.ym||null, st:b.status||b.s||null};
+}
+
+/* Bir booking satırı BUGÜN aktif mi?
+   kesinlik: 'gun'  -> gerçek tarihlerle belirlendi
+             'ay'   -> yalnız aylık kova ile belirlendi (gün bilgisi YOK)  */
+function bookAktif(b){
+  if(!b) return {aktif:false,kesinlik:null};
+  const q=bookPer(b), t=_bIso(new Date());
+  if(q.ps){
+    if(q.ps>t) return {aktif:false,kesinlik:'gun',durum:'gelecek'};
+    if(q.pe && q.pe<t) return {aktif:false,kesinlik:'gun',durum:'gecmis'};
+    return {aktif:true,kesinlik:'gun',acikUclu:!q.pe};
+  }
+  /* Tarih yoksa yalnız ay karşılaştırılır — uydurma gün üretilmez. */
+  return {aktif:String(q.ym)===ymBugun(), kesinlik:'ay'};
+}
+
+/* "Ne zaman boşalıyor?" — yalnız bilinenden konuşur (§12). */
+function bookBosalma(b){
+  if(!b) return '';
+  const q=bookPer(b);
+  if(q.pe){
+    const d=new Date(q.pe+'T00:00:00'); d.setDate(d.getDate()+1);
+    return `${d.getDate()} ${AY_ADI[d.getMonth()]}'de boş`;
+  }
+  if(q.ps) return 'Bitiş bilinmiyor';
+  /* Yalnız aylık kayıt: ay seviyesinde konuş, gün UYDURMA. */
+  return q.ym?`${ymAdi(q.ym)} sonuna kadar dolu`:'';
+}
+
+/* Dönem metni: gerçek tarihler varsa onlar, yoksa ham kaynak ifade
+   (ör. "20.09.2025 - ?" ya da "01.02. / 31.03.2026 2 AY") gösterilir —
+   iki tarih kolonunun taşıyamadığı bilgi kaybolmasın diye (§5). */
+function bookDonem(b){
+  if(!b) return '';
+  const q=bookPer(b);
+  const g=d=>{ const x=new Date(d+'T00:00:00'); return `${String(x.getDate()).padStart(2,'0')}.${String(x.getMonth()+1).padStart(2,'0')}`; };
+  if(q.ps&&q.pe) return `${g(q.ps)}–${g(q.pe)}`;
+  if(q.ps) return `${g(q.ps)}–?`;
+  if(q.pe) return `?–${g(q.pe)}`;
+  return q.pn||'';
+}
 function lCell(u,ym,cmap,bmap,solo){
   if(!u) return `<span class="rcell yok" title="Bu yüzey tanımlı değil">–</span>`;
   const rec=(bmap[u.id]||{})[ym]; const st=rec?rec.s:'bos';
@@ -4942,7 +5016,8 @@ async function bookExport(){
   const alt={}; (al.data||[]).forEach(a=>alt[a.id]=a);
   const mm={}; mc.forEach(m=>mm[m.id]=m);
   const cus={}; cu.forEach(c=>cus[c.id]=c.firma);
-  const bmap={}; (bk.data||[]).forEach(b=>{(bmap[b.unit_id]=bmap[b.unit_id]||{})[b.ym]={s:b.status,c:b.customer_id,n:b.note};});
+  const bmap={}; (bk.data||[]).forEach(b=>{(bmap[b.unit_id]=bmap[b.unit_id]||{})[b.ym]={s:b.status,c:b.customer_id,n:b.note,
+      ym:b.ym,ps:b.period_start,pe:b.period_end,pn:b.period_note,wid:b.work_id};});
   const rows=[];
   (un.data||[]).forEach(u=>{
     const a=alt[u.alt_mecra_id]||{}; const m=mm[a.mecra_id||u.mecra_id]||{};
@@ -4950,7 +5025,10 @@ async function bookExport(){
     for(let i=1;i<=12;i++){
       const ym=y+'-'+String(i).padStart(2,'0'); const r=(bmap[u.id]||{})[ym];
       rows.push({mecra:m.name||'',alt:a.name||'',pozisyon:p.base,yuzey:p.surf,ay:ym,
-        durum:r?(r.s==='dolu'?'Dolu':'Rezerve'):'Boş',firma:r&&r.c?(cus[r.c]||''):'',not:r&&r.n?r.n:''});
+        durum:r?(r.s==='dolu'?'Dolu':'Rezerve'):'Boş',firma:r&&r.c?(cus[r.c]||''):'',
+        /* Gerçek dönem AYRI sütunlarda; `ay` ile karıştırılmaz (§6/§18). */
+        ps:r&&r.ps?r.ps:'', pe:r&&r.pe?r.pe:'', pnot:r&&r.pn?r.pn:'',
+        bosalma:r?bookBosalma(r):'', not:r&&r.n?r.n:''});
     }
   });
   if(!rows.length){ mpAlert('Aktarılacak kayıt yok.'); return; }
@@ -4958,7 +5036,14 @@ async function bookExport(){
     {key:'mecra',label:'Mecra',w:24},{key:'alt',label:'Alt Mecra',w:22},
     {key:'pozisyon',label:'Pozisyon',w:14},{key:'yuzey',label:'Yüzey',w:8},
     {key:'ay',label:'Ay',w:10},{key:'durum',label:'Durum',w:10},
-    {key:'firma',label:'Firma',w:26},{key:'not',label:'Not',w:30}],rows);
+    {key:'firma',label:'Firma',w:26},
+    {key:'ps',label:'Dönem başlangıç',w:16},{key:'pe',label:'Dönem bitiş',w:16},
+    {key:'pnot',label:'Kaynak dönem ifadesi',w:28},
+    {key:'bosalma',label:'Ne zaman boşalıyor',w:24},
+    {key:'not',label:'Not',w:30}],rows,[
+    ['İş dönemi', y+' yılı aylık doluluk'],
+    ['Kapsam','Tüm pozisyonlar (12 ay)'],
+    ['Not','`Ay` aylık doluluk kovasıdır; `Dönem başlangıç/bitiş` gerçek iş dönemidir. Aynı değildirler.']]);
 }
 function bookImport(){
   const y=ui._lyear||new Date().getFullYear();
@@ -5026,9 +5111,11 @@ async function listeler(c){
   const pmap={}; prods.forEach(p=>pmap[p.id]=p.name);
   const uByAlt={}; mlist.forEach(m=>(m.units||[]).forEach(u=>{ if(u.alt_mecra_id!=null)(uByAlt[u.alt_mecra_id]=uByAlt[u.alt_mecra_id]||[]).push(u); }));
   const altByMec={}; alts.forEach(a=>(altByMec[a.mecra_id]=altByMec[a.mecra_id]||[]).push(a));
-  const bmap={}; bks.forEach(b=>{(bmap[b.unit_id]=bmap[b.unit_id]||{})[b.ym]={s:b.status,c:b.customer_id,n:b.note};}); window.__lbmap=bmap;
+  const bmap={}; bks.forEach(b=>{(bmap[b.unit_id]=bmap[b.unit_id]||{})[b.ym]={s:b.status,c:b.customer_id,n:b.note,
+      ym:b.ym,ps:b.period_start,pe:b.period_end,pn:b.period_note,wid:b.work_id};}); window.__lbmap=bmap;
   const umap={}; mlist.forEach(m=>(m.units||[]).forEach(u=>umap[u.id]=u)); window.__lumap=umap;
   ui._L={mlist,altByMec,uByAlt,pmap,cmap,custs,y};
+  ui._veriOkunma=new Date();                 /* PS4 §20 — veri okunma anı */
 
   const custOpts=custs.map(x=>`<option value="${x.id}">${esc(x.firma||('#'+x.id))}</option>`).join('');
   const mecOpts=mlist.map(m=>`<option value="${m.id}">${esc(m.name)}</option>`).join('');
@@ -5051,8 +5138,15 @@ async function listeler(c){
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
       <button class="btn btn-ghost btn-sm" onclick="bookExport()">${ic('download',15)} Excel'e Aktar</button>
       ${isAdmin()?`<button class="btn btn-outline btn-sm" onclick="bookImport()">${ic('upload',15)} Excel'den Al</button>`:''}
-      <div class="year-nav" style="margin:0"><button onclick="lYear(-1)">‹</button><span class="yr">${y}</span><button onclick="lYear(1)">›</button></div>
+      <div class="ws-switch inline" role="group" aria-label="Doluluk görünümü">
+        <button type="button" class="${lGorunum()==='bugun'?'on':''}" aria-pressed="${lGorunum()==='bugun'}"
+          onclick="lGorunumSec('bugun')">Bugün</button>
+        <button type="button" class="${lGorunum()==='yil'?'on':''}" aria-pressed="${lGorunum()==='yil'}"
+          onclick="lGorunumSec('yil')">Yıl ızgarası</button>
+      </div>
+      <div class="year-nav" style="margin:0" ${lGorunum()==='bugun'?'hidden':''}><button onclick="lYear(-1)">‹</button><span class="yr">${y}</span><button onclick="lYear(1)">›</button></div>
     </div></div>
+    ${lTazeBar()}
     <div class="banner">${isAdmin()
       ?'Aya tıklayın: açılan pencereden <b>durumu seçin</b> (Boş / Dolu / Rezerve), <b>müşteri atayın</b> ya da oracıkta <b>yeni müşteri ekleyin</b> — eklenen müşteri, Müşteriler bölümünde de oluşur. Çift yüzlü pozisyonlarda (M1 megalight ve raketleri) her ayın altında iki kutu vardır: soldaki A (ön yüz), sağdaki B (arka yüz). Ziyaretçi firma adını görmez, yalnızca durumu görür.'
       :'Bu görünüm salt okunurdur; durum/müşteri/pozisyon değişikliği mecra yetkisindedir (BR-M03). Çift yüzlü pozisyonlarda (M1 megalight ve raketleri) her ayın altında iki kutu vardır: soldaki A (ön yüz), sağdaki B (arka yüz).'}</div>
@@ -5091,8 +5185,133 @@ function lGrupBilgi(g,y,bmap){
       if(cell){ st.add(cell.s); if(cell.c!=null)cs.add(String(cell.c)); } } }
   return {st,cs};
 }
+/* Görünüm tercihi oturumda kalır; varsayılan mevcut yıl ızgarasıdır, yani
+   Admin'in çalışma yüzeyi DEĞİŞMEZ (§3/§29). */
+function lGorunum(){ try{ return sessionStorage.getItem('mp_dol_g')==='bugun'?'bugun':'yil'; }catch(e){ return 'yil'; } }
+function lGorunumSec(v){ try{ sessionStorage.setItem('mp_dol_g',v); }catch(e){} listeler(document.getElementById('content')); }
+
+/* §20: "son güncelleme" UYDURULMAZ. `bookings` üzerinde updated_at kolonu
+   YOK (bakıldı), o yüzden kayıt düzeyinde bir tazelik iddiası edilemez.
+   Dürüst olan tek şey verinin NE ZAMAN OKUNDUĞUDUR — ekran düzeyinde,
+   hücre başına değil. */
+function lTazeBar(){
+  const t=ui._veriOkunma instanceof Date?ui._veriOkunma:new Date();
+  const ss=String(t.getHours()).padStart(2,'0')+':'+String(t.getMinutes()).padStart(2,'0');
+  return `<div class="afilt neutral"><span class="afilt-l">Görünüm</span>
+    <span class="afilt-v">${lGorunum()==='bugun'
+      ? `Bugün · <b>${esc(trTarih(_bIso(new Date())))}</b> itibarıyla mevcut durum`
+      : `Yıl ızgarası · <b>${ui._L?ui._L.y:''}</b> aylık doluluk`}</span>
+    <span class="afilt-n">veri okunma ${esc(ss)}</span></div>`;
+}
+
+/* ---- BUGÜN görünümü (§10-§12) ----
+   Yoğun, taranabilir bir tablo. Her satır §10'un sorduğu her şeyi verir:
+   mecra · alan · pozisyon · bugünkü durum · kurum · gerçek dönem · ne zaman
+   boşalıyor. KESİNLİK dürüstçe ayrılır (§11): gerçek tarihten gelen bilgi
+   ile yalnız aylık kovadan çıkarılan bilgi aynı görünmez. */
+function lBugunCiz(box){
+  const L=ui._L, bmap=window.__lbmap;
+  const q=(gv('lQ')||'').trim().toLocaleLowerCase('tr');
+  const fm=gv('lFm')||'', fd=gv('lFd')||'', fc=gv('lFc')||'', fp=gv('lFp')||'';
+  const bugunYm=ymBugun();
+  const rows=[];
+  for(const m of L.mlist){
+    if(fm && String(m.id)!==fm) continue;
+    for(const a of (L.altByMec[m.id]||[])){
+      for(const u of (L.uByAlt[a.id]||[])){
+        const pid=(u.product_id!=null)?u.product_id:a.product_id;
+        if(fp && String(pid)!==fp) continue;
+        const b=(bmap[u.id]||{})[bugunYm]||null;
+        const ak=bookAktif(b);
+        const dolu=!!(b&&ak.aktif);
+        const firma=dolu&&b.c?(L.cmap[b.c]||('#'+b.c)):'';
+        if(fc && String(b&&b.c)!==fc) continue;
+        if(fd==='dolu'      && !(dolu&&b.s==='dolu'))   continue;
+        if(fd==='rezerve'   && !(dolu&&b.s==='rezerve'))continue;
+        if(fd==='doluveya'  && !dolu)                    continue;
+        if(fd==='bos'       && dolu)                     continue;
+        if(q){ const hay=[u.name,a.name,m.name,firma].join(' ').toLocaleLowerCase('tr');
+               if(!hay.includes(q)) continue; }
+        rows.push({m,a,u,b,ak,dolu,firma,pid});
+      }
+    }
+  }
+  const say=document.getElementById('lSayi');
+  if(say) say.textContent=`${rows.length} pozisyon · bugünkü durum`;
+  if(!rows.length){ box.innerHTML='<div class="sec-card"><p class="empty">Bu filtreye uyan pozisyon yok.</p></div>'; return; }
+
+  const satir=r=>{
+    const {u,a,m,b,ak,dolu,firma}=r;
+    const pasif=u.active===false;
+    const donem=dolu?bookDonem(b):'';
+    const bosalma=dolu?bookBosalma(b):'';
+    /* Bugün boş ama bu ay içinde başlayan gerçek bir dönem varsa bunu
+       söylemek zorundayız: aksi halde operatör yüzeyi boş sanıp teklif
+       verir, sonra çakışmayı keşfeder. */
+    const per0=bookPer(b);
+    const yakinda=(!dolu&&b&&ak.durum==='gelecek'&&per0.ps)?per0.ps:null;
+    /* Yalnız aylık kayıttan gelen bilgi "yaklaşık" olarak işaretlenir —
+       gün hassasiyeti varmış gibi sunulmaz (§11). */
+    const yaklasik=dolu&&ak.kesinlik==='ay';
+    const per=bookPer(b);
+    return `<tr onclick="lBugunAc(${u.id})" style="cursor:pointer">
+      <td><div class="lz-t">${esc(u.name||('#'+u.id))}</div>
+          <div class="lz-s">${esc(m.name)} · ${esc(a.name)}</div></td>
+      <td>${pasif?'<span class="pill">Pasif</span>'
+            :dolu?`<span class="pill ${b.s==='rezerve'?'sand':'clay'}">${b.s==='rezerve'?'Rezerve':'Dolu'}</span>`
+                 :`<span class="pill ok">Boş</span>${yakinda?'<div class="lz-s">yakında dolu</div>':''}`}</td>
+      <td>${dolu?`<div class="lz-t" title="${esc(firma)}">${esc(orgKisa(firma,30))}</div>`:'<span class="muted">—</span>'}</td>
+      <td>${donem?`<span class="mono">${esc(donem)}</span>`
+            :dolu?`<span class="muted" title="Bu kayıtta gerçek tarih yok; yalnız aylık doluluk biliniyor">ay bazlı</span>`:''}
+          ${per.pn&&!per.ps?`<div class="lz-s" title="Kaynak ifade">${esc(per.pn)}</div>`:''}</td>
+      <td>${bosalma?`<span class="${yaklasik?'muted':''}">${esc(bosalma)}</span>`
+            :yakinda?`<span class="lz-late">${esc(psGun(yakinda))}'de doluyor</span>`:''}</td>
+    </tr>`;};
+
+  box.innerHTML=`<div class="sec-card pad0"><div class="tbl-wrap">
+    <table class="tbl rowlink lz"><thead><tr>
+      <th>Pozisyon</th><th style="width:96px">Bugün</th><th style="width:210px">Kurum</th>
+      <th style="width:150px">Gerçek dönem</th><th style="width:170px">Ne zaman boşalıyor</th>
+    </tr></thead><tbody>${rows.map(satir).join('')}</tbody></table></div></div>`;
+}
+
+/* §14: pozisyonu Admin'e gitmeden incele. SALT OKUNUR — mecra mutasyon
+   kontrolü eklenmez. */
+function lBugunAc(uid){
+  const L=ui._L, bmap=window.__lbmap;
+  const u=(window.__lumap||{})[uid]||{};
+  const a=(L.altByMec?Object.values(L.altByMec).flat():[]).find(x=>x.id===u.alt_mecra_id)||{};
+  const m=(L.mlist||[]).find(x=>x.id===(a.mecra_id||u.mecra_id))||{};
+  const aylar=bmap[uid]||{};
+  const bugunYm=ymBugun();
+  const b=aylar[bugunYm]||null;
+  const ak=bookAktif(b); const dolu=!!(b&&ak.aktif);
+  const sonraki=Object.keys(aylar).filter(k=>k>=bugunYm).sort().slice(0,6);
+  modal(`<h3 style="margin:0 0 4px">${esc(u.name||('#'+uid))}</h3>
+    <p class="muted" style="font-size:12.5px;margin:0 0 14px">${esc(m.name||'')} · ${esc(a.name||'')}${
+      u.olcu?' · '+esc(u.olcu):''}${L.pmap&&L.pmap[a.product_id]?' · '+esc(L.pmap[a.product_id]):''}</p>
+    <div class="meta" style="line-height:1.9">
+      Bugün: ${dolu?`<b>${b.s==='rezerve'?'Rezerve':'Dolu'}</b> — ${esc(L.cmap[b.c]||'kurum belirtilmemiş')}`
+        :(u.active===false?'<b>Pasif</b> — ticari satışa kapalı':'<b>Boş</b>')}<br>
+      ${(!dolu&&b&&ak.durum==='gelecek'&&bookPer(b).ps)
+        ?`<span class="lz-late">${esc(psGun(bookPer(b).ps))} tarihinde doluyor</span> — ${esc(L.cmap[b.c]||'kurum belirtilmemiş')}<br>`:''}
+      ${dolu&&bookDonem(b)?`Gerçek dönem: <b>${esc(bookDonem(b))}</b><br>`:''}
+      ${dolu&&!bookPer(b).ps?'<span class="muted">Bu kayıtta gerçek tarih yok — yalnız aylık doluluk biliniyor.</span><br>':''}
+      ${b&&bookPer(b).pn?`Kaynak ifade: <span class="mono">${esc(bookPer(b).pn)}</span><br>`:''}
+      ${dolu?`Ne zaman boşalıyor: <b>${esc(bookBosalma(b))}</b><br>`:''}
+      ${u.konum?`Konum: ${esc(u.konum)}<br>`:''}
+    </div>
+    ${sonraki.length?`<div class="field" style="margin-top:12px">
+      <span class="flabel">Önümüzdeki aylar</span>
+      <div class="rz-next">${sonraki.map(k=>{ const x=aylar[k];
+        return `<span class="rz-next-i ${x.s}"><b>${esc(ymAdi(k))}</b>${x.c?`<em>${esc(orgKisa(L.cmap[x.c]||'',18))}</em>`:''}</span>`;}).join('')}</div></div>`:''}
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+      <button class="btn btn-ghost btn-sm" onclick="closeModal()">Kapat</button></div>`);
+}
+
 function lFiltre(){
   const L=ui._L, box=document.getElementById('lWrap'); if(!L||!box)return;
+  if(lGorunum()==='bugun'){ lBugunCiz(box); return; }
   const y=L.y, bmap=window.__lbmap;
   const q=(gv('lQ')||'').trim().toLocaleLowerCase('tr');
   const fm=gv('lFm')||'', fd=gv('lFd')||'', fc=gv('lFc')||'', fp=gv('lFp')||'';
@@ -5160,7 +5379,9 @@ function rezDis(e){ const p=document.getElementById('rezPop'); if(p && !p.contai
 function rezAc(uid,ym,ev){
   rezKapat();
   const u=window.__lumap[uid]||{}; const cur=(window.__lbmap[uid]||{})[ym];
-  ui._rez={uid,ym,st:cur?cur.s:'bos',cid:cur&&cur.c?cur.c:null,yeni:false};
+  /* Mevcut dönem varsa forma taşınır ki düzenlerken kaybolmasın. */
+  ui._rez={uid,ym,st:cur?cur.s:'bos',cid:cur&&cur.c?cur.c:null,yeni:false,
+           ps:(cur&&cur.ps)||'',pe:(cur&&cur.pe)||'',pn:(cur&&cur.pn)||''};
   const p=document.createElement('div'); p.id='rezPop'; p.className='rezpop';
   document.body.appendChild(p);
   rezCiz();
@@ -5207,6 +5428,20 @@ function rezCiz(){
           :(t?'<p class="rz-not">Eşleşen müşteri yok.</p>':'')}
         <button class="btn btn-outline btn-sm" style="margin-top:6px" onclick="ui._rez.yeni=true;rezCiz()">＋ Yeni müşteri ekle</button>`}
     </div>`}
+    ${st==='bos'?'':`
+    <div class="rz-per">
+      <label class="flabel">Gerçek dönem <span class="muted">(opsiyonel)</span></label>
+      <div class="rz-per-r">
+        <input class="inp inp-sm" type="date" id="rzPs" value="${esc(ui._rez.ps||'')}" aria-label="Dönem başlangıcı">
+        <span class="rz-per-d">–</span>
+        <input class="inp inp-sm" type="date" id="rzPe" value="${esc(ui._rez.pe||'')}" aria-label="Dönem bitişi">
+      </div>
+      <input class="inp inp-sm" id="rzPn" value="${esc(ui._rez.pn||'')}" style="margin-top:6px"
+        placeholder="Kaynak ifade — ör. 20.09.2025 - ?  ·  01.02./31.03.2026 2 AY">
+      <label class="switch rz-per-y"><input type="checkbox" id="rzPy" checked><span class="sl"></span>
+        <span class="txt">Dönemin kapsadığı tüm aylara uygula</span></label>
+      <p class="rz-not" style="margin:4px 0 0">Bitiş boşsa dönem açık uçlu sayılır. Ay bazlı doluluk değişmez.</p>
+    </div>`}
     <div class="rz-not" style="display:flex;align-items:center;gap:8px;justify-content:space-between;margin-top:8px">
       <span title="Ticari satisa kapatir. Kisa bakim otomatik pasife almaz (BR-M03).">Pozisyon durumu</span>
       <label class="switch" style="margin:0"><input type="checkbox" id="rzAktif" ${u.active===false?'':'checked'}
@@ -5243,12 +5478,44 @@ async function rezYeniKaydet(){
   toast('Müşteri eklendi — Müşteriler bölümünde de görebilirsiniz.');
   rezCiz();
 }
+/* Bir gerçek rezervasyon birden çok aylık kovayı kapsar (§6). Aynı dönemi
+   her ay için elle yeniden girmek saçma olurdu (§16), bu yüzden kapsanan
+   aylara aynı dönem yazılır. Bu MÜKERRER İŞ KAYDI DEĞİLDİR: aylık satır
+   uygunluk gerçeği, dönem ise bağlam gerçeğidir ve ikisi ayrı şeylerdir.
+   Yeni bir rezervasyon nesnesi/gruplama YARATILMAZ (§7). */
+function rezAylar(ps,pe,ym){
+  if(!ps) return [ym];
+  const bas=new Date(ps+'T00:00:00');
+  const son=pe?new Date(pe+'T00:00:00'):bas;
+  const out=[]; const d=new Date(bas.getFullYear(),bas.getMonth(),1);
+  /* Güvenlik sınırı: açık uçlu ya da hatalı aralıkta sonsuz döngü olmasın. */
+  for(let i=0;i<36;i++){
+    const k=d.getFullYear()+'-'+pad(d.getMonth()+1);
+    out.push(k);
+    if(d.getFullYear()===son.getFullYear()&&d.getMonth()===son.getMonth()) break;
+    if(d>son) break;
+    d.setMonth(d.getMonth()+1);
+  }
+  if(!out.includes(ym)) out.push(ym);
+  return out;
+}
 async function rezKaydet(){
   const {uid,ym,st}=ui._rez; const cid=st==='bos'?null:ui._rez.cid;
-  const r=await guard(()=>api('booking_toggle',{unit_id:uid,ym,status:st,customer_id:cid}),'Kaydedilemedi');
-  if(r===null)return;
-  window.__lbmap[uid]=window.__lbmap[uid]||{};
-  if(st==='bos')delete window.__lbmap[uid][ym]; else window.__lbmap[uid][ym]={s:st,c:cid};
+  const ps=st==='bos'?null:(gv('rzPs')||null);
+  const pe=st==='bos'?null:(gv('rzPe')||null);
+  const pn=st==='bos'?null:(gv('rzPn')||null);
+  if(ps&&pe&&pe<ps){ mpAlert('Dönem bitişi başlangıcından önce olamaz.','Geçersiz dönem'); return; }
+  const yay=!!(document.getElementById('rzPy')||{}).checked;
+  const hedef=(st!=='bos'&&ps&&yay)?rezAylar(ps,pe,ym):[ym];
+  for(const k of hedef){
+    const r=await guard(()=>api('booking_toggle',{unit_id:uid,ym:k,status:st,customer_id:cid,
+      period_start:ps,period_end:pe,period_note:pn}),'Kaydedilemedi');
+    if(r===null)return;
+    window.__lbmap[uid]=window.__lbmap[uid]||{};
+    if(st==='bos')delete window.__lbmap[uid][k];
+    else window.__lbmap[uid][k]={s:st,c:cid,ym:k,ps,pe,pn};
+  }
+  if(hedef.length>1) toast(`${hedef.length} aya uygulandı.`);
   const el=document.querySelector(`.rcell[data-u='${uid}'][data-ym='${ym}']`);
   if(el){ el.className='rcell '+st;
     const who=cid?window.__lcmap[cid]:'';
