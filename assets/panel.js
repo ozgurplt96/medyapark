@@ -3232,6 +3232,27 @@ function psZaman(t){
   const d=new Date(t);
   return `${d.getDate()} ${PS_AY[d.getMonth()]} · ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
 }
+/* §8: uzun resmi unvanlar akışı ezmesin. Bu YALNIZCA GÖRÜNTÜLEME içindir —
+   kimlik verisine dokunmaz, hiçbir yere geri yazılmaz, tam unvan `title`
+   ile erişilebilir kalır. `customers` tablosunda kısa/ticari ad kolonu YOK
+   (bakıldı), o yüzden yaygın tüzel kişilik eklerinden kısaltılır. */
+const ORG_EK=/\s+(a\.?\s?ş|ltd\.?\s?şti|limited şirketi|anonim şirketi|san\.?\s?ve\s?tic|sanayi ve ticaret|tic\.?\s?ltd|ve tic|tic\.?|san\.?|sanayi|ticaret|organizasyon|pazarlama|reklamcılık|hizmetleri|grup|day\.?tük\.?mal\.?)[\s.]*/i;
+function orgKisa(ad,max){
+  const tam=String(ad||'').trim(); if(!tam) return '';
+  max=max||32;
+  let k=tam;
+  const m=k.search(ORG_EK);
+  if(m>2) k=k.slice(0,m).trim().replace(/[.,·-]+$/,'');
+  if(k.length<3) k=tam;
+  if(k.length>max) k=k.slice(0,max-1).trim()+'…';
+  return k;
+}
+/* "3 gün gecikti" / "Son tarih: 18 Eyl" (§5). */
+function psGecikme(due){
+  const d=new Date(String(due).slice(0,10)+'T00:00:00');
+  const b=new Date(); b.setHours(0,0,0,0);
+  return Math.round((b-d)/86400000);
+}
 /* Son tarih: yalnizca gun. "18 Eyl". */
 function psGun(t){
   if(!t) return '';
@@ -3278,14 +3299,18 @@ async function workspaceHome(c){
   /* Tek turda paralel cekim; kart/gun/Work basina sorgu YOK (07 §20).
      entry_relevance TUM satirlariyla cekilir cunku feed etiketlenen
      kisileri chip olarak gosterir (§5) - Entry basina sorgu N+1 olurdu. */
-  const [jobs,ents,ops,custs,team,ilgi,takip]=await Promise.all([
+  const [jobs,ents,ops,custs,team,ilgi,takip,kisiler]=await Promise.all([
     api('jobs_list'),
     api('entries_list&limit=400'),
     api(`operations_list&from=${opBas}&to=${ufukIso}`),
     api('customers_list'),
     api('team_list'),
     api('entry_relevance_all').catch(()=>[]),
-    benim?api('work_followers_all&team_id='+benim).catch(()=>[]):Promise.resolve([])]);
+    benim?api('work_followers_all&team_id='+benim).catch(()=>[]):Promise.resolve([]),
+    /* Kişi chip'i için (§5 bağlam satırı). Tek toplu okuma; Entry başına
+       sorgu YOK. Soğuk açılışta ui._contactMap boş olurdu ve kişi bağlamı
+       sessizce kaybolurdu. */
+    api('contacts_list').catch(()=>[])]);
   ui._team=team||[]; ui._jobs=jobs||[]; ui._cust=custs||[];
   const jm={}; (jobs||[]).forEach(j=>jm[j.id]=j);
   const cm={}; (custs||[]).forEach(x=>cm[x.id]=x.firma);
@@ -3293,6 +3318,7 @@ async function workspaceHome(c){
   ui._opJobs=jm; ui._opCust=cm;
 
   /* entry_id -> [team_id] ve benim etiketlerim */
+  ui._contactMap={}; (kisiler||[]).forEach(k=>ui._contactMap[k.id]=k);
   const ilgiMap={}; (ilgi||[]).forEach(r=>{ (ilgiMap[r.entry_id]=ilgiMap[r.entry_id]||[]).push(r.team_id); });
   const ilgiSet=new Set((ilgi||[]).filter(r=>r.team_id===benim).map(r=>r.entry_id));
   const takipJobs=new Set((takip||[]).map(r=>r.job_id));
@@ -3318,29 +3344,40 @@ async function workspaceHome(c){
   const gosterilen=suz.slice(0,st.n);
 
   /* ---- Feed satiri: kompakt, metin odakli (§5) ---- */
+  /* §4/§5 — satır şu sırayla cevap verir:
+       1 kim yazdı · 2 ne zaman · 3 ne oldu · 4 neye bağlı · 5 aciliyet/termin
+     Başlık satırı kim+ne zaman (+Acil, +kişisel ilgi), sonra EN GÜÇLÜ öğe
+     olan metin, sonra bağlam chip'leri, en sonda AYRI bir son tarih satırı.
+     Son tarih hiçbir zaman oluşturma zamanıyla aynı yerde durmaz (§5/§6). */
   const feedSatir=e=>{
     const j=jm[e.job_id]||null;
     const orgId=j?j.customer_id:e.customer_id;
     const org=cm[orgId]||'';
+    const kisi=(ui._contactMap&&ui._contactMap[e.contact_id])||null;
     const sys=e.source==='system';
     const kim=sys?'Sistem':(tm[e.created_by_team_id]||'—');
     const etiket=(ilgiMap[e.id]||[]).map(t=>tm[t]).filter(Boolean);
-    const sonTarih=e.due_at?psGun(e.due_at):'';
-    const gec=e.action_status==='open'&&gecmis(e.due_at);
+    const acikAks=e.action_status==='open';
+    const gecGun=e.due_at?psGecikme(e.due_at):null;
+    const gecikti=acikAks&&gecGun>0;
     return `<article class="pu ${sys?'sys':''} ${e._benim?'mine':''}">
       <div class="pu-h">
         <b>${esc(kim)}</b>
         <time datetime="${esc(String(e.occurred_at||''))}">${esc(psZaman(e.occurred_at))}</time>
-        ${e.is_urgent?'<span class="pu-b acil">⚡ Acil</span>':''}
-        ${sonTarih?`<span class="pu-b ${gec?'gec':'due'}">${gec?'⚠ ':''}Son tarih: ${esc(sonTarih)}</span>`:''}
+        ${e.is_urgent?'<span class="pu-b acil">ACİL</span>':''}
+        ${e._benim&&ilgiSet.has(e.id)?'<span class="pu-b mine">Sana özel</span>':''}
       </div>
       <p class="pu-t" onclick="psAc(this)">${esc(e.body)}</p>
-      ${(j||org||etiket.length||sys)?`<div class="pu-c">
-        ${j?`<button type="button" class="pu-chip" onclick="workAc(${j.id})">${esc(j.title)}</button>`:''}
-        ${org?`<button type="button" class="pu-chip org" onclick="orgAc(${orgId})">${esc(org)}</button>`:''}
+      ${(j||org||kisi||etiket.length||sys)?`<div class="pu-c">
+        ${j?`<button type="button" class="pu-chip" onclick="workAc(${j.id})" title="${esc(j.title)}">${esc(orgKisa(j.title,38))}</button>`:''}
+        ${org?`<button type="button" class="pu-chip org" onclick="orgAc(${orgId})" title="${esc(org)}">${esc(orgKisa(org))}</button>`:''}
+        ${kisi?`<button type="button" class="pu-chip" onclick="personAc(${kisi.id})" title="${esc(kisi.name)}">${esc(kisi.name)}</button>`:''}
         ${etiket.map(nm=>`<span class="pu-chip who">@${esc(nm)}</span>`).join('')}
         ${sys?'<span class="pu-chip dim">sistem</span>':''}
       </div>`:''}
+      ${e.due_at?`<div class="pu-due">${gecikti
+        ? `<span class="g">⚠ ${gecGun} gün gecikti</span><span class="n">son tarih ${esc(psGun(e.due_at))}</span>`
+        : `<span class="n">Son tarih: <b>${esc(psGun(e.due_at))}</b></span>`}</div>`:''}
     </article>`;};
 
   const feedHtml=gosterilen.length?gosterilen.map(feedSatir).join('')
@@ -3363,20 +3400,23 @@ async function workspaceHome(c){
        <span class="pd-b"><span class="pd-t">${metin}</span><span class="pd-s">${alt}</span></span>
        <span class="pd-r">${sag}</span></button>`;
   const dikkatHtml=dikkatN?[
+    /* §12: NEDEN burada olduğu okunur olsun — küçük kırmızı bir ikona
+       bakıp çıkarım yapmak zorunda kalınmasın. */
     ...dikkatAks.slice(0,6).map(e=>{ const j=jm[e.job_id]||{};
+      const g=psGecikme(e.due_at);
       return dikkatSatir('⚠','gec',esc(e.body),
-        esc(j.title||orgAdi(j)||'Şirket güncellemesi'),
-        `<span class="pill clay">${esc(psGun(e.due_at))}</span>`,
+        esc(j.title||orgKisa(orgAdi(j))||'Şirket güncellemesi'),
+        `<span class="pill clay">${g} gün gecikti</span><span class="pd-d">${esc(psGun(e.due_at))}</span>`,
         e.job_id?`workAc(${e.job_id})`:'void 0'); }),
     ...dikkatAcil.slice(0,4).map(e=>{ const j=jm[e.job_id]||{};
       return dikkatSatir('⚡','acil',esc(e.body),
-        esc(j.title||orgAdi(j)||'Şirket güncellemesi'),
-        '<span class="pill clay">Acil</span>',
+        esc(j.title||orgKisa(orgAdi(j))||'Şirket güncellemesi'),
+        `<span class="pill clay">ACİL</span>${e.due_at?`<span class="pd-d">${esc(psGun(e.due_at))}</span>`:''}`,
         e.job_id?`workAc(${e.job_id})`:'void 0'); }),
     ...dikkatIs.slice(0,4).map(j=>
       dikkatSatir('⚡','acil',esc(j.title),
-        esc(orgAdi(j)||JOBLBL[j.status]||''),
-        '<span class="pill clay">Acil iş</span>',`workAc(${j.id})`))
+        esc(orgKisa(orgAdi(j))||JOBLBL[j.status]||''),
+        '<span class="pill clay">ACİL İŞ</span>',`workAc(${j.id})`))
   ].join('') : '<p class="empty">Dikkat gerektiren bir şey yok.</p>';
 
   /* ---- BUGUN & YAKLASAN (§13) ----
@@ -3400,7 +3440,7 @@ async function workspaceHome(c){
         ? `<button type="button" class="pa-e ${x.gec?'gec':''}" onclick="${x.e.job_id?`workAc(${x.e.job_id})`:'void 0'}">
              <span class="pa-k takip">Takip</span>
              <span class="pa-x">${esc(String(x.e.body).slice(0,64))}</span>
-             ${x.gec?`<em>${esc(psGun(x.d))} · gecikti</em>`:''}</button>`
+             ${x.gec?`<em>${psGecikme(x.d)} gün gecikti</em>`:''}</button>`
         : `<button type="button" class="pa-e" onclick="workAc(${x.o.job_id})">
              <span class="pa-k op">${esc(opTypeLbl(x.o.operation_type))}</span>
              <span class="pa-x">${esc(x.o.description||(jm[x.o.job_id]||{}).title||'')}</span></button>`).join('')}
@@ -3418,7 +3458,7 @@ async function workspaceHome(c){
     const son=sonEntryOf(j.id);
     return `<button type="button" class="pd-row" onclick="workAc(${j.id})">
       <span class="pd-b"><span class="pd-t">${esc(j.title)}${j.is_urgent?' <span class="pu-b acil">⚡</span>':''}</span>
-        <span class="pd-s">${esc(orgAdi(j)||'—')}${son?' · '+esc(String(son.body).slice(0,40)):''}</span></span>
+        <span class="pd-s">${esc(orgKisa(orgAdi(j))||'—')}${son?' · '+esc(String(son.body).slice(0,40)):''}</span></span>
       <span class="pd-r"><span class="pill">${esc(JOBLBL[j.status]||j.status)}</span>
         ${j.lifecycle_status==='bekliyor'?'<span class="pill sand">Bekliyor</span>':''}</span></button>`;}).join('')
     :'<p class="empty">Henüz bir işi takibe almadın. Bir iş açıp <b>Takibe Al</b> diyebilirsin.</p>';
