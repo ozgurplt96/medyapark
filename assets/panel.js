@@ -1468,6 +1468,9 @@ async function coordVeri(){
      çeker — başka bir ekranın ısıtmasına güvenmez. */
   ui._jobs=jobs||[]; ui._entries=ents||[]; ui._team=team||[]; ui._cust=custs||[];
   ui._contacts=cts||[];
+  /* S2 §5: "veri okunma anı" — ekrandaki verinin çekildiği an. Dışa
+     aktarım künyesinde iş döneminden ve dosya üretim anından ayrı yazılır. */
+  ui._veriOkunma=new Date();
   const D=coordTuret(ui._jobs,ui._entries,ui._team,ui._cust,ui._contacts);
   D.followers=folMap;
   return D;
@@ -1605,10 +1608,10 @@ function isFiltreBanner(tab,D,f){
   if(f.acil)   p.push('Acil');
   if(arsiv)    p.push('Arşiv');
   if(!p.length) return '';
-  return `<div class="fbar">
-    <span class="fbar-l">Aktif filtre</span>
-    <span class="fbar-v">${p.join(' · ')}</span>
-    <button type="button" class="fbar-x" onclick="isFiltreSifirla()">Temizle ✕</button></div>`;
+  return `<div class="afilt">
+    <span class="afilt-l">Aktif filtre</span>
+    <span class="afilt-v">${p.join(' · ')}</span>
+    <button type="button" class="afilt-x" onclick="isFiltreSifirla()">Temizle ✕</button></div>`;
 }
 function isKapsam(v){ isFiltre2({life:v==='arsiv'?['kapandi']:['acik','bekliyor']}); }
 function isFiltre2(patch){ isFiltreYaz({...isFiltre(),...patch}); renderSection(); }
@@ -1694,7 +1697,13 @@ function isListeRows(D,f){
   const rows=coordSuz(D,f).map(j=>{
     const nx=D.sonraki[j.id]||null;
     const kisi=D.ktm[j.primary_contact_id]||null;
-    return {j, org:D.cm[j.customer_id]||'', kisi, nx,
+    /* S2 §3: `İlgili` = bu işi TAKİP EDEN ekip üyeleri. Tek bir
+       `jobs.assignee_id` sahibi değil. Takip eden yoksa ve iş sahibi
+       doluysa onu ikincil bağlam olarak gösteririz — ama "Sahip"
+       başlığıyla birincil koordinasyon kavramı olarak DEĞİL. */
+    const folIds=(D.followers&&D.followers[j.id])||[];
+    const folAd=folIds.map(t=>D.tm[t]).filter(Boolean);
+    return {j, org:D.cm[j.customer_id]||'', kisi, nx, folAd,
             akt:D.sonAkt[j.id]||'', aks:D.acikAks[j.id]||0,
             due:nx&&nx.due_at?String(nx.due_at).slice(0,10):''};
   });
@@ -1702,7 +1711,7 @@ function isListeRows(D,f){
              org:r=>String(r.org||'').toLocaleLowerCase('tr'),
              phase:r=>JOBST.findIndex(x=>x[0]===(r.j.status||'temas_takip')),
              life:r=>String(r.j.lifecycle_status||'acik'),
-             owner:r=>String(D.tm[r.j.assignee_id]||'zzz').toLocaleLowerCase('tr'),
+             ilgili:r=>String(r.folAd[0]||'zzz').toLocaleLowerCase('tr'),
              akt:r=>r.akt||'',
              due:r=>r.due||'9999-99-99'}[s.k]||(r=>r.akt||'');
   /* Boş değer (kurumsuz iş, sahipsiz, hareketsiz) yön ne olursa olsun
@@ -1730,7 +1739,9 @@ function isListe(box,D,f){
       <td>${ls==='acik'?'<span class="muted">Açık</span>'
             :`<span class="pill ${ls==='bekliyor'?'sand':''}">${esc(LIFELBL[ls])}</span>`}
           ${j.closed_reason?`<div class="lz-s">${esc(CLOSELBL[j.closed_reason]||j.closed_reason)}</div>`:''}</td>
-      <td>${j.assignee_id?esc(D.tm[j.assignee_id]||'—'):'<span class="muted">—</span>'}</td>
+      <td>${r.folAd.length
+            ? `<div class="lz-t">${esc(r.folAd[0])}</div>${r.folAd.length>1?`<div class="lz-s">+${r.folAd.length-1} kişi</div>`:''}`
+            : '<span class="muted">—</span>'}</td>
       <td class="mono dim">${r.akt?`${esc(trTarih(r.akt))}<div class="lz-s">${esc(coordYas(r.akt))}${yas>=21?' <span class="lz-old" title="Uzun süre hareket yok">durgun</span>':''}</div>`:'<span class="muted">—</span>'}</td>
       <td>${nx?`<div class="lz-t">${esc(String(nx.body).slice(0,58))}</div>
             <div class="lz-s">${nx.due_at?(gec?`<span class="lz-late">⚠ gecikti · ${esc(trTarih(nx.due_at))}</span>`:esc(trTarih(nx.due_at))):'tarihsiz'}${nx.assignee_id?' · '+esc(D.tm[nx.assignee_id]||''):''}</div>`
@@ -1741,7 +1752,7 @@ function isListe(box,D,f){
   box.innerHTML=rows.length?`<div class="sec-card pad0"><div class="tbl-wrap">
       <table class="tbl rowlink lz"><thead><tr>
         ${th('title','İş')}${th('org','Kurum')}${th('phase','Aşama','110px')}
-        ${th('life','Durum','96px')}${th('owner','Sahip','110px')}
+        ${th('life','Durum','96px')}${th('ilgili','İlgili','110px')}
         ${th('akt','Son hareket','116px')}${th('due','Sıradaki aksiyon')}
       </tr></thead><tbody>${body}</tbody></table></div></div>`
     :`<div class="sec-card"><p class="empty">Bu filtreye uyan iş yok.
@@ -1749,7 +1760,17 @@ function isListe(box,D,f){
 }
 async function isListeExport(){
   const D=ui._coord; if(!D) return;
-  const rows=isListeRows(D,isFiltre());
+  const f0=isFiltre();
+  const rows=isListeRows(D,f0);
+  const arsiv=f0.life.length===1&&f0.life[0]==='kapandi';
+  const ilgiliAd=f0.ilgili?(D.tm[coordAsgId(D,f0)]||String(f0.ilgili)):'Herkes';
+  const meta=[
+    ['Kapsam', arsiv?'Arşiv (kapandı)':'Aktif (açık + bekliyor)'],
+    ['Kurum filtresi', f0.org?(D.cm[f0.org]||('#'+f0.org)):'Tümü'],
+    ['Aşama filtresi', f0.phase?((JOBST.find(x=>x[0]===f0.phase)||[,f0.phase])[1]):'Tümü'],
+    ['İlgili filtresi', ilgiliAd],
+    ['Acil', f0.acil?'Yalnız acil':'Tümü'],
+    ['Arama', f0.q||'—']];
   await exportRows('medyapark-isler','İşler',[
     {label:'İş',key:'t',w:40,get:r=>r.j.title},
     {label:'Kurum',key:'o',w:40,get:r=>r.org},
@@ -1757,7 +1778,8 @@ async function isListeExport(){
     {label:'Aşama',w:16,get:r=>JOBLBL[r.j.status]||r.j.status},
     {label:'Durum',w:12,get:r=>LIFELBL[r.j.lifecycle_status||'acik']},
     {label:'Kapanış nedeni',w:18,get:r=>r.j.closed_reason?(CLOSELBL[r.j.closed_reason]||r.j.closed_reason):''},
-    {label:'Sahip',w:18,get:r=>D.tm[r.j.assignee_id]||''},
+    {label:'İlgili',w:22,get:r=>r.folAd.join(', ')},
+    {label:'İş sahibi',w:18,get:r=>D.tm[r.j.assignee_id]||''},
     {label:'Son hareket',w:14,get:r=>r.akt?String(r.akt).slice(0,10):''},
     {label:'Açık aksiyon',w:12,get:r=>r.aks},
     {label:'Sıradaki aksiyon',w:44,get:r=>r.nx?r.nx.body:''},
@@ -1765,7 +1787,7 @@ async function isListeExport(){
     {label:'Aksiyon sahibi',w:18,get:r=>r.nx?(D.tm[r.nx.assignee_id]||''):''},
     {label:'Sözleşme',w:12,get:r=>({missing:'Eksik',pending:'Bekleniyor',signed:'İmzalı'})[r.j.contract_status]||''},
     {label:'Muhasebe',w:12,get:r=>({yok:'Yok',hazir:'Hazır',gonderildi:'Gönderildi',islendi:'İşlendi'})[r.j.accounting_status]||''}
-  ],rows);
+  ],rows,meta);
 }
 
 /* TAKİPLERİM ve BEKLEYENLER renderer'ları PS1.1 §18 ile kaldırıldı.
@@ -2287,7 +2309,13 @@ async function workAc(id){
                    +`${k.phone?' · '+esc(k.phone):''}${k.email?` · <a href="mailto:${esc(k.email)}">${esc(k.email)}</a>`:''}`
                  :'<span class="muted">seçilmedi</span>'; })()}
         <button class="btn btn-ghost btn-sm" onclick="jobForm(null,${j.id})">Değiştir</button><br>
-        Sorumlu: ${j.assignee_id?esc((tm||[]).find(t=>t.id===j.assignee_id)?.name||'—'):'<span class="muted">atanmadı</span>'}<br>
+        İlgili ekip: ${folAdlari.length?folAdlari.map(x=>`<span class="pu-chip who">@${esc(x)}</span>`).join(' ')
+          :'<span class="muted">henüz kimse takip etmiyor</span>'}<br>
+        ${/* S2 §3: `jobs.assignee_id` şemada kalır ve doluysa İKİNCİL bağlam
+             olarak görünür. Artık "Sorumlu" DEĞİL: genel koordinasyon kavramı
+             İlgili'dir, bu yalnızca opsiyonel iş sahipliğidir. Boşsa hiç
+             gösterilmez — doldurulması gereken bir alan gibi durmasın. */''}
+        ${j.assignee_id?`İş sahibi: ${esc((tm||[]).find(t=>t.id===j.assignee_id)?.name||'—')}<br>`:''}
         Sözleşme: ${j.contract_status==='signed'?'<span class="pill">İmzalı</span>':j.contract_status==='pending'?'<span class="pill">Bekleniyor</span>':'<span class="pill">Eksik</span>'}
         ${j.contract_signed_at?' · '+esc(trTarih(j.contract_signed_at)):''}
         ${j.contract_url?` · <a href="${esc(j.contract_url)}" target="_blank" rel="noopener">Belge</a>`:''}<br>
@@ -2297,11 +2325,16 @@ async function workAc(id){
       </div>
     </div>
 
-    <div class="sec-card">
+    ${/* S2 §27: boş bölüm sessiz kalır. Hiç taraf yoksa koca bir boş kart
+         yerine tek satırlık bir ekleme bağlantısı gösterilir. */''}
+    ${d.parties.length?`<div class="sec-card">
       <div class="sec-head" style="margin-bottom:10px">
         <h4 style="font-size:14px;margin:0">Taraflar <span class="chip">${d.parties.length}</span></h4>
         <button class="btn btn-outline btn-sm" onclick="partyForm(${j.id})">${ic('plus',15)} Taraf Ekle</button></div>
-      <div id="wParties"></div></div>
+      <div id="wParties"></div></div>`
+    :`<p class="w-quiet"><span class="muted">Ek taraf (ajans, fatura, tedarikçi) tanımlı değil.</span>
+       <button class="btn-link" onclick="partyForm(${j.id})">Taraf ekle</button></p>
+      <div id="wParties" hidden></div>`}
 
     ${d.quotes.length?`<div class="sec-card">
       <div class="sec-head" style="margin-bottom:10px"><h4 style="font-size:14px;margin:0">Teklifler <span class="chip">${d.quotes.length}</span></h4></div>
@@ -2709,6 +2742,9 @@ function opDonem(kind){
   /* Gunluk operasyonel kontrol yuzeyinin en sik sorusu (C4 §13). */
   if(kind==='bugun'){ return [_cIso(n),_cIso(n)]; }
   if(kind==='hafta'){ const son=new Date(pzt); son.setDate(pzt.getDate()+6); return [_iso(pzt),_iso(son)]; }
+  /* "Sırada ne var?" — gerçek tablonun cevapladığı ama ekranda karşılığı
+     olmayan soruydu (S2 §8). Bugünden ileri 30 gün. */
+  if(kind==='yaklasan'){ const son=new Date(n); son.setDate(n.getDate()+30); return [_cIso(n),_iso(son)]; }
   if(kind==='ay')   { return [_iso(new Date(n.getFullYear(),n.getMonth(),1)), _iso(new Date(n.getFullYear(),n.getMonth()+1,0))]; }
   if(kind==='gecen'){ return [_iso(new Date(n.getFullYear(),n.getMonth()-1,1)), _iso(new Date(n.getFullYear(),n.getMonth(),0))]; }
   if(kind==='yil')  { return [_iso(new Date(n.getFullYear(),0,1)), _iso(new Date(n.getFullYear(),11,31))]; }
@@ -2732,6 +2768,7 @@ async function operasyon(c){
   const cm={}; (custs||[]).forEach(x=>cm[x.id]=x.firma);
   const um={}; (units||[]).forEach(u=>um[u.id]=u);
   ui._ops=ops||[]; ui._opJobs=jm; ui._opCust=cm; ui._opUnits=um;
+  ui._veriOkunma=new Date();                 /* S2 §5 — veri okunma anı */
 
   let list=(ops||[]).slice();
   if(f.q){ const t=f.q.toLocaleLowerCase('tr');
@@ -2764,30 +2801,38 @@ async function operasyon(c){
         <button class="btn btn-primary btn-sm" onclick="opForm(0)">${ic('plus',15)} Yeni Kayıt</button></div></div>
 
     ${coordKisayol('operasyon')}
-    <div class="sec-card">
-      <div class="row2" style="margin-bottom:8px">
-        <div class="field"><label class="flabel" for="opDonem">Dönem</label>
-          <select class="inp" id="opDonem" onchange="opFiltreDegis()">
-            ${[['bugun','Bugün'],['hafta','Bu hafta'],['ay','Bu ay'],['gecen','Geçen ay'],['yil','Bu yıl'],['ozel','Özel aralık'],['tum','Tümü']]
-              .map(o=>`<option value="${o[0]}" ${f.donem===o[0]?'selected':''}>${o[1]}</option>`).join('')}
-          </select></div>
-        <div class="field"><label class="flabel" for="opQ">Ara</label>
-          <input class="inp" id="opQ" value="${esc(f.q)}" placeholder="İş, kurum, tedarikçi, yer, açıklama" oninput="opFiltreDegis()"></div>
+    ${/* S2 §8: dönem artık bir formun içine gömülü select değil, doğrudan
+         tıklanabilir bir şerit. Gerçek tablonun sorduğu dört soru —
+         bugün / bu hafta / sırada ne var / ne bitti — tek tıkla. */''}
+    <div class="op-bar">
+      <div class="ws-switch inline" role="group" aria-label="Dönem">
+        ${[['bugun','Bugün'],['hafta','Bu hafta'],['yaklasan','Yaklaşan'],['ay','Bu ay'],
+           ['gecen','Geçen ay'],['tum','Tümü'],['ozel','Özel aralık']]
+          .map(o=>`<button type="button" class="${f.donem===o[0]?'on':''}" aria-pressed="${f.donem===o[0]}"
+            onclick="opDonemSec('${o[0]}')">${o[1]}</button>`).join('')}
       </div>
-      <div class="row2" id="opOzelBox" ${f.donem==='ozel'?'':'hidden'} style="margin-bottom:8px">
-        <div class="field"><label class="flabel" for="opFrom">Başlangıç</label><input class="inp" type="date" id="opFrom" value="${esc(f.from)}" onchange="opFiltreDegis()"></div>
-        <div class="field"><label class="flabel" for="opTo">Bitiş</label><input class="inp" type="date" id="opTo" value="${esc(f.to)}" onchange="opFiltreDegis()"></div>
-      </div>
-      <div class="row2">
-        <div class="field"><label class="flabel" for="opType">Tür</label>
-          <select class="inp" id="opType" onchange="opFiltreDegis()"><option value="">Tümü</option>
-            ${OPTYPE.map(o=>`<option value="${o[0]}" ${f.type===o[0]?'selected':''}>${o[1]}</option>`).join('')}</select></div>
-        <div class="field"><label class="flabel" for="opStatus">Durum</label>
-          <select class="inp" id="opStatus" onchange="opFiltreDegis()"><option value="">Tümü</option>
-            ${OPSTAT.map(o=>`<option value="${o[0]}" ${f.status===o[0]?'selected':''}>${o[1]}</option>`).join('')}</select></div>
-      </div>
-      <div class="meta" style="margin-top:8px">${OPSTAT.map(s=>`${s[1]}: <b>${sayim[s[0]]}</b>`).join(' · ')}</div>
+      <input class="inp inp-sm" id="opQ" value="${esc(f.q)}" style="flex:1 1 190px;max-width:280px"
+        placeholder="İş, kurum, tedarikçi, yer, açıklama" oninput="opFiltreDegis()" aria-label="Ara">
+      <select class="inp inp-sm ${f.type?'inp-on':''}" id="opType" onchange="opFiltreDegis()" aria-label="Tür">
+        <option value="">Tüm türler</option>
+        ${OPTYPE.map(o=>`<option value="${o[0]}" ${f.type===o[0]?'selected':''}>${o[1]}</option>`).join('')}</select>
+      <select class="inp inp-sm ${f.status?'inp-on':''}" id="opStatus" onchange="opFiltreDegis()" aria-label="Durum">
+        <option value="">Tüm durumlar</option>
+        ${OPSTAT.map(o=>`<option value="${o[0]}" ${f.status===o[0]?'selected':''}>${o[1]}</option>`).join('')}</select>
     </div>
+    <div class="op-bar op-ozel" id="opOzelBox" ${f.donem==='ozel'?'':'hidden'}>
+      <label class="qc-mini" for="opFrom">Başlangıç</label>
+      <input class="inp inp-sm" type="date" id="opFrom" value="${esc(f.from)}" onchange="opFiltreDegis()">
+      <label class="qc-mini" for="opTo">Bitiş</label>
+      <input class="inp inp-sm" type="date" id="opTo" value="${esc(f.to)}" onchange="opFiltreDegis()">
+    </div>
+    ${/* Durum sayaçları artık okunacak bir metin değil, tıklanabilir filtre. */''}
+    <div class="op-bar op-say">
+      ${OPSTAT.map(st=>`<button type="button" class="pf-t ${f.status===st[0]?'on':''}"
+        onclick="opFiltre2({status:'${f.status===st[0]?'':st[0]}'})">${st[1]}
+        <b class="mono">${sayim[st[0]]}</b></button>`).join('')}
+    </div>
+    ${opFiltreBanner(f,from,to,list.length)}
 
     ${list.length?`<div class="sec-card" style="overflow-x:auto">
       <table class="tbl rowlink"><thead><tr>
@@ -2798,15 +2843,35 @@ async function operasyon(c){
 }
 /* Ana Sayfa "Bu Hafta Baski & Montaj" karti icin tek giris noktasi:
    donem filtresini kurup operasyon ekranina gecer (C4 §17). */
+function opFiltre2(patch){ opFiltreYaz({...opFiltre(),...patch}); renderSection(); }
+function opDonemSec(d){ opFiltre2({donem:d}); }
+/* S2 §8/§13 + S1.1 §8: hangi dönemi ve hangi filtreyi görüyoruz — ekranda
+   açıkça yazar. Aynı zamanda İŞ TARİHİ ile VERİNİN OKUNDUĞU AN'ı ayırır:
+   burada yazan aralık iş dönemidir, dosya adındaki tarih değil. */
+function opFiltreBanner(f,from,to,adet){
+  const donemAd={bugun:'Bugün',hafta:'Bu hafta',yaklasan:'Yaklaşan 30 gün',ay:'Bu ay',
+                 gecen:'Geçen ay',yil:'Bu yıl',ozel:'Özel aralık',tum:'Tüm zamanlar'}[f.donem]||f.donem;
+  const p=[`İş dönemi: <b>${esc(donemAd)}</b>${from&&to?` (${esc(trTarih(from))} – ${esc(trTarih(to))})`:''}`];
+  if(f.type)   p.push('Tür: '+esc(opTypeLbl(f.type)));
+  if(f.status) p.push('Durum: '+esc(opStatLbl(f.status)));
+  if(f.q)      p.push(`Ara: “${esc(f.q)}”`);
+  const filtreli=!!(f.type||f.status||f.q);
+  return `<div class="afilt ${filtreli?'':'neutral'}">
+    <span class="afilt-l">${filtreli?'Aktif filtre':'Görünüm'}</span>
+    <span class="afilt-v">${p.join(' · ')}</span>
+    <span class="afilt-n">${adet} kayıt</span>
+    ${filtreli?`<button type="button" class="afilt-x" onclick="opFiltre2({type:'',status:'',q:''})">Temizle ✕</button>`:''}</div>`;
+}
 function opGo(donem){
   opFiltreYaz({...opFiltre(),donem:donem||'hafta',from:'',to:''});
   go('operasyon');
 }
 function opFiltreDegis(){
-  const d=gv('opDonem')||'ay';
-  const box=document.getElementById('opOzelBox'); if(box) box.hidden=(d!=='ozel');
-  opFiltreYaz({donem:d,from:gv('opFrom')||'',to:gv('opTo')||'',
-    type:gv('opType')||'',status:gv('opStatus')||'',q:gv('opQ')||''});
+  /* Dönem artık bir select değil, şerit düğmesi (opDonemSec). Buradan
+     yalnız serbest alanlar okunur; mevcut dönem korunur. */
+  const f=opFiltre();
+  opFiltreYaz({...f, from:gv('opFrom')||'', to:gv('opTo')||'',
+    type:gv('opType')||'', status:gv('opStatus')||'', q:gv('opQ')||''});
   renderSection();
 }
 
@@ -2924,7 +2989,15 @@ const OP_COLS=[
 async function opExport(){
   const list=ui._opFiltered||ui._ops||[];
   if(!list.length){ mpAlert('Aktarılacak kayıt yok.'); return; }
-  await exportRows('baski-montaj','Baskı & Montaj',OP_COLS,list);
+  const f=opFiltre();
+  const [from,to]=f.donem==='ozel'?[f.from,f.to]:opDonem(f.donem);
+  const donemAd={bugun:'Bugün',hafta:'Bu hafta',yaklasan:'Yaklaşan 30 gün',ay:'Bu ay',
+                 gecen:'Geçen ay',yil:'Bu yıl',ozel:'Özel aralık',tum:'Tüm zamanlar'}[f.donem]||f.donem;
+  await exportRows('baski-montaj','Baskı & Montaj',OP_COLS,list,[
+    ['İş dönemi', donemAd + (from&&to?` (${trTarih(from)} – ${trTarih(to)})`:'')],
+    ['Tür filtresi', f.type?opTypeLbl(f.type):'Tümü'],
+    ['Durum filtresi', f.status?opStatLbl(f.status):'Tümü'],
+    ['Arama', f.q||'—']]);
 }
 function opImport(){
   importOpen({
@@ -3280,11 +3353,11 @@ async function workspaceHome(c){
             <button type="button" class="pf-t ${st.benim?'on':''}" aria-pressed="${st.benim}"
               onclick="psFiltre({benim:${!st.benim}})">Benimle ilgili</button>
           </div>
-          ${filtreAktif?`<div class="fbar">
-            <span class="fbar-l">Aktif filtre</span>
-            <span class="fbar-v">${ozet.join(' · ')}</span>
-            <span class="fbar-n">${suz.length} güncelleme</span>
-            <button type="button" class="fbar-x" onclick="psTemizle()">Temizle ✕</button></div>`:''}
+          ${filtreAktif?`<div class="afilt">
+            <span class="afilt-l">Aktif filtre</span>
+            <span class="afilt-v">${ozet.join(' · ')}</span>
+            <span class="afilt-n">${suz.length} güncelleme</span>
+            <button type="button" class="afilt-x" onclick="psTemizle()">Temizle ✕</button></div>`:''}
           <div class="card-b pu-list">${feedHtml}
             ${suz.length>st.n?`<button class="btn btn-outline btn-sm pu-more" onclick="psDaha()">Daha fazla göster</button>`:''}
           </div></section>
@@ -3456,7 +3529,22 @@ function xlsxLoad(){                       /* SheetJS sadece gerektiğinde yükl
 const _dt=()=>new Date().toISOString().slice(0,10);
 
 /* --- DIŞA AKTAR --- */
-async function exportRows(dosyaAdi, sheetAdi, cols, rows){
+/* S2 §5/§13 — tarih anlambilimi.
+   Çalışma referansı Excel'lerin hepsinde dosya adında bir tarih var
+   ("... 21.11.2025.xlsx") ve o tarih İŞ DÖNEMİ DEĞİL, dosyanın alındığı
+   AN'dır: 21.11.2025 tarihli baskı/montaj dosyasının satırları Ekim
+   2025'e aittir. Uygulama bu iki şeyi artık asla tek bir tarihe
+   karıştırmaz ve dışa aktarımda ÜÇÜNÜ AYRI AYRI yazar:
+     · İş dönemi / filtre  → hangi işlere bakıyoruz
+     · Veri okunma anı      → ekrandaki verinin çekildiği an
+     · Dışa aktarım anı     → bu dosyanın üretildiği an
+
+   Meta AYRI BİR SAYFAYA ve DATA SAYFASINDAN SONRA yazılır. İki neden:
+   içe aktarım `SheetNames[0]`ı ve onun 1. satırını başlık kabul eder
+   (bkz. importOpen), dolayısıyla başlığın üstüne satır eklemek kendi
+   çıktımızı geri alınamaz hale getirirdi; meta sayfasını başa koymak da
+   aynı şeyi yapardı. Bu haliyle gidiş-dönüş bozulmaz. */
+async function exportRows(dosyaAdi, sheetAdi, cols, rows, meta){
   try{ await xlsxLoad(); }catch(e){ mpAlert(e.message); return; }
   const head=cols.map(c=>c.label);
   const body=rows.map(r=>cols.map(c=>{
@@ -3466,7 +3554,31 @@ async function exportRows(dosyaAdi, sheetAdi, cols, rows){
   ws['!cols']=cols.map(c=>({wch:c.w||18}));
   const wb=XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb,ws,sheetAdi.slice(0,30));
+  XLSX.utils.book_append_sheet(wb,exportMetaSheet(sheetAdi,rows.length,meta),'Bilgi');
   XLSX.writeFile(wb,`${dosyaAdi}-${_dt()}.xlsx`);
+}
+/* Dışa aktarım künyesi. `meta` = [[etiket,değer], ...] — ekranın o anki
+   filtresi. Buradaki hiçbir satır iş tarihi DEĞİLDİR; iş tarihleri veri
+   sayfasının kendi sütunlarındadır. */
+function exportMetaSheet(sheetAdi, adet, meta){
+  const now=new Date();
+  const okundu=ui._veriOkunma instanceof Date?ui._veriOkunma:now;
+  const aoa=[
+    ['Medyapark — dışa aktarım künyesi'],
+    [],
+    ['Görünüm', sheetAdi],
+    ['Kayıt sayısı', adet],
+    []];
+  (meta||[]).forEach(m=>aoa.push([m[0], m[1]]));
+  aoa.push([]);
+  aoa.push(['Veri okunma anı', okundu.toLocaleString('tr-TR')]);
+  aoa.push(['Dışa aktarım anı', now.toLocaleString('tr-TR')]);
+  aoa.push([]);
+  aoa.push(['Not','Bu dosya yukarıdaki filtrenin O ANKİ durumunun anlık görüntüsüdür.']);
+  aoa.push(['','Canlı kayıt uygulamadadır; bu dosya kaynak tablo değildir.']);
+  const ws=XLSX.utils.aoa_to_sheet(aoa);
+  ws['!cols']=[{wch:24},{wch:52}];
+  return ws;
 }
 
 /* çok sayfalı Excel */
@@ -4771,6 +4883,18 @@ async function listeler(c){
 
   const custOpts=custs.map(x=>`<option value="${x.id}">${esc(x.firma||('#'+x.id))}</option>`).join('');
   const mecOpts=mlist.map(m=>`<option value="${m.id}">${esc(m.name)}</option>`).join('');
+  /* S2 §11/§12 — keşfedilebilirlik.
+     LED ekranlar envanterde VARDI ama bulunabilir değildi: onlara ulaşmak
+     için ya "M1 Adana LED" alt mecrasını ya da "P3-A" gibi bir pozisyon
+     kodunu önceden bilmek gerekiyordu. Ürün (mecra türü) zaten her
+     `units.product_id` üzerinde duruyor; tek eksik onu süzebilmekti.
+     Yeni tablo YOK, Team'e özel medya çatalı YOK - aynı paylaşılan
+     renderer'a bir filtre eklendi. */
+  const urunSay={}; mlist.forEach(m=>(m.units||[]).forEach(u=>{
+    if(u.product_id!=null) urunSay[u.product_id]=(urunSay[u.product_id]||0)+1; }));
+  const prodOpts=prods.filter(p=>urunSay[p.id])
+    .sort((a,b)=>String(a.name).localeCompare(String(b.name),'tr'))
+    .map(p=>`<option value="${p.id}">${esc(p.name)} (${urunSay[p.id]})</option>`).join('');
   /* Excel içe aktarma değişiklik yazan bir mutation'dır; team_member'a
      kapalı. Dışa aktarma salt okuma/rapor işlemidir, her iki role de
      açık kalır (parity audit S1 §3). */
@@ -4793,6 +4917,7 @@ async function listeler(c){
           <option value="rezerve">Rezerve ayı olanlar</option>
           <option value="doluveya">Dolu veya rezerve</option>
           <option value="bos">Tamamen boş (${y})</option></select>
+        <select class="inp" id="lFp" onchange="lFiltre()"><option value="">Tüm mecra türleri</option>${prodOpts}</select>
         <select class="inp" id="lFc" onchange="lFiltre()"><option value="">Tüm müşteriler</option>${custOpts}</select>
         <button class="btn btn-ghost btn-sm" onclick="lTemizle()">Temizle</button>
       </div>
@@ -4803,11 +4928,12 @@ async function listeler(c){
   if(ui._lfSakla){ const f=ui._lfSakla; ui._lfSakla=null;
     const e=id=>document.getElementById(id);
     if(e('lQ'))e('lQ').value=f.q||''; if(e('lFm'))e('lFm').value=f.m||'';
-    if(e('lFd'))e('lFd').value=f.d||''; if(e('lFc'))e('lFc').value=f.c||''; }
+    if(e('lFd'))e('lFd').value=f.d||''; if(e('lFc'))e('lFc').value=f.c||'';
+    if(e('lFp'))e('lFp').value=f.p||''; }
   lFiltre();
 }
 function lTemizle(){ const e=id=>document.getElementById(id); if(e('lQ'))e('lQ').value='';
-  ['lFm','lFd','lFc'].forEach(id=>{ if(e(id))e(id).value=''; }); lFiltre(); }
+  ['lFm','lFd','lFc','lFp'].forEach(id=>{ if(e(id))e(id).value=''; }); lFiltre(); }
 /* Bir A/B grubunun yıl içindeki durum kümesi ve kiralayan müşteri kümesi */
 function lGrupBilgi(g,y,bmap){
   const st=new Set(), cs=new Set();
@@ -4820,8 +4946,8 @@ function lFiltre(){
   const L=ui._L, box=document.getElementById('lWrap'); if(!L||!box)return;
   const y=L.y, bmap=window.__lbmap;
   const q=(gv('lQ')||'').trim().toLocaleLowerCase('tr');
-  const fm=gv('lFm')||'', fd=gv('lFd')||'', fc=gv('lFc')||'';
-  const aktif=!!(q||fm||fd||fc);
+  const fm=gv('lFm')||'', fd=gv('lFd')||'', fc=gv('lFc')||'', fp=gv('lFp')||'';
+  const aktif=!!(q||fm||fd||fc||fp);
   const monHead=MONTHS_SHORT.map(mo=>`<div class="rg-m rg-mh"><span>${mo}</span></div>`).join('');
   let html='', topPoz=0, topMecra=0;
   for(const m of L.mlist){
@@ -4844,6 +4970,9 @@ function lFiltre(){
         if(fd==='doluveya' && !st.has('dolu') && !st.has('rezerve')) return false;
         if(fd==='bos' && st.size) return false;
         if(fc && !cs.has(fc)) return false;
+        /* Ürün önce pozisyonun kendisinden, yoksa alt mecradan okunur. */
+        if(fp){ const pid=(g.A&&g.A.product_id!=null)?g.A.product_id:a.product_id;
+                if(String(pid)!==fp) return false; }
         return true;
       });
       if(!groups.length && aktif) continue;    /* filtre varken boş alanları gizle */
@@ -4981,7 +5110,7 @@ async function rezKaydet(){
 }
 async function lAddPos(altId,mid,pid){ const nm=prompt('Pozisyon adı (ör. P1-A):','P'); if(nm===null)return; await api('unit_save',{alt_mecra_id:altId,mecra_id:mid,product_id:pid,name:(nm||'Yeni Pozisyon')}); renderSection(); }
 function lYear(d){ ui._lyear=(ui._lyear||new Date().getFullYear())+d;
-  ui._lfSakla={q:gv('lQ'),m:gv('lFm'),d:gv('lFd'),c:gv('lFc')};   /* yıl değişince filtreler korunur */
+  ui._lfSakla={q:gv('lQ'),m:gv('lFm'),d:gv('lFd'),c:gv('lFc'),p:gv('lFp')};  /* yıl değişince filtreler korunur */
   renderSection(); }
 
 /* ---------- MÜŞTERİLER ---------- */
