@@ -165,6 +165,7 @@ const LOG_AD={
   customer_save:['Müşteri','kaydetti'], customer_delete:['Müşteri','sildi'],
   contact_save:['Kişi','kaydetti'], contact_delete:['Kişi','sildi'],
   entry_save:['Güncelleme','ekledi'], entry_delete:['Güncelleme','sildi'],
+  work_follow:['İş','takibe aldı'], work_unfollow:['İş','takibi bıraktı'],
   operation_save:['Baskı/Montaj','kaydetti'], operation_delete:['Baskı/Montaj','sildi'],
   job_lifecycle:['İş','durumunu değiştirdi'],
   work_party_save:['İş tarafı','kaydetti'], work_party_delete:['İş tarafı','sildi'],
@@ -236,6 +237,33 @@ function mpDlg(o){ return new Promise(res=>{
   const okB=bg.querySelector('#mpDlgOk'); okB.onclick=()=>kapat(true); okB.focus();
 });}
 function mpAlert(msg,baslik){ return mpDlg({msg,baslik:baslik||'Bilgi',tek:true}); }
+/* Tek satirlik metin sorar. Tarayicinin prompt()'u KULLANILMAZ: panel
+   temasinin disinda kalir ve bazi tarayicilarda engellenir. Ayni
+   mpdlg iskeletini kullanir (PS1.1 §24 satir ici kurum/kisi ekleme). */
+function mpPrompt(msg,baslik,varsayilan){ return new Promise(res=>{
+  const eski=document.getElementById('mpDlgBg'); if(eski)eski.remove();
+  const bg=document.createElement('div'); bg.id='mpDlgBg'; bg.className='mpdlg-bg';
+  bg.innerHTML=`<div class="mpdlg" role="dialog" aria-modal="true">
+    <div class="mpdlg-t">${esc(baslik||'Yeni kayıt')}</div>
+    <div class="mpdlg-m"><label class="flabel" for="mpPromptI">${esc(msg||'')}</label>
+      <input class="inp" id="mpPromptI" value="${esc(varsayilan||'')}" autocomplete="off"></div>
+    <div class="mpdlg-b">
+      <button class="btn btn-ghost" id="mpDlgNo">Vazgeç</button>
+      <button class="btn btn-primary" id="mpDlgOk">Ekle</button>
+    </div></div>`;
+  document.body.appendChild(bg);
+  requestAnimationFrame(()=>bg.classList.add('on'));
+  const inp=bg.querySelector('#mpPromptI');
+  const kapat=v=>{ bg.classList.remove('on'); document.removeEventListener('keydown',tus);
+    setTimeout(()=>bg.remove(),140); res(v); };
+  const tus=e=>{ if(e.key==='Escape')kapat(null);
+    if(e.key==='Enter'){ e.preventDefault(); kapat(inp.value); } };
+  document.addEventListener('keydown',tus);
+  bg.addEventListener('mousedown',e=>{ if(e.target===bg)kapat(null); });
+  bg.querySelector('#mpDlgNo').onclick=()=>kapat(null);
+  bg.querySelector('#mpDlgOk').onclick=()=>kapat(inp.value);
+  inp.focus(); inp.select();
+});}
 function mpConfirm(msg,baslik,opt){ opt=opt||{};
   const dg=opt.danger!==undefined?opt.danger:/sil|kald(ı|i)r/i.test(String(msg));
   return mpDlg({msg,baslik:baslik||(dg?'Emin misiniz?':'Onay'),danger:dg,
@@ -503,6 +531,37 @@ async function api(action, body){
       logYaz(act,body); return ok(r); }
     /* Panelim'in ilgi eşleşmesi için toplu okuma: Entry başına sorgu
        açmamak adına tek turda çekilir (07 §20 — N+1 yasak). */
+    /* ---- Work takibi (PS1.1 §16) ----
+       ACIKCA niyet beyanidir: Work'un sahibi olmak, uzerinde gecmiste
+       calismis olmak veya bir guncellemede etiketlenmis olmak DEGILDIR.
+       Gorunurluk kapisi da degildir - `jobs` RLS'i bu tabloyu okumaz. */
+    case 'work_followers_all':{
+      let self=sb.from('work_followers').select('job_id,team_id');
+      if(q.team_id) self=self.eq('team_id',q.team_id);
+      const {data,error}=await self.limit(q.limit?+q.limit:5000);
+      if(error)throw error; return ok(data); }
+    case 'work_follow':{
+      /* team_id sunucuda RLS ile zorlanir (with check team_id =
+         current_team_id()); buradaki deger yalnizca istegin govdesidir. */
+      const me=(ui._me&&ui._me.id)||null;
+      if(!me) throw new Error('Takip icin ekip profili gerekiyor.');
+      const {error}=await sb.from('work_followers')
+        .upsert({job_id:body.id, team_id:me},{onConflict:'job_id,team_id'});
+      if(error)throw error; logYaz(act,body); return ok(); }
+    case 'work_follow_many':{
+      /* Yeni is olustururken secilen "Ilgili" kisiler. Tek upsert;
+         kisi basina istek YOK. */
+      const ids=(body.team_ids||[]).filter(Boolean);
+      if(!ids.length) return ok();
+      const {error}=await sb.from('work_followers')
+        .upsert(ids.map(t=>({job_id:body.id,team_id:t})),{onConflict:'job_id,team_id'});
+      if(error)throw error; logYaz('work_follow',body); return ok(); }
+    case 'work_unfollow':{
+      const me=(ui._me&&ui._me.id)||null;
+      if(!me) return ok();
+      const {error}=await sb.from('work_followers').delete()
+        .eq('job_id',body.id).eq('team_id',me);
+      if(error)throw error; logYaz(act,body); return ok(); }
     case 'entry_relevance_all':{
       let sel=sb.from('entry_relevance').select('entry_id,team_id');
       if(q.team_id) sel=sel.eq('team_id',q.team_id);
@@ -781,6 +840,7 @@ function showApp(){
                doldurulmus halde acar. -->
           <div class="qc-top">
             <button class="btn btn-primary btn-sm" onclick="qcAc({})" title="Bir güncelleme paylaş">${ic('plus',15)} Güncelleme</button>
+            <button class="btn btn-outline btn-sm" onclick="jobForm()" title="Yeni iş aç">${ic('plus',15)} Yeni İş</button>
           </div>
           <a class="btn btn-outline btn-sm" href="index.html" target="_blank">${ic('ext',15)} Siteyi Aç</a>
           ${userChip()}
@@ -1323,19 +1383,29 @@ const gecikti=v=>{ if(!v) return false;
    ve bu bilinçlidir: uygulamanın her yerinde renderSection() taze veri
    çeker, burada bayat bir önbellek tutmak tutarsızlık üretirdi.
    ============================================================ */
-const ISTABS=[['pano','Pano'],['liste','Liste'],['takiplerim','Takiplerim'],
-              ['bekleyenler','Bekleyenler'],['takvim','Takvim']];
+/* PS1.1 §18: nihai paylasilan Work IA'si UC sekmedir. `Takiplerim` ve
+   `Bekleyenler` birincil sekme olmaktan cikti - kisisel degerleri artik
+   Panelim'de (Bana ait akis, Dikkat Gerekenler, Takip Ettigim Isler)
+   karsilaniyor. Altlarindaki sorgu mantigi SILINMEDI; Panelim ve
+   filtreler uzerinden yeniden kullaniliyor. */
+const ISTABS=[['pano','Pano'],['liste','Liste'],['takvim','Takvim']];
 
-const ISF_DEF={life:['acik','bekliyor'],q:'',org:'',phase:'',asg:''};
+/* PS1.1 §19: varsayilan yasam dongusu UX'i Aktif | Arsiv.
+   Aktif = acik + bekliyor. Backend degerleri aynen duruyor; `bekliyor`
+   bir rozet ve filtre olarak yasiyor, ama ASLA "geciken" demek degil.
+   PS1.1 §20: kisi filtresi `asg` (Sorumlu) degil `ilgili`. */
+const ISF_DEF={life:['acik','bekliyor'],q:'',org:'',phase:'',ilgili:'',acil:false};
 /* Work görünümü filtresi oturum içinde korunur (07 §18/2). */
 function isFiltre(){
   let f={};
   try{ f=JSON.parse(sessionStorage.getItem('mp_is_filtre')||'null')||{}; }catch(e){ f={}; }
   const o={...ISF_DEF,...f};
   if(!Array.isArray(o.life)||!o.life.length) o.life=ISF_DEF.life.slice();
-  /* Geriye uyumluluk: eski `mine` anahtarı artık asg='me' demektir. */
-  if(f.mine===true && !f.asg) o.asg='me';
-  delete o.mine;
+  /* Geriye uyumluluk: eski `mine` -> asg='me' -> bugun ilgili=<ben>. */
+  if(f.mine===true && !f.asg && !o.ilgili) o.asg='me';
+  if(f.asg && !o.ilgili) o.ilgili=f.asg;
+  delete o.mine; delete o.asg;
+  o.acil=!!o.acil;
   return o;
 }
 function isFiltreYaz(f){ try{ sessionStorage.setItem('mp_is_filtre',JSON.stringify(f)); }catch(e){} }
@@ -1343,7 +1413,13 @@ function isTab(){
   try{ const t=sessionStorage.getItem('mp_is_tab'); return ISTABS.some(x=>x[0]===t)?t:'pano'; }
   catch(e){ return 'pano'; }
 }
-function isTabYaz(t){ try{ sessionStorage.setItem('mp_is_tab',t); }catch(e){} }
+/* Kaldirilan sekmelere giden eski kisayollar/oturum degerleri sessizce
+   kirilmasin: en yakin kalici gorunume duserler. */
+const IS_ESKI_TAB={takiplerim:'liste',bekleyenler:'liste'};
+function isTabYaz(t){
+  const k=IS_ESKI_TAB[t]||t;
+  try{ sessionStorage.setItem('mp_is_tab',ISTABS.some(x=>x[0]===k)?k:'pano'); }catch(e){}
+}
 function isTabGit(t){ isTabYaz(t); renderSection(); }
 /* Ana Sayfa ve dashboard kısayolları için tek giriş noktası: hedef
    sekmeyi ve filtreyi birlikte kurar, sonra İşler'e gider (§11). */
@@ -1368,14 +1444,6 @@ function coordHaftaSon(){                     /* içinde bulunulan ISO haftanın
    ufuktur; şirket takvimi haftalıktır. İkisi ayrı kalır — `coordHaftaSon`
    ve `wsHafta` operasyonel ISO haftası için aynen durur (C4 §3). */
 const COORD_UFUK=7;
-function coordKova(due){
-  if(!due) return 'yok';
-  const d=String(due).slice(0,10), bugun=_cIso(new Date());
-  if(d<bugun) return 'gec';
-  if(d===bugun) return 'bugun';
-  const son=new Date(); son.setDate(son.getDate()+COORD_UFUK);
-  return d<=_cIso(son)?'ufuk':'sonra';
-}
 const COORDKOVA=[['gec','Geciken'],['bugun','Bugün'],['ufuk','Önümüzdeki 7 Gün'],
                  ['sonra','Daha Sonra'],['yok','Tarihsiz']];
 const coordGunFark=v=>v?Math.floor((Date.now()-new Date(v).getTime())/864e5):null;
@@ -1387,16 +1455,22 @@ function coordYas(v){                          /* "12 gün" / "bugün" */
 
 /* ---- tek turda veri + türev ---- */
 async function coordVeri(){
-  const [jobs,ents,team,custs,cts]=await Promise.all([
+  const [jobs,ents,team,custs,cts,fol]=await Promise.all([
     api('jobs_list'), api('entries_list&limit=1000'), api('team_list'),
-    api('customers_list'), api('contacts_list')]);
+    api('customers_list'), api('contacts_list'),
+    api('work_followers_all').catch(()=>[])]);
+  /* job_id -> [team_id]. Tek toplu okuma; Work basina sorgu YOK. */
+  const folMap={}; (fol||[]).forEach(r=>{ (folMap[r.job_id]=folMap[r.job_id]||[]).push(r.team_id); });
+  ui._followers=folMap;
   /* ui._cust burada DOLDURULUR. Eskiden isTakibi onu okuyup hiç
      çekmiyordu; kurum adına göre arama bu yüzden soğuk oturumda sessizce
      boş dönüyordu (coordination audit §2.3). Okuyan ekran kendi verisini
      çeker — başka bir ekranın ısıtmasına güvenmez. */
   ui._jobs=jobs||[]; ui._entries=ents||[]; ui._team=team||[]; ui._cust=custs||[];
   ui._contacts=cts||[];
-  return coordTuret(ui._jobs,ui._entries,ui._team,ui._cust,ui._contacts);
+  const D=coordTuret(ui._jobs,ui._entries,ui._team,ui._cust,ui._contacts);
+  D.followers=folMap;
+  return D;
 }
 function coordTuret(jobs,ents,team,custs,cts){
   const jm={},cm={},tm={},ktm={};
@@ -1437,16 +1511,6 @@ const coordAksSira=e=>e.due_at?String(e.due_at).slice(0,10):'9999-12-31';
    Faz ağırlığı BİLİNÇLİ olarak yok: phase bir state machine değildir
    (BR-W02) ve ticari risk göstergesi olarak kullanılması onu fiilen
    öyle yapardı. */
-function coordBekSira(j,D){
-  const yas=coordGunFark(D.sonAkt[j.id]);
-  const nx=D.sonraki[j.id];
-  let s=(yas===null?365:yas);                        /* hiç hareket yok = en eski */
-  if(nx&&nx.due_at&&gecikti(nx.due_at)) s+=500;      /* kaçmış termin */
-  if(!(D.acikAks[j.id]||0))             s+=250;      /* sıradaki adım belirsiz */
-  if(!j.assignee_id)                    s+=60;       /* sahipsiz */
-  return s;
-}
-
 /* ---- paylaşılan filtre uygulaması ---- */
 function coordSuz(D,f,opt){
   opt=opt||{};
@@ -1454,9 +1518,15 @@ function coordSuz(D,f,opt){
   if(opt.life) list=list.filter(j=>(j.lifecycle_status||'acik')===opt.life);
   if(f.phase&&!opt.faziAtla) list=list.filter(j=>(j.status||'temas_takip')===f.phase);
   if(f.org) list=list.filter(j=>String(j.customer_id)===String(f.org));
+  if(f.acil) list=list.filter(j=>!!j.is_urgent);
+  /* `Ilgili` (PS1.1 §20) = bu kisiyi gercekten baglayan her sey:
+     Work'u TAKIP EDIYOR (acik niyet, work_followers), Work'un sahibi,
+     ya da uzerinde acik bir aksiyonu var. "Sorumlu" degil - kimseye is
+     atanmis olmasi gerekmiyor. */
   const aid=coordAsgId(D,f);
-  if(aid) list=list.filter(j=>j.assignee_id===aid||
-    (D.ents||[]).some(e=>e.job_id===j.id&&e.assignee_id===aid&&e.action_status==='open'));
+  if(aid){ const fol=D.followers||{};
+    list=list.filter(j=>(fol[j.id]&&fol[j.id].includes(aid))||j.assignee_id===aid||
+      (D.ents||[]).some(e=>e.job_id===j.id&&e.assignee_id===aid&&e.action_status==='open')); }
   if(f.q){ const t=f.q.toLocaleLowerCase('tr');
     list=list.filter(j=>[j.title,j.note,D.cm[j.customer_id]]
       .some(v=>String(v||'').toLocaleLowerCase('tr').includes(t))); }
@@ -1464,18 +1534,13 @@ function coordSuz(D,f,opt){
 }
 /* 'me' -> oturum sahibi, '' -> herkes, aksi halde team.id */
 function coordAsgId(D,f){
-  if(!f.asg) return 0;
-  return f.asg==='me'?(D.benim||0):(+f.asg||0);
+  if(!f.ilgili) return 0;
+  return f.ilgili==='me'?(D.benim||0):(+f.ilgili||0);
 }
 
 /* ---- sekme çubuğu + paylaşılan filtre kartı ---- */
 function coordTabBar(tab,D){
-  const say={
-    liste:coordSuz(D,isFiltre()).length,
-    takiplerim:(D.ents||[]).filter(e=>e.action_status==='open'&&
-      (coordAsgId(D,isFiltre())||D.benim)&&
-      e.assignee_id===(coordAsgId(D,isFiltre())||D.benim)).length,
-    bekleyenler:(D.jobs||[]).filter(j=>j.lifecycle_status==='bekliyor').length};
+  const say={liste:coordSuz(D,isFiltre()).length};
   return `<div class="ws-switch inline" role="group" aria-label="İşler görünümü">
     ${ISTABS.map(([k,l])=>`<button type="button" class="${tab===k?'on':''}" aria-pressed="${tab===k}"
       onclick="isTabGit('${k}')">${esc(l)}${say[k]?` <span class="tabn mono">${say[k]}</span>`:''}</button>`).join('')}
@@ -1486,15 +1551,19 @@ function coordTabBar(tab,D){
 function coordFiltreKart(tab,D,f){
   const orgSec=(D.jobs||[]).reduce((a,j)=>{ if(j.customer_id&&!a.includes(j.customer_id))a.push(j.customer_id); return a; },[])
     .map(id=>[id,D.cm[id]||('#'+id)]).sort((a,b)=>String(a[1]).localeCompare(String(b[1]),'tr'));
-  const asgSec=(D.team||[]).filter(t=>t.active!==false);
+  /* PS1.1 §20: kisi listesi TUM workspace uyelerini icerir, oturum
+     sahibi dahil - "Bana Dusenler" gibi kisiye sabitlenmis bir kisayol
+     degil, secilebilir bir filtre. */
+  const kisiSec=(D.team||[]).filter(t=>t.active!==false);
+  const arsiv=f.life.length===1&&f.life[0]==='kapandi';
   const gosterFaz=tab==='liste';
   const gosterLife=tab==='pano'||tab==='liste';
-  const gosterOrg=tab!=='takiplerim'&&tab!=='takvim';
-  const gosterAra=tab!=='takvim';          /* Takvim'de arama yerine gün seçimi */
+  const gosterOrg=tab!=='takvim';
+  const gosterAra=tab!=='takvim';
   return `<div class="sec-card">
     <div class="coord-f">
       ${gosterAra?`<div class="field"><label class="flabel" for="isQ">Ara</label>
-        <input class="inp" id="isQ" value="${esc(f.q)}" placeholder="${tab==='takiplerim'?'Aksiyon, iş, kurum':'Başlık, not, kurum'}" oninput="isFiltreDegis()"></div>`:''}
+        <input class="inp" id="isQ" value="${esc(f.q)}" placeholder="Başlık, not, kurum" oninput="isFiltreDegis()"></div>`:''}
       ${gosterOrg?`<div class="field"><label class="flabel" for="isOrg">Kurum</label>
         <select class="inp" id="isOrg" onchange="isFiltreDegis()"><option value="">Tümü</option>
           ${orgSec.map(([id,ad])=>`<option value="${id}" ${String(f.org)===String(id)?'selected':''}>${esc(ad)}</option>`).join('')}
@@ -1503,29 +1572,55 @@ function coordFiltreKart(tab,D,f){
         <select class="inp" id="isPhase" onchange="isFiltreDegis()"><option value="">Tümü</option>
           ${JOBST.map(([st,lbl])=>`<option value="${st}" ${f.phase===st?'selected':''}>${esc(lbl)}</option>`).join('')}
         </select></div>`:''}
-      <div class="field"><label class="flabel" for="isAsg">${tab==='takiplerim'?'Kimin aksiyonları':(tab==='takvim'?'Kimin takvimi':'Sorumlu')}</label>
-        <select class="inp" id="isAsg" onchange="isFiltreDegis()">
-          <option value="me" ${f.asg==='me'||(tab==='takiplerim'&&!f.asg)?'selected':''}>${tab==='takvim'?'Benim':'Bana düşenler'}</option>
-          <option value="" ${f.asg===''&&tab!=='takiplerim'?'selected':''}>${tab==='takvim'?'Tümü':'Herkes'}</option>
-          ${asgSec.map(t=>`<option value="${t.id}" ${String(f.asg)===String(t.id)?'selected':''}>${esc(t.name)}</option>`).join('')}
+      <div class="field"><label class="flabel" for="isIlgili">${tab==='takvim'?'Kimin takvimi':'İlgili'}</label>
+        <select class="inp ${f.ilgili?'inp-on':''}" id="isIlgili" onchange="isFiltreDegis()">
+          <option value="" ${f.ilgili===''?'selected':''}>${tab==='takvim'?'Tüm ekip':'Herkes'}</option>
+          <option value="me" ${f.ilgili==='me'?'selected':''}>Ben</option>
+          ${kisiSec.map(t=>`<option value="${t.id}" ${String(f.ilgili)===String(t.id)?'selected':''}>${esc(t.name)}</option>`).join('')}
         </select></div>
     </div>
-    ${gosterLife?`<div class="field" style="margin-top:8px"><span class="flabel" id="isLifeLbl">Yaşam döngüsü</span>
-      <div role="group" aria-labelledby="isLifeLbl" style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;padding-top:4px">
-        ${LIFE.map(l=>`<label class="switch" style="margin:0"><input type="checkbox" class="isLife" value="${l[0]}" ${f.life.includes(l[0])?'checked':''} onchange="isFiltreDegis()"><span class="sl"></span><span class="txt">${esc(l[1])}</span></label>`).join('')}
-      </div></div>`:''}
-  </div>`;
+    ${gosterLife?`<div class="coord-f2">
+      <div role="group" aria-label="Kapsam" class="ws-switch inline">
+        <button type="button" class="${!arsiv?'on':''}" aria-pressed="${!arsiv}" onclick="isKapsam('aktif')">Aktif</button>
+        <button type="button" class="${arsiv?'on':''}" aria-pressed="${arsiv}" onclick="isKapsam('arsiv')">Arşiv</button>
+      </div>
+      <button type="button" class="pf-t ${f.acil?'on':''}" aria-pressed="${f.acil}"
+        onclick="isFiltre2({acil:${!f.acil}})">⚡ Acil</button>
+      <span class="fhint" style="margin-left:auto">Aktif = açık + bekliyor</span>
+    </div>`:''}
+  </div>
+  ${isFiltreBanner(tab,D,f)}`;
 }
+/* PS1.1 §8: secili filtre ASLA sessiz kalmaz. Panelim'den filtreli bir
+   kisayolla gelen kullanici, varsayilan sirket gorunumune baktigini
+   sanmamalidir. Ozet + tek tiklik Temizle. */
+function isFiltreBanner(tab,D,f){
+  const arsiv=f.life.length===1&&f.life[0]==='kapandi';
+  const p=[];
+  if(f.q)      p.push(`Ara: “${esc(f.q)}”`);
+  if(f.org)    p.push('Kurum: '+esc(D.cm[f.org]||('#'+f.org)));
+  if(f.phase)  p.push('Aşama: '+esc((JOBST.find(x=>x[0]===f.phase)||[,f.phase])[1]));
+  if(f.ilgili){ const id=coordAsgId(D,f);
+    p.push('İlgili: '+esc((D.tm&&D.tm[id])||(f.ilgili==='me'?'Ben':'#'+f.ilgili))); }
+  if(f.acil)   p.push('Acil');
+  if(arsiv)    p.push('Arşiv');
+  if(!p.length) return '';
+  return `<div class="fbar">
+    <span class="fbar-l">Aktif filtre</span>
+    <span class="fbar-v">${p.join(' · ')}</span>
+    <button type="button" class="fbar-x" onclick="isFiltreSifirla()">Temizle ✕</button></div>`;
+}
+function isKapsam(v){ isFiltre2({life:v==='arsiv'?['kapandi']:['acik','bekliyor']}); }
+function isFiltre2(patch){ isFiltreYaz({...isFiltre(),...patch}); renderSection(); }
+
 function isFiltreDegis(){
   const f=isFiltre();
-  const life=[...document.querySelectorAll('.isLife')].filter(x=>x.checked).map(x=>x.value);
   const el=id=>document.getElementById(id);
   isFiltreYaz({...f,
-    life:life.length?life:(el('isLifeLbl')?ISF_DEF.life.slice():f.life),
     q:gv('isQ')||'',
     org:el('isOrg')?(gv('isOrg')||''):f.org,
     phase:el('isPhase')?(gv('isPhase')||''):f.phase,
-    asg:el('isAsg')?gv('isAsg'):f.asg});
+    ilgili:el('isIlgili')?gv('isIlgili'):f.ilgili});
   renderSection();
 }
 function isFiltreSifirla(){ isFiltreYaz({...ISF_DEF}); renderSection(); }
@@ -1537,10 +1632,8 @@ async function isTakibi(c){
   ui._coord=D; ui._acikAks=D.acikAks;          /* mevcut okuyucular korunur */
   const f=isFiltre();
   const ust={pano:['Pano','aşamalar arasında oklarla taşıyın'],
-             liste:['Liste','tüm açık işler tek tabloda — sıralanabilir, filtrelenebilir'],
-             takiplerim:['Takiplerim','sana atanmış açık aksiyonlar, termine göre'],
-             bekleyenler:['Bekleyenler','dış cevap bekleyen işler ve dikkat gerektirenler'],
-             takvim:['Takvim','takip terminleri ve baskı/montaj planları']}[tab];
+             liste:['Liste','işler tek tabloda — sıralanabilir, filtrelenebilir'],
+             takvim:['Takvim','son tarihler ve baskı/montaj planları']}[tab];
   c.innerHTML=`<div class="sec-head">
       <div><h3>İşler <span class="muted" style="font-weight:500">· ${esc(ust[0])}</span></h3>
         <p class="sub" id="coordSub">${esc(ust[1])}</p></div>
@@ -1552,11 +1645,9 @@ async function isTakibi(c){
     ${tab==='takvim'?'':coordFiltreKart(tab,D,f)}
     <div id="coordBody"></div>`;
   const box=document.getElementById('coordBody');
-  if(tab==='liste')            isListe(box,D,f);
-  else if(tab==='takiplerim')  isTakiplerim(box,D,f);
-  else if(tab==='bekleyenler') isBekleyenler(box,D,f);
-  else if(tab==='takvim')      await isTakvim(box,D,f);
-  else                         isPano(box,D,f);
+  if(tab==='liste')       isListe(box,D,f);
+  else if(tab==='takvim') await isTakvim(box,D,f);
+  else                    isPano(box,D,f);
 }
 
 /* ============ PANO — canonical faz panosu (07 §5, korunur) ============ */
@@ -1568,7 +1659,7 @@ function isPano(box,D,f){
       const ls=j.lifecycle_status||'acik';
       const aks=D.acikAks[j.id]||0;
       return `<article class="kcard" style="cursor:pointer" onclick="workAc(${j.id})">
-      <div class="kc-t">${esc(j.title)}${j.assignee_id?ekipRozet(j.assignee_id):''}</div>
+      <div class="kc-t">${j.is_urgent?'<span class="pu-b acil" title="Acil">⚡</span> ':''}${esc(j.title)}${j.assignee_id?ekipRozet(j.assignee_id):''}</div>
       <div class="kc-m">${ls!=='acik'?`<span class="pill">${esc(LIFELBL[ls])}</span> `:''}${aks?`<span class="pill" title="Açık aksiyon">${aks} aksiyon</span> `:''}${esc(D.cm[j.customer_id]||j.note||'')}</div>
       <div class="kc-a" onclick="event.stopPropagation()">
         ${idx>0?`<button title="Geri al: ${esc(JOBST[idx-1][1])}" onclick="jobMove(${j.id},'${JOBST[idx-1][0]}')">${ic('left',15)}</button>`:'<span></span>'}
@@ -1677,143 +1768,25 @@ async function isListeExport(){
   ],rows);
 }
 
-/* ============ TAKİPLERİM — Entry tabanlı kişisel aksiyon görünümü =====
-   Work panosunun filtrelenmiş hali DEĞİLDİR: kaynağı doğrudan açık
-   actionable `entries` satırlarıdır (brief §8). Ayrı bir Task kaydı
-   yaratılmaz; görünen şey Work timeline'ındaki aynı Entry'dir. */
-function isTakiplerim(box,D,f){
-  const kim=coordAsgId(D,f)||D.benim;
-  const t=(f.q||'').toLocaleLowerCase('tr');
-  let list=(D.ents||[]).filter(e=>e.action_status==='open'&&kim&&e.assignee_id===kim);
-  if(t) list=list.filter(e=>{ const j=D.jm[e.job_id]||{};
-    return [e.body,j.title,D.cm[j.customer_id],D.cm[e.customer_id]]
-      .some(v=>String(v||'').toLocaleLowerCase('tr').includes(t)); });
-  const kova={}; COORDKOVA.forEach(k=>kova[k[0]]=[]);
-  list.forEach(e=>kova[coordKova(e.due_at)].push(e));
-  Object.keys(kova).forEach(k=>kova[k].sort((a,b)=>coordAksSira(a).localeCompare(coordAksSira(b))));
+/* TAKİPLERİM ve BEKLEYENLER renderer'ları PS1.1 §18 ile kaldırıldı.
+   İkisi de birincil sekme olmaktan çıktı; kişisel değerleri Panelim'e
+   taşındı (kronolojik akış + Dikkat Gerekenler + Takip Ettiğim İşler),
+   şirket geneli "bekliyor" durumu ise Pano/Liste'de `Aktif` kapsamının
+   içinde bir rozet ve `İlgili`/`Acil` filtreleriyle okunur.
 
-  const satir=e=>{
-    const j=D.jm[e.job_id]||null;
-    const org=j?(D.cm[j.customer_id]||''):(D.cm[e.customer_id]||'');
-    const gec=e.due_at&&gecikti(e.due_at);
-    /* Work'ü olmayan Entry kurum bağlamına gider (entries.job_id nullable). */
-    const ac=j?`workAc(${j.id})`:(e.customer_id?`orgAc(${e.customer_id})`:'');
-    return `<div class="ak-row">
-      <button type="button" class="ak-main" ${ac?`onclick="${ac}"`:'disabled'}>
-        <span class="ak-b">${esc(e.body)}</span>
-        <span class="ak-m">${j?esc(j.title):'<i>işe bağlı değil</i>'}${org?' · '+esc(org):''}${j?` · ${esc(JOBLBL[j.status]||j.status)}`:''}</span>
-      </button>
-      <span class="ak-d">${e.due_at
-        ? (gec?`<span class="pill clay">⚠ ${esc(trTarih(e.due_at))}</span>`
-              :`<span class="pill">${esc(trTarih(e.due_at))}</span>`)
-        : '<span class="muted">tarihsiz</span>'}</span>
-      <span class="ak-a">
-        <button class="btn btn-outline btn-sm" title="Aksiyonu tamamla" onclick="coordAksTamam(${e.id})">${ic('check',14)} Bitti</button>
-      </span></div>`;};
+   Yalnız bu iki renderer'a hizmet eden iki yardımcı da birlikte
+   kaldırıldı, çünkü başka hiçbir yerden çağrılmıyorlardı:
+     · coordKova()    → tarih kovası sınıflandırması. Panelim'in ajanda
+       ufku farklı (bugün + 7 gün, gecikmişler bugüne toplanır), bu
+       yüzden kendi sınıflandırmasını yapıyor.
+     · coordBekSira() → C3'ün dikkat sıralaması puanı. Bilinçli olarak
+       YENİDEN KULLANILMADI: ağırlıklı olarak "son hareketten bu yana
+       geçen gün" üzerine kuruluydu ve PS1.1 §12 dikkat gerekliliğinin
+       YAŞTAN çıkarılmasını açıkça yasaklıyor. Formül git geçmişinde ve
+       C3 notlarında duruyor.
+   İkinci bir Work modeli hiçbir zaman yaratılmadı; `jobs`, `entries` ve
+   `work_operations` aynen yerinde. */
 
-  const bolum=COORDKOVA.map(([k,l])=>{
-    const arr=kova[k]; if(!arr.length) return '';
-    return `<section class="sec-card ak-sec ${k==='gec'?'ak-gec':''}">
-      <div class="sec-head" style="margin-bottom:8px">
-        <h4 style="font-size:14px;margin:0">${esc(l)} <span class="chip">${arr.length}</span></h4></div>
-      ${arr.map(satir).join('')}</section>`;}).join('');
-
-  const sub=document.getElementById('coordSub');
-  const benimMi=kim===D.benim;
-  if(sub) sub.textContent=`${list.length} açık aksiyon · ${benimMi?'sana atanmış':(D.tm[kim]||'seçili kişi')+' üzerinde'} · termine göre`;
-  box.innerHTML=list.length?`<div class="ak-kpi">
-      ${COORDKOVA.filter(k=>kova[k[0]].length).map(([k,l])=>
-        `<div class="ak-k ${k==='gec'?'k-red':k==='bugun'?'k-amber':''}"><b>${kova[k].length}</b><span>${esc(l)}</span></div>`).join('')}
-    </div>${bolum}`
-    :`<div class="sec-card"><p class="empty">${benimMi?'Sana atanmış açık bir aksiyon yok.':'Bu kişiye atanmış açık aksiyon yok.'}
-       <button class="btn-link" onclick="isTabGit('pano')">Panoya dön</button></p></div>`;
-}
-/* Aksiyonu listede kapat: canonical `entry_save` yolunu kullanır, yeni
-   bir yazma yolu açmaz (brief §12). workAc'a atlamaz, listede kalır. */
-async function coordAksTamam(id){
-  const r=await guard(()=>api('entry_save',{id,action_status:'done'}),'Aksiyon kapatılamadı');
-  if(r===null)return;
-  toast('Aksiyon tamamlandı.'); renderSection();
-}
-
-/* ============ BEKLEYENLER — dikkat kuyruğu ============================
-   Birincil kaynak canonical Work lifecycle 'bekliyor' (brief §9). Yeni
-   bir bekleme-durumu modeli UYDURULMAZ. Bunun altında, aynı kayıtlardan
-   türeyen ikincil dikkat grupları gösterilir; hepsi mevcut predicate'lar.
-   Şemanın güvenilir biçimde kodlayamadığı bir "bekleme nedeni" varsa
-   üretilmez — yerine son anlamlı Entry gösterilir. */
-function isBekleyenler(box,D,f){
-  const fb={...f,life:['bekliyor']};
-  const bek=coordSuz(D,fb,{faziAtla:true}).filter(j=>j.lifecycle_status==='bekliyor');
-  bek.sort((a,b)=>coordBekSira(b,D)-coordBekSira(a,D));
-
-  const satir=j=>{
-    const nx=D.sonraki[j.id]||null, son=D.sonKayit[j.id]||null;
-    const akt=D.sonAkt[j.id]||'', yas=coordGunFark(akt);
-    const gec=nx&&nx.due_at&&gecikti(nx.due_at);
-    return `<div class="bk-row" onclick="workAc(${j.id})">
-      <div class="bk-a">
-        <div class="bk-t">${esc(j.title)}</div>
-        <div class="bk-m">${esc(D.cm[j.customer_id]||'kurum bağlı değil')} · ${esc(JOBLBL[j.status]||j.status)}${j.assignee_id?' · '+esc(D.tm[j.assignee_id]||''):' · <i>sahipsiz</i>'}</div>
-        ${son?`<div class="bk-s">Son hareket: ${esc(String(son.body).slice(0,84))}</div>`:'<div class="bk-s muted">Hiç güncelleme yok.</div>'}
-      </div>
-      <div class="bk-b">
-        <div class="bk-yas ${yas>=30?'y-red':yas>=14?'y-amber':''}" title="Son hareketten bu yana">
-          ${akt?esc(coordYas(akt)):'—'}</div>
-        <div class="bk-s">${akt?esc(trTarih(akt)):'hareket yok'}</div>
-      </div>
-      <div class="bk-c">${nx
-        ? `<div class="bk-nx">${esc(String(nx.body).slice(0,52))}</div>
-           <div class="bk-s">${nx.due_at?(gec?`<span class="lz-late">⚠ gecikti · ${esc(trTarih(nx.due_at))}</span>`:esc(trTarih(nx.due_at))):'tarihsiz'}${nx.assignee_id?' · '+esc(D.tm[nx.assignee_id]||''):''}</div>`
-        : `<span class="muted">Açık aksiyon yok</span>
-           <div class="bk-s"><button class="btn-link" onclick="event.stopPropagation();qcAc('takip',{jobId:${j.id}})">Güncelleme ekle</button></div>`}
-      </div></div>`;};
-
-  /* İkincil dikkat grupları — hepsi mevcut alanlar üzerinde predicate. */
-  const bugun=_cIso(new Date());
-  const acikJ=(D.jobs||[]).filter(j=>(j.lifecycle_status||'acik')!=='kapandi');
-  const gecikenAks=(D.ents||[]).filter(e=>e.action_status==='open'&&e.due_at&&
-    String(e.due_at).slice(0,10)<bugun);
-  const aksiyonsuz=acikJ.filter(j=>j.lifecycle_status==='acik'&&!(D.acikAks[j.id]||0)&&
-    (coordGunFark(D.sonAkt[j.id])===null||coordGunFark(D.sonAkt[j.id])>=14));
-  const szEksik=acikJ.filter(j=>j.contract_status==='missing'&&
-    ['baski','montaj','yayinda_aktif'].includes(j.status||''));
-
-  const grup=(baslik,ipucu,items,ciz)=>items.length?`<section class="sec-card">
-      <div class="sec-head" style="margin-bottom:8px">
-        <h4 style="font-size:14px;margin:0">${esc(baslik)} <span class="chip">${items.length}</span></h4>
-        <span class="muted" style="font-size:12px">${esc(ipucu)}</span></div>
-      ${items.map(ciz).join('')}</section>`:'';
-
-  const sub=document.getElementById('coordSub');
-  if(sub) sub.textContent=`${bek.length} bekleyen iş · en uzun süredir hareketsiz olan üstte`;
-  box.innerHTML=`
-    ${bek.length?`<section class="sec-card pad0">
-      <div class="bk-h"><span>Bekleyen iş</span><span>Hareketsiz</span><span>Sıradaki aksiyon</span></div>
-      ${bek.map(satir).join('')}</section>`
-     :`<div class="sec-card"><p class="empty">Bekleyen iş yok.
-        <button class="btn-link" onclick="isTabGit('pano')">Panoya dön</button></p></div>`}
-
-    ${grup('Geciken aksiyonlar','termini geçmiş açık aksiyonlar',gecikenAks,e=>{
-      const j=D.jm[e.job_id]||null;
-      const org=j?(D.cm[j.customer_id]||''):(D.cm[e.customer_id]||'');
-      return `<button type="button" class="ws-row" onclick="${j?`workAc(${j.id})`:(e.customer_id?`orgAc(${e.customer_id})`:'')}">
-        <span class="ws-row-t">${esc(e.body)}</span>
-        <span class="ws-row-m">${j?esc(j.title):'<i>işe bağlı değil</i>'}${org?' · '+esc(org):''}${e.assignee_id?' · '+esc(D.tm[e.assignee_id]||''):' · <i>atanmamış</i>'}</span>
-        <span class="ws-row-r"><span class="pill clay">⚠ ${esc(trTarih(e.due_at))}</span></span></button>`;})}
-
-    ${grup('Hareketsiz açık işler','14+ gündür güncelleme ve açık aksiyonu yok',aksiyonsuz,j=>
-      `<button type="button" class="ws-row" onclick="workAc(${j.id})">
-        <span class="ws-row-t">${esc(j.title)}</span>
-        <span class="ws-row-m">${esc(D.cm[j.customer_id]||'kurum bağlı değil')} · ${esc(JOBLBL[j.status]||j.status)}${j.assignee_id?' · '+esc(D.tm[j.assignee_id]||''):' · <i>sahipsiz</i>'}</span>
-        <span class="ws-row-r">${D.sonAkt[j.id]?esc(coordYas(D.sonAkt[j.id])):'<span class="muted">hareket yok</span>'}</span></button>`)}
-
-    ${grup('Sözleşmesi eksik ilerleyen işler','uyarıdır, engel değildir (03 §13)',szEksik,j=>
-      `<button type="button" class="ws-row" onclick="workAc(${j.id})">
-        <span class="ws-row-t">${esc(j.title)}</span>
-        <span class="ws-row-m">${esc(D.cm[j.customer_id]||'kurum bağlı değil')} · ${esc(JOBLBL[j.status]||j.status)}</span>
-        <span class="ws-row-r"><span class="pill">Sözleşme eksik</span></span></button>`)}`;
-}
 /* ============ TAKVİM — zaman katmanı (C4 §4-7) =======================
    Takvim bir KAYIT TÜRÜ DEĞİL, bir görünümdür. Hiçbir calendar_event
    satırı yaratılmaz; iki mevcut structured tarih alanı birleştirilir:
@@ -1857,22 +1830,29 @@ function tkvAralik(ayOfset){
 function tkvOlaylar(D,ops,f){
   const ev=[];
   const kim=coordAsgId(D,f);
+  /* `İlgili` takvimde de aynı anlama gelir (PS1.1 §20): kişiye atanmış
+     olması ŞART değil — Work'ü takip ediyorsa ya da sahibiyse de onun
+     takvimidir. Tek toplu follower okumasından gelir, sorgu açmaz. */
+  const fol=D.followers||{};
+  const bana=(jid,asg)=>!kim || asg===kim ||
+    (jid && ((fol[jid]&&fol[jid].includes(kim)) || (D.jm[jid]||{}).assignee_id===kim));
   (D.ents||[]).forEach(e=>{
     if(!e.due_at||!e.action_status) return;
     if(e.action_status==='cancelled') return;
-    if(kim && e.assignee_id!==kim) return;
+    if(!bana(e.job_id,e.assignee_id)) return;
     const j=e.job_id?D.jm[e.job_id]:null;
     ev.push({d:String(e.due_at).slice(0,10), tip:'takip', id:e.id,
       baslik:e.body, job:j, jobId:e.job_id||null,
       org:j?(D.cm[j.customer_id]||''):(D.cm[e.customer_id]||''),
       custId:e.customer_id||(j?j.customer_id:null),
       kisi:D.tm[e.assignee_id]||'', bitti:e.action_status==='done',
+      acil:!!e.is_urgent,
       gec:e.action_status==='open'&&gecikti(e.due_at)});
   });
   (ops||[]).forEach(o=>{
     if(!o.planned_date) return;
     const j=D.jm[o.job_id]||null;
-    if(kim && (!j || j.assignee_id!==kim)) return;   /* operasyonda sahip = Work sahibi */
+    if(!bana(o.job_id,null)) return;                 /* operasyonda ilgi = Work üzerinden */
     ev.push({d:String(o.planned_date).slice(0,10), tip:'op', id:o.id,
       baslik:o.description||opTypeLbl(o.operation_type), job:j, jobId:o.job_id,
       org:j?(D.cm[j.customer_id]||''):'', custId:j?j.customer_id:null,
@@ -1907,15 +1887,21 @@ async function isTakvim(box,D,f){
   for(let d=1;d<=gunSay;d++){
     const iso=y+'-'+pad(m+1)+'-'+pad(d);
     const list=gunMap[iso]||[];
-    const nT=list.filter(x=>x.tip==='takip').length, nO=list.filter(x=>x.tip==='op').length;
+    /* PS1.1 §21: eskiden burada yalnizca minik yesil/kirmizi sayi kareleri
+       vardi - neyin oldugunu anlamak icin gune tiklamak gerekiyordu.
+       Artik okunabilir kompakt olay satirlari var: tur, kisa metin ve
+       gecikme/acil durumu. Hucre icinde dev kart YOK; yogun gunlerde
+       ilk ikisi gosterilip gerisi "+N" ile ozetlenir. */
     const gec=list.some(x=>x.gec);
+    const goster=list.slice(0,2), kalan=list.length-goster.length;
     hc+=`<button type="button" class="tk-d${iso===bugun?' tk-today':''}${iso===secili?' tk-sel':''}${list.length?' tk-has':''}"
       onclick="tkvGun('${iso}')" aria-pressed="${iso===secili}"
-      title="${esc(list.slice(0,4).map(x=>x.baslik).join(' · '))}">
-      <span class="tk-n">${d}</span>
-      ${list.length?`<span class="tk-b">
-        ${nT?`<span class="tk-p tk-takip${gec?' tk-gec':''}">${nT}</span>`:''}
-        ${nO?`<span class="tk-p tk-op">${nO}</span>`:''}</span>`:''}
+      title="${esc(list.map(x=>x.baslik).join(' · '))}">
+      <span class="tk-n">${d}${list.length>1?`<em class="tk-c">${list.length}</em>`:''}</span>
+      ${list.length?`<span class="tk-evs">
+        ${goster.map(x=>`<span class="tk-ev ${x.tip==='op'?'op':'takip'}${x.gec?' gec':''}${x.acil?' acil':''}">
+            <i></i><b>${esc(String(x.baslik||'').slice(0,26))}</b></span>`).join('')}
+        ${kalan>0?`<span class="tk-ev more">+${kalan}</span>`:''}</span>`:''}
     </button>`;
   }
 
@@ -1954,10 +1940,10 @@ async function isTakvim(box,D,f){
             <button type="button" class="${!st.kaynak?'on':''}" onclick="tkvKaynak('')">Tümü</button>
             ${TKV_KAYNAK.map(([k,l])=>`<button type="button" class="${st.kaynak===k?'on':''}" onclick="tkvKaynak('${k}')">${esc(l)}</button>`).join('')}
           </div>
-          <select class="inp tk-who" id="isAsg" aria-label="Kimin takvimi" onchange="isFiltreDegis()">
-            <option value="" ${!f.asg?'selected':''}>Tüm ekip</option>
-            <option value="me" ${f.asg==='me'?'selected':''}>Benim</option>
-            ${(D.team||[]).filter(t=>t.active!==false).map(t=>`<option value="${t.id}" ${String(f.asg)===String(t.id)?'selected':''}>${esc(t.name)}</option>`).join('')}
+          <select class="inp tk-who ${f.ilgili?'inp-on':''}" id="isIlgili" aria-label="Kimin takvimi" onchange="isFiltreDegis()">
+            <option value="" ${!f.ilgili?'selected':''}>Tüm ekip</option>
+            <option value="me" ${f.ilgili==='me'?'selected':''}>Benim</option>
+            ${(D.team||[]).filter(t=>t.active!==false).map(t=>`<option value="${t.id}" ${String(f.ilgili)===String(t.id)?'selected':''}>${esc(t.name)}</option>`).join('')}
           </select>
         </div>
       </div>
@@ -1977,40 +1963,34 @@ async function isTakvim(box,D,f){
     </section>`;
 }
 
-/* ============ GUNCELLEME PAYLAS - tek composer (PS1 §5-8) ==========
-   TEK form, TEK giris noktasi. Eskiden iki isimli dugme (Guncelleme Ekle /
-   Takip Ekle) ayni modali `mod` onsecili aciyordu; kullanici bes saniyelik
-   bir olguyu kaydetmeden ONCE onu siniflandirmak zorunda kaliyordu.
-   Artik tek "Bir guncelleme paylas..." formu var; tarih/sorumlu yalniz
-   istendiginde acilan bir bolum (progressive disclosure).
+/* ============ GUNCELLEME PAYLAS (PS1.1 §9-11) ======================
+   Sprint 1 iki dugmeyi tek forma indirdi ama formu hala UC ayri acilir
+   bolume bolmustu (+ Baglam / + Tarih / Sorumlu / + Kime onemli). Urun
+   sahibinin gercek UI incelemesi bunun hala "form" gibi durdugunu
+   gosterdi: kullanici yazmadan once HANGI bolumu acacagina karar etmek
+   zorundaydi.
 
-   URETTIGI KAYIT: her durumda tek canonical `entries` satiri.
-   Ayri Task / Ticket / mesaj tablosu YOKTUR (D-204).
+   Artik acilir bolum YOK. Her sey tek gorunumde:
+     · metin alani
+     · ekip etiketleri (dogrudan metnin altinda)
+     · kompakt istege bagli kontroller: Is/Kurum · Son tarih · Acil
+     · Paylas
 
-   Baglamsiz kayit artik GECERLIDIR (PS1 §6 - C4'un "en az biri zorunlu"
-   kuralini acikca gecersiz kilar). "Yarin M1 tarafinda saha kontrolu
-   yapilacak." gibi sirket duzeyi bir not, sirf forma yetsin diye sahte bir
-   Work/kurum uydurmadan kaydedilebilmelidir. Sema zaten buna izin
-   veriyordu: entries.job_id ve customer_id nullable, aralarinda hicbir
-   check constraint yok - kural yalnizca bu istemci fonksiyonundaydi.
+   SORUMLU ALANI KALDIRILDI (PS1.1 §2.B). Normal kullanici bir
+   guncellemenin icinden kimseye is atamaz. Etiketlenen kisiler
+   "ilgili/ilgilenen" kisilerdir; guncelleme yine herkese goruniir.
+   Arkadaki entries.assignee_id / action_status alanlari uyumluluk icin
+   DURUYOR (PS1.1 §31) - yalnizca bu yuzey onlari artik yazmiyor.
 
-   IKI AYRI KAVRAM, karistirilmaz (PS1 §9):
-     - Sorumlu (entries.assignee_id) = "bu aksiyon SENIN".
-     - Ilgili  (entry_relevance)     = "bunu ozellikle FARK ET".
-   Ilgi etiketi aksiyon uretmez, gorunurluk kisitlamaz.
+   TARIH SEMANTIGI (PS1.1 §2.A):
+     · occurred_at = olusturma zamani. Her zaman feed'de gorunur.
+     · due_at      = SON TARIH. Yalnizca kullanici acikca secerse yazilir.
+   Tarih secilmezse due_at NULL kalir - bugune ayarlanmaz. */
 
-   Baglam kurallari korunur:
-   - Work baglamindan: Work sabit, kurum ondan turer, ayrica secilemez.
-   - Kurum baglamindan: kurum sabit, Work o kurumun Work'lerinden secilir.
-   - Global baglamdan: Work VEYA kurum secilebilir - ya da hicbiri. */
-
-/* Acilista hangi opsiyonel bolumler acik gelsin? Eski `qcAc('takip',...)`
-   cagrilari (Bekleyenler kartindaki "Takip ekle", Takvim gunu) ikinci bir
-   form DEGIL; ayni formu Tarih/Sorumlu bolumu acik halde acar. */
+/* `mod` argumani artik anlamsiz; eski cagri sekilleri (qcAc('takip',ctx))
+   kirilmasin diye imza toleransi korunuyor. */
 function qcAc(a,b){
-  /* Geriye donuk imza toleransi: qcAc(ctx) | qcAc('takip',ctx) */
   const ctx=(a&&typeof a==='object')?a:(b||{});
-  const aksiyonAcik=(a==='takip');
   const D=ui._coord||null;
   const jobs=(D?D.jobs:(ui._jobs||[]))||[];
   const custs=(D?D.custs:(ui._cust||[]))||[];
@@ -2022,15 +2002,13 @@ function qcAc(a,b){
   const cm={}; custs.forEach(x=>cm[x.id]=x.firma);
   const benim=(ui._me&&ui._me.id)||0;
 
-  /* Work secimi: kurum sabitse yalniz o kurumun Work'leri listelenir. */
   const jobSec=(kilitliOrg&&!kilitliJob)
     ? jobs.filter(x=>String(x.customer_id)===String(kilitliOrg)&&(x.lifecycle_status||'acik')!=='kapandi')
     : jobs.filter(x=>(x.lifecycle_status||'acik')!=='kapandi');
 
-  /* Kilitli baglam bilgi satiridir, toren degil: kullaniciya neye
-     yazdigini soyler ve hicbir secim istemez. */
+  /* Kilitli baglam bilgi satiridir, secim istemez. */
   const baglam = kilitliJob
-    ? `<div class="qc-ctx"><span class="qc-lbl">Is</span>
+    ? `<div class="qc-ctx"><span class="qc-lbl">İş</span>
          <b>${esc(j?j.title:'#'+kilitliJob)}</b>
          ${orgId?`<em>${esc(cm[orgId]||'')}</em>`:''}
          <input type="hidden" id="qcJob" value="${kilitliJob}">
@@ -2040,98 +2018,55 @@ function qcAc(a,b){
          <input type="hidden" id="qcOrg" value="${kilitliOrg}"></div>`
     : '';
 
-  /* Global baglamda Work/kurum secicileri KAPALI baslar. Bos birakmak
-     gecerli bir sonuctur: kayit sirket guncellemesi olarak duser. */
-  const secici = (kilitliJob) ? '' : (kilitliOrg
-    ? `<div class="field"><label class="flabel" for="qcJob">Is (bu kurumda)</label>
-         <select class="inp" id="qcJob"><option value="">-- ise baglama --</option>
+  /* Is/Kurum secicileri: kilitli baglam yoksa kompakt bir satir olarak
+     DOGRUDAN gorunur - acilir bolum degil. Ikisini de bos birakmak
+     gecerlidir; kayit sirket guncellemesi olur (PS1 §6). */
+  const secici = kilitliJob ? '' : (kilitliOrg
+    ? `<div class="qc-line"><label class="qc-mini" for="qcJob">İş</label>
+         <select class="inp inp-sm" id="qcJob"><option value="">—</option>
            ${jobSec.map(x=>`<option value="${x.id}">${esc(x.title)}</option>`).join('')}</select></div>`
-    : `<div class="row2">
-         <div class="field"><label class="flabel" for="qcJob">Is</label>
-           <select class="inp" id="qcJob" onchange="qcJobDegis()"><option value="">-- yok --</option>
-             ${jobSec.map(x=>`<option value="${x.id}">${esc(x.title)}${cm[x.customer_id]?' · '+esc(cm[x.customer_id]):''}</option>`).join('')}</select></div>
-         <div class="field"><label class="flabel" for="qcOrg">Kurum</label>
-           <select class="inp" id="qcOrg"><option value="">-- yok --</option>
-             ${custs.slice().sort((a2,b2)=>String(a2.firma||'').localeCompare(String(b2.firma||''),'tr'))
-               .map(x=>`<option value="${x.id}">${esc(x.firma||('#'+x.id))}</option>`).join('')}</select></div>
-       </div>
-       <p class="fhint" id="qcHint">Ikisi de bos kalabilir — kayit sirket guncellemesi olarak paylasilir.</p>`);
+    : `<div class="qc-line">
+         <label class="qc-mini" for="qcJob">İş</label>
+         <select class="inp inp-sm" id="qcJob" onchange="qcJobDegis()"><option value="">—</option>
+           ${jobSec.map(x=>`<option value="${x.id}">${esc(x.title)}</option>`).join('')}</select>
+         <label class="qc-mini" for="qcOrg">Kurum</label>
+         <select class="inp inp-sm" id="qcOrg"><option value="">—</option>
+           ${custs.slice().sort((a2,b2)=>String(a2.firma||'').localeCompare(String(b2.firma||''),'tr'))
+             .map(x=>`<option value="${x.id}">${esc(x.firma||('#'+x.id))}</option>`).join('')}</select>
+       </div>`);
 
-  const ekip=team.filter(t=>t.active!==false);
-  const chip=(id,lbl)=>`<button type="button" class="qc-chip" id="qcC_${id}"
-      aria-expanded="false" aria-controls="qcS_${id}" onclick="qcAc2('${id}')">+ ${esc(lbl)}</button>`;
+  /* Kendini etiketlemek anlamsiz: kendi guncellemeni zaten biliyorsun. */
+  const ekip=team.filter(t=>t.active!==false&&t.id!==benim);
 
-  modal(`<h3 style="margin:0 0 4px">Bir güncelleme paylaş…</h3>
-    <p class="muted" style="font-size:12.5px;margin:0 0 14px">Anlamlı bir sonuç kaydeder; ekibe görünür olur.</p>
+  modal(`<h3 style="margin:0 0 12px">Bir güncelleme paylaş…</h3>
     ${baglam}
-    <div class="field"><label class="flabel" for="qcBody">Ne oldu? *</label>
+    <div class="field" style="margin-bottom:10px">
       <textarea class="inp" id="qcBody" rows="3"
-        placeholder="ör. Müşteri M1'i onayladı, stadyumu almadı."
-        onkeydown="qcTus(event)"></textarea>
-      <p class="fhint">Kaydetmek için Ctrl+Enter.</p></div>
+        placeholder="Ne oldu? ör. Müşteri M1'i onayladı, stadyumu almadı."
+        onkeydown="qcTus(event)"></textarea></div>
 
-    <div class="qc-chips">
-      ${secici?chip('ctx','Bağlam'):''}
-      ${chip('act','Tarih / Sorumlu')}
-      ${ekip.length?chip('rel','Kime önemli'):''}
+    ${ekip.length?`<div class="qc-tags">
+      <span class="qc-mini">İlgili</span>
+      ${ekip.map(t=>`<label class="qc-who"><input type="checkbox" class="qcRel" value="${t.id}">
+        <span>${esc(t.name)}</span></label>`).join('')}
+    </div>`:''}
+
+    ${secici}
+
+    <div class="qc-line qc-opt">
+      <label class="qc-mini" for="qcDue">Son tarih</label>
+      <input class="inp inp-sm" type="date" id="qcDue" style="max-width:170px">
+      <label class="qc-acil"><input type="checkbox" id="qcAcil"><span>⚡ Acil</span></label>
+      <span class="fhint" style="margin:0 0 0 auto">Ctrl+Enter ile paylaş</span>
     </div>
 
-    ${secici?`<div class="qc-sec" id="qcS_ctx" hidden>${secici}</div>`:''}
-
-    <div class="qc-sec" id="qcS_act" hidden>
-      <div class="row2">
-        <div class="field"><label class="flabel" for="qcAsg">Sorumlu</label>
-          <select class="inp" id="qcAsg"><option value="">-- yok --</option>
-            ${ekip.map(t=>`<option value="${t.id}">${esc(t.name)}</option>`).join('')}</select></div>
-        <div class="field"><label class="flabel" for="qcDue">Termin</label>
-          <input class="inp" type="date" id="qcDue"></div>
-      </div>
-      <p class="fhint">Doldurulursa bu güncelleme takip edilecek bir aksiyona dönüşür;
-        Panelim, Takvim ve gecikme görünümlerinde çıkar.</p>
-    </div>
-
-    ${ekip.length?`<div class="qc-sec" id="qcS_rel" hidden>
-      <div class="field"><span class="flabel">Kime özellikle önemli?</span>
-        <div class="qc-rel">${ekip.map(t=>`<label class="qc-who">
-          <input type="checkbox" class="qcRel" value="${t.id}"> <span>${esc(t.name)}</span></label>`).join('')}</div>
-        <p class="fhint">Yalnız dikkat çeker — kimseye iş atamaz. Güncelleme
-          yine tüm ekibe görünür kalır.</p></div></div>`:''}
-
-    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:4px">
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
       <button class="btn btn-ghost btn-sm" onclick="closeModal()">Vazgeç</button>
       <button class="btn btn-primary btn-sm" onclick="qcKaydet()">Paylaş</button></div>`);
-  if(aksiyonAcik) qcAc2('act');
   const t=document.getElementById('qcBody'); if(t)t.focus();
 }
-/* Opsiyonel bolum ac/kapat. Kapatmak alanlari da temizler ki kullanici
-   acip vazgectiginde istemeden aksiyon/ilgi uretmesin. */
-function qcAc2(id){
-  const sec=document.getElementById('qcS_'+id), c=document.getElementById('qcC_'+id);
-  if(!sec||!c) return;
-  const ac=sec.hidden;
-  sec.hidden=!ac; c.classList.toggle('on',ac); c.setAttribute('aria-expanded',String(ac));
-  if(!ac){
-    if(id==='act'){ const a=document.getElementById('qcAsg'), d=document.getElementById('qcDue');
-      if(a)a.value=''; if(d)d.value=''; }
-    if(id==='rel') document.querySelectorAll('.qcRel').forEach(x=>x.checked=false);
-    if(id==='ctx'){ const jj=document.getElementById('qcJob'), oo=document.getElementById('qcOrg');
-      if(jj)jj.value=''; if(oo){oo.value='';oo.disabled=false;} }
-  }
-  /* Yardimci varsayilanlar bolum ACILDIGINDA yazilir, render sirasinda
-     DEGIL. Gizli bir alanin dolu olmasi kullanicinin onu sectigi anlamina
-     gelmez; aksi halde her duz guncelleme sessizce kendi yazarina atanmis
-     bir aksiyona donusuyordu (PS1 §20). */
-  if(ac){
-    if(id==='act'){
-      const a=document.getElementById('qcAsg'), d=document.getElementById('qcDue');
-      const benim=(ui._me&&ui._me.id)||0;
-      if(a&&!a.value&&benim) a.value=String(benim);
-      if(d&&!d.value) d.value=_cIso(new Date());
-    }
-    const f=sec.querySelector('select,input'); if(f)f.focus(); }
-}
 function qcTus(e){ if((e.ctrlKey||e.metaKey)&&e.key==='Enter'){ e.preventDefault(); qcKaydet(); } }
-/* Global baglamda is secilince kurumu ondan turet ve kilitle. */
+/* Is secilince kurumu ondan turet ve kilitle. */
 function qcJobDegis(){
   const jid=+gv('qcJob'), org=document.getElementById('qcOrg');
   if(!org) return;
@@ -2139,8 +2074,6 @@ function qcJobDegis(){
   const j=jobs.find(x=>x.id===jid);
   if(j){ org.value=j.customer_id||''; org.disabled=true; }
   else { org.disabled=false; }
-  const h=document.getElementById('qcHint');
-  if(h) h.textContent=j?'Kurum işten türetildi.':'Ikisi de bos kalabilir — kayit sirket guncellemesi olarak paylasilir.';
 }
 async function qcKaydet(){
   const body=(gv('qcBody')||'').trim();
@@ -2148,25 +2081,16 @@ async function qcKaydet(){
   const jid=+gv('qcJob')||null;
   const oel=document.getElementById('qcOrg');
   const oid=(oel? (+oel.value||null) : null);
-  /* Baglam ZORUNLU DEGIL (PS1 §6): ikisi de bossa kayit sirket duzeyi
-     guncellemedir. Sahte Work/kurum uretilmez. */
-  /* Aksiyon ancak kullanici Tarih/Sorumlu bolumunu ACTIYSA olusur.
-     Kapali bolumun alanlari DOM'da durur; `hidden` yalnizca gorunumu
-     gizler. Niyet "bolumu actim"dir, "alanda bir deger var"dir degil
-     (PS1 §20 - surpriz aksiyon uretme). */
-  const actSec=document.getElementById('qcS_act');
-  const actAcik=!!(actSec&&!actSec.hidden);
-  const asg=actAcik?(+gv('qcAsg')||null):null;
-  const due=actAcik?(gv('qcDue')||''):'';
-  const aksiyon=!!(asg||due);
-  /* Work'e bagliysa kurum Work uzerinden okunur; entries.customer_id
-     yalniz Work'suz (kurum duzeyi) kayitta doldurulur - ayni gercegi iki
-     yerde tutmamak icin (06 §9). */
-  const row={id:0, body, job_id:jid, customer_id: jid?null:oid};
-  if(aksiyon){
+  const due=gv('qcDue')||'';
+  const acil=!!(document.getElementById('qcAcil')||{}).checked;
+  /* Work'e bagliysa kurum Work uzerinden okunur (06 §9). */
+  const row={id:0, body, job_id:jid, customer_id: jid?null:oid, is_urgent:acil};
+  /* SON TARIH: yalnizca acikca secildiyse yazilir. Secilmediyse due_at
+     NULL kalir - bugune ayarlanmaz (PS1.1 §2.A). action_status yalnizca
+     gercek bir son tarih varsa anlamli olur; sorumlu ATANMAZ. */
+  if(due){
+    row.due_at=new Date(due+'T09:00:00').toISOString();
     row.action_status='open';
-    row.assignee_id=asg;
-    row.due_at=due?new Date(due+'T09:00:00').toISOString():null;
   }
   row._ilgili=Array.from(document.querySelectorAll('.qcRel:checked')).map(x=>+x.value);
   modalBusy(true);
@@ -2174,7 +2098,7 @@ async function qcKaydet(){
   modalBusy(false);
   if(r===null)return;
   closeModal();
-  toast(aksiyon?'Güncelleme paylaşıldı — aksiyon oluşturuldu.':'Güncelleme paylaşıldı.');
+  toast(due?'Güncelleme paylaşıldı — son tarih eklendi.':'Güncelleme paylaşıldı.');
   /* Ayni Entry; nereden bakildigina gore farkli gorunum (BR-V01). */
   if(ui.section==='is-takibi'||ui.section==='workspace-home'||ui.section==='kurumlar') renderSection();
   else if(jid) workAc(jid);
@@ -2320,9 +2244,14 @@ async function jobDelete(id){ if(await mpConfirm('Bu iş kaydı silinsin mi? Ba�
 /* ---------- WORK DETAIL (07 §7) ---------- */
 async function workAc(id){
   const veri=await guard(()=>Promise.all([api('work_detail&id='+id),api('team_list'),
-    api('customers_list'),api('contacts_list')]),'İş açılamadı');
+    api('customers_list'),api('contacts_list'),
+    api('work_followers_all&limit=5000').catch(()=>[])]),'İş açılamadı');
   if(!veri)return;
-  const [d,tm,cu,ct]=veri; ui._team=tm||[]; ui._cust=cu||[]; ui._contacts=ct||[];
+  const [d,tm,cu,ct,fol]=veri; ui._team=tm||[]; ui._cust=cu||[]; ui._contacts=ct||[];
+  const benim=(ui._me&&ui._me.id)||0;
+  const folBu=(fol||[]).filter(r=>String(r.job_id)===String(id));
+  const takipEdiyorum=folBu.some(r=>r.team_id===benim);
+  const folAdlari=folBu.map(r=>((tm||[]).find(t=>t.id===r.team_id)||{}).name).filter(Boolean);
   ui._work=d.job; ui._workParties=d.parties; ui._workEntries=d.entries;
   ui._workQuotes=d.quotes||[]; ui._workBookings=d.bookings||[];
   const j=d.job, org=(cu||[]).find(x=>x.id===j.customer_id);
@@ -2330,9 +2259,13 @@ async function workAc(id){
   const c=document.getElementById('content');
   c.innerHTML=`<div class="sec-head">
       <div><h3><button class="btn btn-ghost btn-sm" onclick="go('is-takibi')">‹ İşler</button> ${esc(j.title)}</h3>
-        <p class="sub">${org?esc(org.firma):'<span class="muted">kurum bağlı değil</span>'} · ${esc(JOBLBL[j.status]||j.status)} · ${esc(LIFELBL[ls])}${j.closed_reason?' · '+esc(CLOSELBL[j.closed_reason]||j.closed_reason):''}</p></div>
+        <p class="sub">${j.is_urgent?'<span class="pu-b acil">⚡ Acil</span> ':''}${org?esc(org.firma):'<span class="muted">kurum bağlı değil</span>'} · ${esc(JOBLBL[j.status]||j.status)} · ${esc(LIFELBL[ls])}${j.closed_reason?' · '+esc(CLOSELBL[j.closed_reason]||j.closed_reason):''}${folAdlari.length?' · ilgili: '+esc(folAdlari.join(', ')):''}</p></div>
       <div style="display:flex;gap:8px">
         <button class="btn btn-primary btn-sm" onclick="qcAc({jobId:${j.id}})">${ic('plus',15)} Güncelleme</button>
+        <button class="btn ${takipEdiyorum?'btn-ghost':'btn-outline'} btn-sm" id="wFol"
+          onclick="workTakip(${j.id},${takipEdiyorum?'false':'true'})"
+          title="${takipEdiyorum?'Bu iş Panelim → Takip Ettiğim İşler listenden çıkar':'Bu iş Panelim → Takip Ettiğim İşler listene eklenir'}">
+          ${takipEdiyorum?'★ Takibi Bırak':'☆ Takibe Al'}</button>
         <button class="btn btn-outline btn-sm" onclick="jobForm(null,${j.id})">Düzenle</button>
       </div></div>
 
@@ -2447,6 +2380,15 @@ function workTimelineCiz(){
       ${(sys||!isAdmin())?'':`<button class="btn btn-danger btn-sm" onclick="entryDel(${e.id})">Sil</button>`}
     </div>`;}).join('')
     ||'<p class="empty">Henüz güncelleme yok.</p>';
+}
+/* PS1.1 §16: acik niyet. Bildirim aboneligi, gorunurluk degisikligi ya
+   da sorumluluk YARATMAZ - yalnizca Panelim listene ekler/cikarir. */
+async function workTakip(id,takipEt){
+  const r=await guard(()=>api(takipEt?'work_follow':'work_unfollow',{id}),
+    takipEt?'Takibe alınamadı':'Takip bırakılamadı');
+  if(r===null)return;
+  toast(takipEt?'Takibe alındı.':'Takip bırakıldı.');
+  workAc(id);
 }
 async function workLifeDegis(id){
   const ls=gv('wLife'), cr=gv('wClose');
@@ -2581,15 +2523,61 @@ async function workMetaSave(){
   closeModal(); toast('Kaydedildi.'); workAc(id);
 }
 
+/* PS1.1 §23-§25: bir işi AÇMAK hızlı olmalı. Yeni iş formu artık yalnız
+   Başlık · Kurum · İlgili kişi · Aşama · İlgili ekip · Acil sorar.
+   Mecra, tedarikçi, başlangıç/bitiş tarihi, operasyon, sözleşme ve
+   muhasebe alanları ARTIK SORULMAZ (§25) — onlar Work gerçekten o
+   bağlama ulaştığında Work Detail'de ve bağlı kayıtlarda yaşar.
+   Aşamaya göre değişen dinamik form da YOK (§25): ürün sahibi açıkça
+   basit oluşturmayı zekice koşullu formlara tercih etti.
+
+   DÜZENLEME farklı bir iştir: mevcut operasyonel alanlar (mecra,
+   tedarikçi, tarihler, not) düzenleme modunda aynen korunur, yoksa
+   bugüne kadar girilmiş veriyi düzenlenemez hale getirirdik. */
 async function jobForm(st,id){
   const veri=await guard(()=>Promise.all([api('customers_list'),api('suppliers_list'),
     api('mecra_list'),api('team_list'),api('contacts_list')]),'Form açılamadı');
   if(!veri) return;
-  const [cu,su,mc,tm,ct]=veri; ui._team=tm||[]; ui._contacts=ct||[];
+  const [cu,su,mc,tm,ct]=veri; ui._team=tm||[]; ui._contacts=ct||[]; ui._cust=cu||[];
   const j = id ? (await api('jobs_list')).find(x=>x.id===id)||{} : {};
   const opt=(arr,val,lbl)=>`<option value="">— yok —</option>`+arr.map(x=>
     `<option value="${x.id}" ${String(val)===String(x.id)?'selected':''}>${esc(lbl(x))}</option>`).join('');
-  modal(`<h3 style="margin:0 0 14px">${id?'İşi Düzenle':'Yeni İş'}</h3>
+  const benim=(ui._me&&ui._me.id)||0;
+  const ekip=(tm||[]).filter(t=>t.active!==false);
+  if(!id){
+    modal(`<h3 style="margin:0 0 14px">Yeni İş</h3>
+    <input type="hidden" id="jid" value="0">
+    <div class="field"><label class="flabel" for="jt">Başlık *</label>
+      <input class="inp" id="jt" placeholder="ör. M1 AVM sonbahar kampanyası"></div>
+    <div class="row2">
+      <div class="field"><label class="flabel" for="jc">Kurum</label>
+        <div class="inp-add">
+          <select class="inp" id="jc" onchange="jobKisiTazele()">${opt(cu,'',x=>x.firma||('#'+x.id))}</select>
+          <button type="button" class="add-b" title="Yeni kurum ekle" onclick="jobYeniKurum()">+</button></div></div>
+      <div class="field"><label class="flabel" for="jkisi">İlgili kişi</label>
+        <div class="inp-add">
+          <select class="inp" id="jkisi">${jobKisiSec('','')}</select>
+          <button type="button" class="add-b" title="Yeni kişi ekle" onclick="jobYeniKisi()">+</button></div>
+        <p class="fhint" id="jkisiHint">Önce kurum seçin.</p></div>
+    </div>
+    <div class="field"><label class="flabel" for="js">Aşama</label>
+      <select class="inp" id="js">${JOBST.map(x=>`<option value="${x[0]}" ${(st||'temas_takip')===x[0]?'selected':''}>${x[1]}</option>`).join('')}</select></div>
+    <div class="qc-tags" style="margin-bottom:12px">
+      <span class="qc-mini">İlgili</span>
+      ${ekip.map(t=>`<label class="qc-who"><input type="checkbox" class="jFol" value="${t.id}" ${t.id===benim?'checked':''}>
+        <span>${esc(t.name)}</span></label>`).join('')}
+    </div>
+    <div class="qc-line qc-opt" style="margin-bottom:4px">
+      <label class="qc-acil"><input type="checkbox" id="jAcil"><span>⚡ Acil</span></label>
+      <span class="fhint" style="margin:0 0 0 auto">Mecra, tedarikçi ve tarihler işin içinden eklenir.</span>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
+      <button class="btn btn-ghost btn-sm" onclick="closeModal()">Vazgeç</button>
+      <button class="btn btn-primary btn-sm" onclick="jobSave()">Oluştur</button></div>`);
+    const t0=document.getElementById('jt'); if(t0)t0.focus();
+    return;
+  }
+  modal(`<h3 style="margin:0 0 14px">İşi Düzenle</h3>
   <input type="hidden" id="jid" value="${id||0}">
   <div class="field"><label class="flabel" for="jt">Başlık *</label><input class="inp" id="jt" value="${esc(j.title)}" placeholder="ör. M1 AVM Megalight baskı"></div>
   <div class="row2">
@@ -2609,6 +2597,8 @@ async function jobForm(st,id){
     <div class="field"><label class="flabel" for="jed">Bitiş / teslim</label><input class="inp" type="date" id="jed" value="${esc(j.end_day)}"></div>
   </div>
   <div class="field"><label class="flabel" for="jn">Not</label><textarea class="inp" id="jn">${esc(j.note)}</textarea></div>
+  <div class="qc-line qc-opt" style="margin-bottom:4px">
+    <label class="qc-acil"><input type="checkbox" id="jAcil" ${j.is_urgent?'checked':''}><span>⚡ Acil</span></label></div>
   <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn btn-ghost btn-sm" onclick="closeModal()">Vazgeç</button><button class="btn btn-primary btn-sm" onclick="jobSave()">Kaydet</button></div>`);
 }
 /* İlgili kişi seçimi Work'ün kurumuna KISITLIDIR: contacts.customer_id
@@ -2620,6 +2610,37 @@ function jobKisiSec(cid,sel){
     .sort((a,b)=>(b.is_primary?1:0)-(a.is_primary?1:0)||String(a.name).localeCompare(String(b.name),'tr'));
   return `<option value="">— yok —</option>`+list.map(k=>
     `<option value="${k.id}" ${String(sel)===String(k.id)?'selected':''}>${esc(k.name)}${k.title?' · '+esc(k.title):''}${k.is_primary?' ★':''}</option>`).join('');
+}
+/* PS1.1 §24: eksik kurumu/kisiyi Work olusturmayi BIRAKMADAN ekle.
+   Mevcut kayit modelleri aynen kullanilir - gecici bir model YARATILMAZ.
+
+   Kisi icin karar: `contacts` satiri, `customer_id` dolu olarak yazilir.
+   Sprint 3'un planlanan `contact_affiliations` migration'i tam olarak
+   bu kolondan backfill edecek (SCHEMA_IMPACT_REVIEW §5.1), dolayisiyla
+   bugun burada uretilen kisi o modelle UYUMLUDUR ve teknik borc degildir.
+   Hafiza'nin coklu-kurum UI'si yine Sprint 3'te gelir. */
+async function jobYeniKurum(){
+  const ad=await mpPrompt('Kurum adı','Yeni Kurum');
+  if(!ad||!ad.trim()) return;
+  const r=await guard(()=>api('customer_save',{id:0,firma:ad.trim()}),'Kurum eklenemedi');
+  if(r===null) return;
+  const liste=await api('customers_list'); ui._cust=liste||[];
+  const sel=document.getElementById('jc'); if(!sel) return;
+  sel.innerHTML=`<option value="">— yok —</option>`+(liste||[]).map(x=>
+    `<option value="${x.id}" ${r&&String(r.id)===String(x.id)?'selected':''}>${esc(x.firma||('#'+x.id))}</option>`).join('');
+  jobKisiTazele(); toast('Kurum eklendi.');
+}
+async function jobYeniKisi(){
+  const cid=gv('jc');
+  if(!cid){ mpAlert('Önce kurum seçin — kişi bir kuruma bağlanır.'); return; }
+  const ad=await mpPrompt('Kişi adı','Yeni Kişi');
+  if(!ad||!ad.trim()) return;
+  const r=await guard(()=>api('contact_save',{id:0,customer_id:+cid,name:ad.trim(),active:true}),'Kişi eklenemedi');
+  if(r===null) return;
+  ui._contacts=await api('contacts_list')||[];
+  const sel=document.getElementById('jkisi');
+  if(sel) sel.innerHTML=jobKisiSec(cid,r&&r.id);
+  toast('Kişi eklendi.');
 }
 function jobKisiTazele(){
   const cid=gv('jc'), sel=document.getElementById('jkisi');
@@ -2634,16 +2655,37 @@ async function jobSave(){
   const yeni=!(+gv('jid'));
   const cid=num(gv('jc'));
   modalBusy(true);
-  const r=await guard(()=>api('job_save',{id:+gv('jid')||0,title:gv('jt'),note:gv('jn'),status:gv('js')||'temas_takip',
-    customer_id:cid,mecra_id:num(gv('jm')),supplier_id:num(gv('jsup')),assignee_id:num(gv('jassg')),
-    primary_contact_id:num(gv('jkisi')),
-    start_day:gv('jsd')||null,end_day:gv('jed')||null}),'İş kaydedilemedi');
+  /* Kısa oluşturma formunda mecra/tedarikçi/tarih alanları HİÇ YOKTUR;
+     düzenleme formunda vardır. Yokken `undefined` göndermek yerine alanı
+     hiç eklemiyoruz, böylece mevcut değerler ezilmez. */
+  const row={id:+gv('jid')||0,title:gv('jt'),status:gv('js')||'temas_takip',
+    customer_id:cid, primary_contact_id:num(gv('jkisi')),
+    is_urgent:!!(document.getElementById('jAcil')||{}).checked};
+  if(document.getElementById('jn'))   row.note=gv('jn');
+  if(document.getElementById('jm'))   row.mecra_id=num(gv('jm'));
+  if(document.getElementById('jsup')) row.supplier_id=num(gv('jsup'));
+  if(document.getElementById('jassg'))row.assignee_id=num(gv('jassg'));
+  if(document.getElementById('jsd'))  row.start_day=gv('jsd')||null;
+  if(document.getElementById('jed'))  row.end_day=gv('jed')||null;
+  /* PS1.1 §26: faz gecmisi ZATEN kaydediliyordu - Pano oklari jobMove()
+     uzerinden sistem Entry'si yaziyor. Tek bosluk duzenleme formuydu:
+     buradan yapilan asama degisikligi timeline'a hic dusmuyordu. Ayni
+     mevcut mekanizmayla kapatildi; yeni bir workflow-history altsistemi
+     KURULMADI (§26 - yeni sema yok). */
+  const eskiFaz=yeni?null:((ui._jobs||[]).find(x=>x.id===+gv('jid'))||{}).status;
+  const r=await guard(()=>api('job_save',row),'İş kaydedilemedi');
   modalBusy(false);
   if(r===null) return;
+  if(!yeni && eskiFaz && eskiFaz!==row.status){
+    await sysEntry(+gv('jid'),`Aşama değişti: ${JOBLBL[eskiFaz]||eskiFaz} → ${JOBLBL[row.status]||row.status}`);
+  }
   /* Yeni Work: seçilen kurum compatibility alanına ve canonical
-     work_parties account rolüne birlikte yazılır (06 §8). */
+     work_parties account rolüne birlikte yazılır (06 §8). Seçilen
+     "İlgili" kişiler work_followers'a yazılır — kimseye İŞ ATANMAZ. */
   if(yeni && r && r.id){
     if(cid) await api('work_party_save',{id:0,job_id:r.id,customer_id:cid,role:'account'}).catch(()=>{});
+    const fol=Array.from(document.querySelectorAll('.jFol:checked')).map(x=>+x.value);
+    if(fol.length) await api('work_follow_many',{id:r.id,team_ids:fol}).catch(()=>{});
     await sysEntry(r.id,'İş oluşturuldu.');
   }
   closeModal(); renderSection(); toast('İş kaydedildi.');
@@ -2982,26 +3024,38 @@ function surfaceSwitchHtml(){
       onclick="surfaceSet('yonetim')">Yönetim</button></div>`;
 }
 
-/* ---------- PANELIM (PS1 §13) ----------------------------------------
-   Eskiden "Ana Sayfa" idi ve ucuncu blogu bastan asagi SIRKET panosuydu:
-   Son Teklifler, Doluluk Trendi, Mecra Dagilimi ve Is Takibi faz sayaci
-   (Correction Sprint 2'de Admin Dashboard'dan bilincli olarak odunc
-   alinmisti). Urun yonu o gunden beri degisti: burasi artik kisisel bir
-   gunluk kokpit.
+/* ---------- PANELIM (PS1.1 §3-§7, §12-§13, §17) -----------------------
+   Sprint 1 sirket panosunu kaldirdi ama ekran hala "dashboard + aktivite
+   listesi + gorev kenar cubugu" gibi duruyordu: tepede dort buyuk KPI
+   karti, genis bir feed ve dar bir kenar sutunu.
 
-   CEVAPLADIGI TEK SORU: "Bugun benim icin ne onemli ve sirkette ne
-   degisti?" - "sirket bu ay nasil gidiyor" DEGIL. O soru Admin
-   Dashboard'da, Mecralar'da ve Raporlar'da aynen duruyor; hicbir yetenek
-   silinmedi, yalnizca yeri degisti (PS1 §14).
+   PS1.1 hedefi: gunluk Medyapark calisma alani.
+     · Buyuk KPI kartlari YOK (§3). Yerine yalnizca gercekten yardim eden
+       yerde kompakt sayac chip'i.
+     · Dengeli iki sutun (§4): Guncellemeler | gunluk sutun.
+     · Feed kompakt ve KRONOLOJIK (§6) - varsayilan siralama kisisel
+       ilgiye gore DEGIL, olusturma zamanina gore.
+     · Her satirda olusturma tarih/saati acikca gorunur (§2.A).
+     · Son tarih AYRI gosterilir; hicbir zaman olusturma tarihiyle
+       karistirilmaz.
 
-   KALDIRILANLAR: dashTekliflerCard / dashDolulukCard / dashMecraDagilimCard
-   / dashIsTakibiCard / dashBildirimCard / dashTakvimCard cagrilari.
-   Fonksiyonlarin KENDILERI duruyor ve Admin Dashboard onlari aynen
-   kullanmaya devam ediyor - paylasilan bilesenler silinmedi.
-
-   YAN ETKI: `dashboard_stats` sorgusu bu ekrandan tamamen dustu; o sorgu
-   yalnizca kaldirilan sirket kartlarini besliyordu. */
+   Sirket panosu bilesenleri (dash*Card) burada CAGRILMAZ; Admin
+   Dashboard onlari aynen kullanmaya devam eder. */
 const _wsIso=d=>d.toISOString().slice(0,10);
+const PS_AY=['Oca','Şub','Mar','Nis','May','Haz','Tem','Ağu','Eyl','Eki','Kas','Ara'];
+/* Olusturma zamani: "14 Eyl · 11:50". Belirsizlik birakmaz, hover
+   gerektirmez (§6). */
+function psZaman(t){
+  if(!t) return '';
+  const d=new Date(t);
+  return `${d.getDate()} ${PS_AY[d.getMonth()]} · ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+}
+/* Son tarih: yalnizca gun. "18 Eyl". */
+function psGun(t){
+  if(!t) return '';
+  const d=new Date(t);
+  return `${d.getDate()} ${PS_AY[d.getMonth()]}`;
+}
 function wsHafta(){
   const n=new Date(), g=n.getDay();
   const pzt=new Date(n); pzt.setDate(n.getDate()-((g+6)%7));
@@ -3009,41 +3063,26 @@ function wsHafta(){
   return [_wsIso(pzt),_wsIso(paz)];
 }
 
-/* ---- Panelim gorunum durumu (oturum icinde kalir) ---- */
+/* ---- Panelim gorunum durumu ---- */
 function psDurum(){
-  try{ return JSON.parse(sessionStorage.getItem('mp_panelim')||'null')||{feed:'tumu',n:25}; }
-  catch(e){ return {feed:'tumu',n:25}; }
+  try{ return JSON.parse(sessionStorage.getItem('mp_panelim')||'null')
+        ||{n:30,job:'',org:'',kisi:'',acil:false,gec:false,benim:false}; }
+  catch(e){ return {n:30,job:'',org:'',kisi:'',acil:false,gec:false,benim:false}; }
 }
 function psYaz(d){ try{ sessionStorage.setItem('mp_panelim',JSON.stringify(d)); }catch(e){} }
-function psFeed(v){ psYaz({...psDurum(),feed:v,n:25}); renderSection(); }
-function psDaha(){ psYaz({...psDurum(),n:psDurum().n+25}); renderSection(); }
-/* Uzun govde tiklayinca acilir - ayri bir detay modali ACILMAZ (PS1 §12):
-   ayni metni okumak icin ikinci bir ekran yuklemek anlamsiz. */
+function psFiltre(patch){ psYaz({...psDurum(),...patch,n:30}); renderSection(); }
+function psTemizle(){ psYaz({n:30,job:'',org:'',kisi:'',acil:false,gec:false,benim:false}); renderSection(); }
+function psDaha(){ psYaz({...psDurum(),n:psDurum().n+30}); renderSection(); }
 function psAc(el){ if(el)el.classList.toggle('acik'); }
+function psFiltreDegis(){
+  psFiltre({ job:gv('psJob')||'', org:gv('psOrg')||'', kisi:gv('psKisi')||'' });
+}
 
-/* ================= KISISEL ILGI SIRALAMASI (PS1 §16) =================
-   Karmasik bir skorlama YOK; deterministik dort kademe. Ayni Entry'nin
-   neden "benim" oldugunu kullanicinin bilmesi gerekmez - ucu de esit
-   derecede gecerli bir "bu seni ilgilendiriyor" nedenidir.
-
-     1  Bana ACIKCA ilgili isaretlenmis        -> entry_relevance
-     2  Aksiyonu BANA atanmis                  -> entries.assignee_id
-     3  BENIM sahibi oldugum bir Work uzerinde -> jobs.assignee_id
-     4  Genel sirket guncellemesi              -> digerleri
-
-   Grup icinde: en yeni once (occurred_at desc). Geciken/bugun olan
-   aksiyonlar ayrica rozetle isaretlenir ama SIRAYI degistirmez - bir
-   terminin gecmis olmasi o guncellemeyi daha yeni yapmaz.
-
-   SORUMLULUK ve ILGI ayri tutulur (PS1 §9): kademe 2 sorumluluktur
-   (sana is dustu), kademe 1 ilgidir (bunu fark et). Ikisi de "benim
-   icin" sayilir, ama biri otekini URETMEZ. */
-function psKademe(e,benim,ilgiSet,benimJobs){
-  if(!benim) return 4;
-  if(ilgiSet.has(e.id))                                   return 1;
-  if(e.assignee_id===benim)                               return 2;
-  if(e.job_id&&benimJobs.has(e.job_id))                   return 3;
-  return 4;
+/* Kisisel ilgi: feed SIRASINI degistirmez (§6), yalnizca vurgular. */
+function psBenimMi(e,benim,ilgiSet,takipJobs){
+  if(!benim) return false;
+  return ilgiSet.has(e.id) || e.assignee_id===benim
+      || (e.job_id&&takipJobs.has(e.job_id));
 }
 
 async function workspaceHome(c){
@@ -3051,227 +3090,229 @@ async function workspaceHome(c){
   const st=psDurum();
   const benim=(ui._me&&ui._me.id)||0;
   const bugun=_wsIso(new Date());
-  const ufuk=new Date(); ufuk.setDate(ufuk.getDate()+7); const ufukIso=_wsIso(ufuk);
-  /* Operasyon penceresi: hem "bu hafta" KPI'si hem 7 gunluk ajanda tek
-     okumadan karsilanir - gun basina veya Work basina sorgu YOK. */
+  const ufuk=new Date(); ufuk.setDate(ufuk.getDate()+14); const ufukIso=_wsIso(ufuk);
   const opBas=h1<bugun?h1:bugun;
-  const opBit=h2>ufukIso?h2:ufukIso;
 
-  /* Tek turda paralel cekim (07 §20). `dashboard_stats` ARTIK YOK:
-     yalnizca kaldirilan sirket kartlarini besliyordu. */
-  const [jobs,ents,ops,custs,team,ilgi]=await Promise.all([
+  /* Tek turda paralel cekim; kart/gun/Work basina sorgu YOK (07 §20).
+     entry_relevance TUM satirlariyla cekilir cunku feed etiketlenen
+     kisileri chip olarak gosterir (§5) - Entry basina sorgu N+1 olurdu. */
+  const [jobs,ents,ops,custs,team,ilgi,takip]=await Promise.all([
     api('jobs_list'),
     api('entries_list&limit=400'),
-    api(`operations_list&from=${opBas}&to=${opBit}`),
+    api(`operations_list&from=${opBas}&to=${ufukIso}`),
     api('customers_list'),
     api('team_list'),
-    benim?api('entry_relevance_all&team_id='+benim).catch(()=>[]):Promise.resolve([])]);
-  ui._team=team||[]; ui._jobs=jobs||[];
+    api('entry_relevance_all').catch(()=>[]),
+    benim?api('work_followers_all&team_id='+benim).catch(()=>[]):Promise.resolve([])]);
+  ui._team=team||[]; ui._jobs=jobs||[]; ui._cust=custs||[];
   const jm={}; (jobs||[]).forEach(j=>jm[j.id]=j);
   const cm={}; (custs||[]).forEach(x=>cm[x.id]=x.firma);
   const tm={}; (team||[]).forEach(t=>tm[t.id]=t.name);
-  ui._opJobs=jm; ui._opCust=cm; ui._cust=custs||[];
+  ui._opJobs=jm; ui._opCust=cm;
 
-  const ilgiSet=new Set((ilgi||[]).map(r=>r.entry_id));
-  const benimJobs=new Set((jobs||[]).filter(j=>benim&&j.assignee_id===benim).map(j=>j.id));
+  /* entry_id -> [team_id] ve benim etiketlerim */
+  const ilgiMap={}; (ilgi||[]).forEach(r=>{ (ilgiMap[r.entry_id]=ilgiMap[r.entry_id]||[]).push(r.team_id); });
+  const ilgiSet=new Set((ilgi||[]).filter(r=>r.team_id===benim).map(r=>r.entry_id));
+  const takipJobs=new Set((takip||[]).map(r=>r.job_id));
+  ui._takipJobs=takipJobs;
   const orgAdi=j=>cm[(j||{}).customer_id]||'';
-  const gec=d=>d&&String(d).slice(0,10)<bugun;
+  const gecmis=d=>!!d&&String(d).slice(0,10)<bugun;
 
-  /* ---- A. GUNCELLEMELER (birincil) ---- */
+  /* ---- KRONOLOJIK feed (§6) ---- */
   const tumEnt=(ents||[]).slice()
     .sort((a,b)=>String(b.occurred_at||'').localeCompare(String(a.occurred_at||'')));
-  tumEnt.forEach(e=>{ e._k=psKademe(e,benim,ilgiSet,benimJobs); });
-  const benimEnt=tumEnt.filter(e=>e._k<4);
-  /* Varsayilan TUMU: kisisel olan gorsel olarak one cikar ama kimseden
-     gizlenmez (PS1 §13.A). "Benim icin" yalnizca bir filtredir. */
-  const kaynak=st.feed==='benim'?benimEnt:tumEnt;
-  const kademeliKaynak=st.feed==='benim'
-    ? kaynak.slice().sort((a,b)=>(a._k-b._k)||String(b.occurred_at||'').localeCompare(String(a.occurred_at||'')))
-    : kaynak;
-  const gosterilen=kademeliKaynak.slice(0,st.n);
+  tumEnt.forEach(e=>{ e._benim=psBenimMi(e,benim,ilgiSet,takipJobs); });
 
-  /* Kimin ilgili isaretlendigi: tek toplu okumadan gelen satirlar zaten
-     yalnizca BENIM icin. Baskasinin etiketi feed'de gosterilmez -
-     gostermek icin Entry basina sorgu gerekirdi (N+1). Kendi etiketim
-     "Sana ozel" rozetiyle gorunur; bu yeterli sinyal. */
-  const KADEME_ET={1:['Sana özel','ps-k1'],2:['Sende','ps-k2'],3:['Senin işin','ps-k3']};
+  /* ---- Filtreler (§7) - hizli, calisan kontroller ---- */
+  let suz=tumEnt;
+  if(st.job)   suz=suz.filter(e=>String(e.job_id)===String(st.job));
+  if(st.org)   suz=suz.filter(e=>{ const j=jm[e.job_id];
+                 return String(j?j.customer_id:e.customer_id)===String(st.org); });
+  if(st.kisi)  suz=suz.filter(e=>(ilgiMap[e.id]||[]).some(t=>String(t)===String(st.kisi)));
+  if(st.acil)  suz=suz.filter(e=>e.is_urgent);
+  if(st.gec)   suz=suz.filter(e=>e.action_status==='open'&&gecmis(e.due_at));
+  if(st.benim) suz=suz.filter(e=>e._benim);
+  const filtreAktif=!!(st.job||st.org||st.kisi||st.acil||st.gec||st.benim);
+  const gosterilen=suz.slice(0,st.n);
 
+  /* ---- Feed satiri: kompakt, metin odakli (§5) ---- */
   const feedSatir=e=>{
     const j=jm[e.job_id]||null;
-    const org=j?orgAdi(j):(cm[e.customer_id]||'');
+    const orgId=j?j.customer_id:e.customer_id;
+    const org=cm[orgId]||'';
     const sys=e.source==='system';
     const kim=sys?'Sistem':(tm[e.created_by_team_id]||'—');
-    const bas=String(kim).trim()[0]||'•';
-    const et=KADEME_ET[e._k];
-    const aks=e.action_status==='open';
-    return `<article class="ps-u ${sys?'sys':''} ${e._k<4?'mine':''}">
-      <span class="ps-av" aria-hidden="true">${esc(bas.toLocaleUpperCase('tr'))}</span>
-      <div class="ps-b">
-        <div class="ps-h"><b>${esc(kim)}</b>
-          <time datetime="${esc(String(e.occurred_at||''))}">${esc(psZaman(e.occurred_at))}</time>
-          ${et?`<span class="ps-tag ${et[1]}">${esc(et[0])}</span>`:''}</div>
-        <p class="ps-t" onclick="psAc(this)" title="Tamamını gör">${esc(e.body)}</p>
-        <div class="ps-c">
-          ${j?`<button type="button" class="ps-chip" onclick="workAc(${j.id})">${ic('jobs',12)} ${esc(j.title)}</button>`:''}
-          ${org?`<button type="button" class="ps-chip" onclick="orgAc(${j?j.customer_id:e.customer_id})">${ic('customers',12)} ${esc(org)}</button>`:''}
-          ${sys?'<span class="ps-chip dim">sistem</span>':''}
-          ${aks?`<span class="ps-chip ${gec(e.due_at)?'ovr':'act'}">${gec(e.due_at)?'⚠ gecikti':'açık aksiyon'}${e.due_at?' · '+esc(trTarih(e.due_at)):''}${e.assignee_id&&tm[e.assignee_id]?' · '+esc(tm[e.assignee_id]):''}</span>`:''}
-        </div>
-      </div></article>`;};
+    const etiket=(ilgiMap[e.id]||[]).map(t=>tm[t]).filter(Boolean);
+    const sonTarih=e.due_at?psGun(e.due_at):'';
+    const gec=e.action_status==='open'&&gecmis(e.due_at);
+    return `<article class="pu ${sys?'sys':''} ${e._benim?'mine':''}">
+      <div class="pu-h">
+        <b>${esc(kim)}</b>
+        <time datetime="${esc(String(e.occurred_at||''))}">${esc(psZaman(e.occurred_at))}</time>
+        ${e.is_urgent?'<span class="pu-b acil">⚡ Acil</span>':''}
+        ${sonTarih?`<span class="pu-b ${gec?'gec':'due'}">${gec?'⚠ ':''}Son tarih: ${esc(sonTarih)}</span>`:''}
+      </div>
+      <p class="pu-t" onclick="psAc(this)">${esc(e.body)}</p>
+      ${(j||org||etiket.length||sys)?`<div class="pu-c">
+        ${j?`<button type="button" class="pu-chip" onclick="workAc(${j.id})">${esc(j.title)}</button>`:''}
+        ${org?`<button type="button" class="pu-chip org" onclick="orgAc(${orgId})">${esc(org)}</button>`:''}
+        ${etiket.map(nm=>`<span class="pu-chip who">@${esc(nm)}</span>`).join('')}
+        ${sys?'<span class="pu-chip dim">sistem</span>':''}
+      </div>`:''}
+    </article>`;};
 
   const feedHtml=gosterilen.length?gosterilen.map(feedSatir).join('')
-    :`<p class="empty">${st.feed==='benim'?'Seni özellikle ilgilendiren bir güncelleme yok.':'Henüz güncelleme yok.'}</p>`;
-  const dahaVar=kademeliKaynak.length>st.n;
+    :`<p class="empty">${filtreAktif?'Bu filtreye uyan güncelleme yok.':'Henüz güncelleme yok.'}</p>`;
 
-  /* ---- B. BUGUN / YAKLASAN - kisisel aksiyon ajandasi ---- */
-  const benimAks=tumEnt.filter(e=>e.action_status==='open'&&benim&&e.assignee_id===benim);
-  const kova={gec:[],bugun:[],yakin:[],sonra:[],tarihsiz:[]};
-  benimAks.forEach(e=>{
-    const d=e.due_at?String(e.due_at).slice(0,10):'';
-    if(!d) kova.tarihsiz.push(e);
-    else if(d<bugun) kova.gec.push(e);
-    else if(d===bugun) kova.bugun.push(e);
-    else if(d<=ufukIso) kova.yakin.push(e);
-    else kova.sonra.push(e); });
-  const srt=a=>a.sort((x,y)=>String(x.due_at||'').localeCompare(String(y.due_at||'')));
-  Object.values(kova).forEach(srt);
+  /* ---- DIKKAT GEREKENLER (§12) ----
+     Deterministik: (a) gecmis SON TARIHI olan acik aksiyonlar,
+     (b) Acil isaretli guncellemeler, (c) Acil isaretli acik Work'ler.
+     YASTAN urgency CIKARILMAZ; eski bir guncelleme sirf eski diye
+     dikkat gerektirmez. "Bekleyen" ADI KULLANILMAZ - lifecycle
+     `bekliyor` bambaska bir kavramdir (§2.C). */
+  const dikkatAks=tumEnt.filter(e=>e.action_status==='open'&&gecmis(e.due_at));
+  const dikkatAcil=tumEnt.filter(e=>e.is_urgent&&!(e.action_status==='open'&&gecmis(e.due_at)));
+  const dikkatIs=(jobs||[]).filter(j=>j.is_urgent&&(j.lifecycle_status||'acik')!=='kapandi');
+  const dikkatN=dikkatAks.length+dikkatAcil.length+dikkatIs.length;
 
-  const aksSatir=e=>{ const j=jm[e.job_id]||{};
-    return `<button type="button" class="ws-row" onclick="${e.job_id?`workAc(${e.job_id})`:'void 0'}">
-      <span class="ws-row-t">${esc(e.body)}</span>
-      <span class="ws-row-m">${esc(j.title||'—')}${orgAdi(j)?' · '+esc(orgAdi(j)):''}</span>
-      <span class="ws-row-r">${e.due_at
-        ?(gec(e.due_at)?`<span class="pill clay">⚠ ${esc(trTarih(e.due_at))}</span>`
-                       :`<span class="pill">${esc(trTarih(e.due_at))}</span>`)
-        :'<span class="muted">tarihsiz</span>'}</span></button>`;};
-  const grup=(lbl,arr,cls)=>arr.length
-    ?`<div class="ps-g"><div class="ps-gh ${cls||''}">${esc(lbl)} <span class="chip">${arr.length}</span></div>${arr.map(aksSatir).join('')}</div>`:'';
-  const aksHtml=benimAks.length
-    ?grup('Geciken',kova.gec,'ovr')+grup('Bugün',kova.bugun,'now')
-      +grup('Önümüzdeki 7 gün',kova.yakin)+grup('Daha sonra',kova.sonra)
-      +grup('Tarihsiz',kova.tarihsiz)
-    :'<p class="empty">Sana atanmış açık bir aksiyon yok.</p>';
+  const dikkatSatir=(ikon,cls,metin,alt,sag,tik)=>
+    `<button type="button" class="pd-row" onclick="${tik}">
+       <span class="pd-i ${cls}">${ikon}</span>
+       <span class="pd-b"><span class="pd-t">${metin}</span><span class="pd-s">${alt}</span></span>
+       <span class="pd-r">${sag}</span></button>`;
+  const dikkatHtml=dikkatN?[
+    ...dikkatAks.slice(0,6).map(e=>{ const j=jm[e.job_id]||{};
+      return dikkatSatir('⚠','gec',esc(e.body),
+        esc(j.title||orgAdi(j)||'Şirket güncellemesi'),
+        `<span class="pill clay">${esc(psGun(e.due_at))}</span>`,
+        e.job_id?`workAc(${e.job_id})`:'void 0'); }),
+    ...dikkatAcil.slice(0,4).map(e=>{ const j=jm[e.job_id]||{};
+      return dikkatSatir('⚡','acil',esc(e.body),
+        esc(j.title||orgAdi(j)||'Şirket güncellemesi'),
+        '<span class="pill clay">Acil</span>',
+        e.job_id?`workAc(${e.job_id})`:'void 0'); }),
+    ...dikkatIs.slice(0,4).map(j=>
+      dikkatSatir('⚡','acil',esc(j.title),
+        esc(orgAdi(j)||JOBLBL[j.status]||''),
+        '<span class="pill clay">Acil iş</span>',`workAc(${j.id})`))
+  ].join('') : '<p class="empty">Dikkat gerektiren bir şey yok.</p>';
 
-  /* ---- C. TAKVIM - kompakt kisisel ajanda ----
-     Tam ay izgarasi DEGIL (o Isler > Takvim'de duruyor ve oraya derin
-     baglaniyoruz). Burada yalnizca bugun + 7 gun, gun gun: benim acik
-     aksiyonlarim ve ayni pencerede planlanmis baskı/montaj. Ikisi de
-     mevcut canonical kayitlar; yeni bir hatirlatma tablosu YOK. */
-  const opPencere=(ops||[]).filter(o=>o.planned_date&&o.planned_date>=bugun&&o.planned_date<=ufukIso);
+  /* ---- BUGUN & YAKLASAN (§13) ----
+     Kaynaklar zaten onaylanmis yapisal tarihler: Entry son tarihleri ve
+     work_operations.planned_date. Work'e sirf burayi doldurmak icin
+     termin EKLENMEZ (§14). */
   const ajanda={};
-  kova.gec.concat(kova.bugun,kova.yakin).forEach(e=>{
-    const d=String(e.due_at).slice(0,10); const k=d<bugun?bugun:d;
-    (ajanda[k]=ajanda[k]||[]).push({t:'takip',d,e}); });
-  opPencere.forEach(o=>{ (ajanda[o.planned_date]=ajanda[o.planned_date]||[]).push({t:'op',d:o.planned_date,o}); });
-  const gunler=Object.keys(ajanda).sort().slice(0,8);
+  tumEnt.filter(e=>e.action_status==='open'&&e.due_at).forEach(e=>{
+    const d=String(e.due_at).slice(0,10);
+    if(d>ufukIso) return;
+    const k=d<bugun?bugun:d;               /* gecikmisler bugunun ustunde toplanir */
+    (ajanda[k]=ajanda[k]||[]).push({t:'takip',gec:d<bugun,d,e}); });
+  (ops||[]).filter(o=>o.planned_date&&o.planned_date>=bugun&&o.planned_date<=ufukIso)
+    .forEach(o=>{ (ajanda[o.planned_date]=ajanda[o.planned_date]||[]).push({t:'op',d:o.planned_date,o}); });
+  const gunler=Object.keys(ajanda).filter(d=>d>=bugun).sort().slice(0,7);
   const tkvHtml=gunler.length?gunler.map(d=>{
-    const et=d===bugun?'Bugün':trTarih(d);
-    return `<div class="ps-d"><div class="ps-dh ${d===bugun?'now':''}">${esc(et)}</div>
+    const yarin=new Date(); yarin.setDate(yarin.getDate()+1);
+    const et=d===bugun?'Bugün':(d===_wsIso(yarin)?'Yarın':psGun(d));
+    return `<div class="pa-d"><div class="pa-dh ${d===bugun?'now':''}">${esc(et)}</div>
       ${ajanda[d].map(x=>x.t==='takip'
-        ? `<button type="button" class="ps-e" onclick="${x.e.job_id?`workAc(${x.e.job_id})`:'void 0'}">
-             <i class="tk-p tk-takip"></i><span>${esc(String(x.e.body).slice(0,70))}</span>
-             ${x.d<bugun?'<em class="ovr">gecikti</em>':''}</button>`
-        : `<button type="button" class="ps-e" onclick="workAc(${x.o.job_id})">
-             <i class="tk-p tk-op"></i><span>${esc(opTypeLbl(x.o.operation_type))} · ${esc(x.o.description||(jm[x.o.job_id]||{}).title||'')}</span></button>`).join('')}
+        ? `<button type="button" class="pa-e ${x.gec?'gec':''}" onclick="${x.e.job_id?`workAc(${x.e.job_id})`:'void 0'}">
+             <span class="pa-k takip">Takip</span>
+             <span class="pa-x">${esc(String(x.e.body).slice(0,64))}</span>
+             ${x.gec?`<em>${esc(psGun(x.d))} · gecikti</em>`:''}</button>`
+        : `<button type="button" class="pa-e" onclick="workAc(${x.o.job_id})">
+             <span class="pa-k op">${esc(opTypeLbl(x.o.operation_type))}</span>
+             <span class="pa-x">${esc(x.o.description||(jm[x.o.job_id]||{}).title||'')}</span></button>`).join('')}
       </div>`;}).join('')
-    :'<p class="empty">Önümüzdeki 7 günde planlı bir şey yok.</p>';
+    :'<p class="empty">Önümüzdeki günlerde planlı bir şey yok.</p>';
 
-  /* ---- D. ILGILI ISLER ----
-     Ilgi MEVCUT semadan turetilir; yeni bir "Work aboneligi" ICAT
-     EDILMEZ (PS1 §13.D). Iki gecerli neden: Work'un sahibi benim
-     (jobs.assignee_id) ya da o Work uzerinde bana atanmis acik bir
-     aksiyon var. */
-  const aksJob=new Set(benimAks.map(e=>e.job_id).filter(Boolean));
-  const ilgiliIs=(jobs||[]).filter(j=>(j.lifecycle_status||'acik')!=='kapandi'
-      &&(benimJobs.has(j.id)||aksJob.has(j.id)));
+  /* ---- TAKIP ETTIGIM ISLER (§17) ----
+     Acikca work_followers ile beslenir - "ilgili olabilir" tahmini DEGIL. */
+  const takipIs=(jobs||[]).filter(j=>takipJobs.has(j.id));
   const sonEntryOf=jid=>tumEnt.find(e=>e.job_id===jid);
-  ilgiliIs.sort((a,b)=>{ const ea=sonEntryOf(a.id),eb=sonEntryOf(b.id);
+  takipIs.sort((a,b)=>{ if(!!b.is_urgent!==!!a.is_urgent) return b.is_urgent?1:-1;
+    const ea=sonEntryOf(a.id),eb=sonEntryOf(b.id);
     return String((eb||{}).occurred_at||'').localeCompare(String((ea||{}).occurred_at||'')); });
-  const isHtml=ilgiliIs.length?ilgiliIs.slice(0,8).map(j=>{
-    const son=sonEntryOf(j.id); const bek=j.lifecycle_status==='bekliyor';
-    return `<button type="button" class="ws-row" onclick="workAc(${j.id})">
-      <span class="ws-row-t">${esc(j.title)}</span>
-      <span class="ws-row-m">${esc(JOBLBL[j.status]||j.status)}${orgAdi(j)?' · '+esc(orgAdi(j)):''}${son?' · '+esc(String(son.body).slice(0,46)):''}</span>
-      <span class="ws-row-r">${bek?'<span class="pill sand">Bekliyor</span>':`<span class="pill">${esc(LIFELBL[j.lifecycle_status||'acik'])}</span>`}</span></button>`;}).join('')
-    :'<p class="empty">Sana bağlı açık bir iş yok.</p>';
+  const takipHtml=takipIs.length?takipIs.slice(0,8).map(j=>{
+    const son=sonEntryOf(j.id);
+    return `<button type="button" class="pd-row" onclick="workAc(${j.id})">
+      <span class="pd-b"><span class="pd-t">${esc(j.title)}${j.is_urgent?' <span class="pu-b acil">⚡</span>':''}</span>
+        <span class="pd-s">${esc(orgAdi(j)||'—')}${son?' · '+esc(String(son.body).slice(0,40)):''}</span></span>
+      <span class="pd-r"><span class="pill">${esc(JOBLBL[j.status]||j.status)}</span>
+        ${j.lifecycle_status==='bekliyor'?'<span class="pill sand">Bekliyor</span>':''}</span></button>`;}).join('')
+    :'<p class="empty">Henüz bir işi takibe almadın. Bir iş açıp <b>Takibe Al</b> diyebilirsin.</p>';
 
-  /* ---- E. BEKLEYEN ISLERIM (kompakt, yalnizca kisisel) ----
-     Sirket capindaki bekleme kuyrugu Isler > Bekleyenler'de duruyor;
-     burada yalnizca BENIM bekleyen islerim var (PS1 §13.E). */
-  const benimBek=ilgiliIs.filter(j=>j.lifecycle_status==='bekliyor');
+  /* ---- Filtre cubugu (§7) ---- */
+  const jobOpt=(jobs||[]).filter(j=>(j.lifecycle_status||'acik')!=='kapandi')
+    .map(j=>`<option value="${j.id}" ${String(st.job)===String(j.id)?'selected':''}>${esc(j.title)}</option>`).join('');
+  const orgIds=[...new Set((ents||[]).map(e=>{const j=jm[e.job_id];return j?j.customer_id:e.customer_id;}).filter(Boolean))];
+  const orgOpt=orgIds.map(id=>[id,cm[id]||('#'+id)]).sort((a,b)=>String(a[1]).localeCompare(String(b[1]),'tr'))
+    .map(([id,nm])=>`<option value="${id}" ${String(st.org)===String(id)?'selected':''}>${esc(nm)}</option>`).join('');
+  const kisiOpt=(team||[]).filter(t=>t.active!==false)
+    .map(t=>`<option value="${t.id}" ${String(st.kisi)===String(t.id)?'selected':''}>${esc(t.name)}</option>`).join('');
 
-  const haftaOps=(ops||[]).filter(o=>o.planned_date&&o.planned_date>=h1&&o.planned_date<=h2);
-  const ad=((ui._me&&ui._me.name)||'').split(' ')[0]||'';
+  const ozet=[];
+  if(st.job)   ozet.push('İş: '+esc((jm[st.job]||{}).title||('#'+st.job)));
+  if(st.org)   ozet.push('Kurum: '+esc(cm[st.org]||('#'+st.org)));
+  if(st.kisi)  ozet.push('İlgili: '+esc(tm[st.kisi]||('#'+st.kisi)));
+  if(st.acil)  ozet.push('Acil');
+  if(st.gec)   ozet.push('Geciken');
+  if(st.benim) ozet.push('Benimle ilgili');
 
   c.innerHTML=`
-    <div class="kpi2-row">
-      <div class="kpi2 k-teal tik" onclick="wsAksiyonlarim()" title="Bana düşen aksiyonlar">
-        <div class="kpi2-n">${benimAks.length}</div><div class="kpi2-t">Bana düşen aksiyon</div>
-        <div class="kpi2-s">${kova.gec.length?`<span style="color:var(--c-red)">${kova.gec.length} tanesi gecikti</span>`:'gecikme yok'}</div></div>
-      <div class="kpi2 k-amber tik" onclick="wsAksiyonlarim()" title="Bugün ve bu hafta">
-        <div class="kpi2-n">${kova.bugun.length}</div><div class="kpi2-t">Bugün</div>
-        <div class="kpi2-s">${kova.yakin.length} tanesi önümüzdeki 7 günde</div></div>
-      <div class="kpi2 tik" onclick="wsAcikIsler()" title="Sana bağlı açık işler">
-        <div class="kpi2-n">${ilgiliIs.length}</div><div class="kpi2-t">İlgili işim</div>
-        <div class="kpi2-s">${benimBek.length?`${benimBek.length} tanesi bekliyor`:'bekleyen yok'}</div></div>
-      <div class="kpi2 k-green tik" onclick="opGo('hafta')" title="Bu haftanın baskı &amp; montajı">
-        <div class="kpi2-n">${haftaOps.length}</div><div class="kpi2-t">Bu hafta baskı/montaj</div>
-        <div class="kpi2-s">${esc(trTarih(h1))} – ${esc(trTarih(h2))}</div></div>
-    </div>
-
-    <div class="dash-grid">
-      <div class="dash-l">
-        <section class="card ps-feed">
+    <div class="pnl-grid">
+      <div class="pnl-a">
+        <section class="card">
           <div class="card-h">
             <h3>Güncellemeler</h3>
-            <div class="ps-fh">
-              <div class="ws-switch inline" role="group" aria-label="Güncelleme filtresi">
-                <button type="button" class="${st.feed==='tumu'?'on':''}" aria-pressed="${st.feed==='tumu'}"
-                  onclick="psFeed('tumu')">Tümü</button>
-                <button type="button" class="${st.feed==='benim'?'on':''}" aria-pressed="${st.feed==='benim'}"
-                  onclick="psFeed('benim')">Benim için <span class="chip">${benimEnt.length}</span></button>
-              </div>
-              <button class="btn btn-primary btn-sm" onclick="qcAc({})">${ic('plus',15)} Güncelleme</button>
-            </div>
+            <button class="btn btn-primary btn-sm" onclick="qcAc({})">${ic('plus',15)} Güncelleme</button>
           </div>
-          <div class="card-b ps-list">${feedHtml}
-            ${dahaVar?`<button class="btn btn-outline btn-sm ps-more" onclick="psDaha()">Daha fazla göster</button>`:''}
+          <div class="pf">
+            <select class="inp inp-sm" id="psJob" aria-label="İşe göre süz" onchange="psFiltreDegis()">
+              <option value="">Tüm işler</option>${jobOpt}</select>
+            <select class="inp inp-sm" id="psOrg" aria-label="Kuruma göre süz" onchange="psFiltreDegis()">
+              <option value="">Tüm kurumlar</option>${orgOpt}</select>
+            <select class="inp inp-sm" id="psKisi" aria-label="İlgili kişiye göre süz" onchange="psFiltreDegis()">
+              <option value="">Tüm ilgililer</option>${kisiOpt}</select>
+            <button type="button" class="pf-t ${st.acil?'on':''}" aria-pressed="${st.acil}"
+              onclick="psFiltre({acil:${!st.acil}})">⚡ Acil</button>
+            <button type="button" class="pf-t ${st.gec?'on':''}" aria-pressed="${st.gec}"
+              onclick="psFiltre({gec:${!st.gec}})">⚠ Geciken</button>
+            <button type="button" class="pf-t ${st.benim?'on':''}" aria-pressed="${st.benim}"
+              onclick="psFiltre({benim:${!st.benim}})">Benimle ilgili</button>
+          </div>
+          ${filtreAktif?`<div class="fbar">
+            <span class="fbar-l">Aktif filtre</span>
+            <span class="fbar-v">${ozet.join(' · ')}</span>
+            <span class="fbar-n">${suz.length} güncelleme</span>
+            <button type="button" class="fbar-x" onclick="psTemizle()">Temizle ✕</button></div>`:''}
+          <div class="card-b pu-list">${feedHtml}
+            ${suz.length>st.n?`<button class="btn btn-outline btn-sm pu-more" onclick="psDaha()">Daha fazla göster</button>`:''}
           </div></section>
       </div>
 
-      <div class="dash-r">
-        <section class="card">
-          <div class="card-h"><h3>Bana Düşenler${ad?` — ${esc(ad)}`:''}</h3>
-            <button class="btn-link" onclick="wsAksiyonlarim()">Tümü</button></div>
-          <div class="card-b">${aksHtml}</div></section>
-
+      <div class="pnl-b">
         <section class="card">
           <div class="card-h"><h3>Bugün &amp; Yaklaşan</h3>
-            <button class="btn-link" onclick="isGo('takvim',{})">Takvim</button></div>
-          <div class="card-b ps-ajanda">${tkvHtml}</div></section>
+            <button class="btn-link" onclick="isGo('takvim',{})">Takvime git</button></div>
+          <div class="card-b pa-list">${tkvHtml}</div></section>
 
         <section class="card">
-          <div class="card-h"><h3>İlgili İşler</h3>
-            <button class="btn-link" onclick="wsAcikIsler()">Tümü</button></div>
-          <div class="card-b">${isHtml}</div></section>
+          <div class="card-h"><h3>Dikkat Gerekenler ${dikkatN?`<span class="chip clay">${dikkatN}</span>`:''}</h3></div>
+          <div class="card-b">${dikkatHtml}</div></section>
+
+        <section class="card">
+          <div class="card-h"><h3>Takip Ettiğim İşler ${takipIs.length?`<span class="chip">${takipIs.length}</span>`:''}</h3>
+            <button class="btn-link" onclick="wsTakipTumu()">Tümü</button></div>
+          <div class="card-b">${takipHtml}</div></section>
       </div>
     </div>`;
 }
-/* Feed zamani: bugun saat, dun "dün", otesi kisa tarih. */
-function psZaman(t){
-  if(!t) return '';
-  const d=new Date(t), n=new Date();
-  const g=_wsIso(d), bugun=_wsIso(n);
-  const dun=new Date(n); dun.setDate(n.getDate()-1);
-  if(g===bugun) return String(t).slice(11,16);
-  if(g===_wsIso(dun)) return 'dün '+String(t).slice(11,16);
-  return trTarih(t);
-}
 /* Panelim kisayollari - ayni kayda Isler ekranindaki filtreyle gider,
-   ayri bir liste kopyasi uretmez (BR-V01). */
-function wsAksiyonlarim(){ isGo('takiplerim',{q:'',asg:'me'}); }
-function wsBekleyenler(){  isGo('bekleyenler',{q:'',org:'',asg:''}); }
-function wsAcikIsler(){    isGo('liste',{q:'',org:'',phase:'',asg:'me',life:['acik','bekliyor']}); }
+   ayri bir liste kopyasi uretmez (BR-V01). Hedef ekranda filtrenin AKTIF
+   oldugu acikca gorunur (§8/§20). */
+function wsTakipTumu(){
+  isGo('liste',{q:'',org:'',phase:'',ilgili:String((ui._me&&ui._me.id)||''),acil:false,life:['acik','bekliyor']});
+}
 
 /* ---------- Workspace Mecralar hub (parity audit S1 §2/§9) ----------
    Retired: the old flat-list `wsMecralar` (Sprint 06) duplicated a
