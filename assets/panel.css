@@ -1139,15 +1139,21 @@ i.tk-p{min-width:10px;height:10px;padding:0;border-radius:3px;}
    Secili bir filtrenin fark edilmemesi bu sprintin duzelttigi somut
    sikayetlerden biri. Sadece kontrolu isaretlemek yetmiyor - listenin
    ustunde acikca yaziyor. */
-.fbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;
+/* AKTIF FILTRE seridi. Sinif adi bilinçli olarak `.afilt` — PS1.1'de
+   bu blok `.fbar` adiyla yazilmisti ve Halil'in Doluluk ekranindaki
+   MEVCUT `.fbar` filtre kartini (bkz. ~640. satir) sessizce yeniden
+   stillendiriyordu. Ayni ada iki farkli bilesen bagli kalamaz. */
+.afilt{display:flex;flex-wrap:wrap;gap:8px;align-items:center;
   padding:9px 16px;background:var(--c-accent-soft);
   border-bottom:1px solid var(--c-line2);border-left:3px solid var(--c-accent);}
-.fbar-l{font:700 10.5px/1.6 var(--f);letter-spacing:.06em;text-transform:uppercase;color:var(--c-accent);}
-.fbar-v{font:600 12.5px/1.5 var(--f);color:var(--c-ink);}
-.fbar-n{font-size:12px;color:var(--c-ink3);}
-.fbar-x{margin-left:auto;border:1px solid var(--c-accent);background:#fff;color:var(--c-accent);
+.afilt.neutral{background:var(--c-alt);border-left-color:var(--c-line);}
+.afilt.neutral .afilt-l{color:var(--c-ink3);}
+.afilt-l{font:700 10.5px/1.6 var(--f);letter-spacing:.06em;text-transform:uppercase;color:var(--c-accent);}
+.afilt-v{font:600 12.5px/1.5 var(--f);color:var(--c-ink);}
+.afilt-n{font-size:12px;color:var(--c-ink3);}
+.afilt-x{margin-left:auto;border:1px solid var(--c-accent);background:#fff;color:var(--c-accent);
   border-radius:999px;padding:3px 11px;font:600 12px/1.4 var(--f);cursor:pointer;}
-.fbar-x:hover{background:var(--c-accent);color:#fff;}
+.afilt-x:hover{background:var(--c-accent);color:#fff;}
 /* Secili bir degeri olan acilir kutu da gorsel olarak isaretlenir. */
 .inp-on{border-color:var(--c-accent)!important;box-shadow:inset 0 0 0 1px var(--c-accent-soft);font-weight:600;}
 
@@ -1262,7 +1268,34 @@ button.pu-chip:hover{border-color:var(--c-ink);color:var(--c-ink);}
   /* Dar ekranda faz/durum rozetleri iki satira sarabilir. */
   .pd-r{flex-wrap:wrap;}
   .pu{padding:9px 2px 9px 8px;}
-  .fbar{padding:9px 12px;} .fbar-x{margin-left:0;}
+  .afilt{padding:9px 12px;} .afilt-x{margin-left:0;}
   .tk-ev b{display:none;}
   .tk-ev{justify-content:center;padding:2px;}
+}
+
+/* ===== S2: operasyonel kontrol seridi (§8) ===========================
+   Donem/tur/durum artik bir formun icinde degil, tablonun hemen ustunde
+   tek tiklik kontroller. Tablo yogun kalir; kart buyumez. */
+.op-bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;
+  padding:10px 14px;background:var(--c-panel);border:1px solid var(--c-line);
+  border-radius:var(--r);margin-bottom:8px;}
+/* `display:flex` HTML'in `hidden` niteligini ezer - ozel aralik satiri
+   gizliyken bile gorunuyordu. Nitelik kazanmali. */
+.op-bar[hidden]{display:none;}
+.op-bar+.op-bar{margin-top:-4px;}
+.op-bar .inp-sm{margin:0;}
+.op-ozel{background:var(--c-alt);}
+.op-say{gap:6px;}
+.op-say .pf-t{display:inline-flex;align-items:center;gap:6px;}
+.op-say .pf-t b{font-size:12px;opacity:.85;}
+.op-say .pf-t.on b{opacity:1;}
+
+/* Bos bolum: koca bos kart yerine tek satirlik sessiz ipucu (§27). */
+.w-quiet{display:flex;flex-wrap:wrap;gap:8px;align-items:baseline;
+  margin:0 0 12px;padding:9px 14px;border:1px dashed var(--c-line);
+  border-radius:var(--r);font-size:12.5px;}
+
+@media(max-width:760px){
+  .op-bar{padding:9px 10px;}
+  .op-bar .inp-sm{flex:1 1 46%;max-width:none;}
 }
