@@ -1129,11 +1129,15 @@ i.tk-p{min-width:10px;height:10px;padding:0;border-radius:3px;}
 /* --- filtre cubugu (§7) -------------------------------------------- */
 .pf{display:flex;flex-wrap:wrap;gap:6px;align-items:center;
   padding:10px 16px;border-bottom:1px solid var(--c-line2);background:var(--c-alt);}
-.inp-sm{height:30px;padding:3px 8px;font-size:12.5px;max-width:190px;}
+.inp-sm{height:34px;padding:4px 10px;font-size:13px;max-width:210px;}
 .pf-t{border:1px solid var(--c-line);background:#fff;color:var(--c-ink2);border-radius:999px;
-  padding:5px 11px;font:600 12px/1.3 var(--f);cursor:pointer;transition:.13s;white-space:nowrap;}
-.pf-t:hover{border-color:var(--c-ink3);color:var(--c-ink);}
-.pf-t.on{background:var(--c-ink);border-color:var(--c-ink);color:#fff;}
+  padding:7px 13px;font:600 13px/1.25 var(--f);cursor:pointer;transition:.13s;white-space:nowrap;}
+.pf-t:hover{border-color:var(--c-ink3);color:var(--c-ink);background:var(--c-alt);}
+/* §9: seçili filtre seçilmemişten AÇIKÇA farklı görünmeli. Sadece koyu zemin
+   değil; kalınlık, gölge ve bir onay işareti birlikte. */
+.pf-t.on{background:var(--c-ink);border-color:var(--c-ink);color:#fff;font-weight:700;
+  box-shadow:0 1px 3px rgba(17,24,39,.28);}
+.pf-t.on::before{content:"✓ ";font-weight:700;}
 
 /* --- aktif filtre serıdı (§8) --------------------------------------
    Secili bir filtrenin fark edilmemesi bu sprintin duzelttigi somut
@@ -1148,11 +1152,11 @@ i.tk-p{min-width:10px;height:10px;padding:0;border-radius:3px;}
   border-bottom:1px solid var(--c-line2);border-left:3px solid var(--c-accent);}
 .afilt.neutral{background:var(--c-alt);border-left-color:var(--c-line);}
 .afilt.neutral .afilt-l{color:var(--c-ink3);}
-.afilt-l{font:700 10.5px/1.6 var(--f);letter-spacing:.06em;text-transform:uppercase;color:var(--c-accent);}
-.afilt-v{font:600 12.5px/1.5 var(--f);color:var(--c-ink);}
-.afilt-n{font-size:12px;color:var(--c-ink3);}
+.afilt-l{font:700 11.5px/1.6 var(--f);letter-spacing:.06em;text-transform:uppercase;color:var(--c-accent);}
+.afilt-v{font:600 13.5px/1.5 var(--f);color:var(--c-ink);}
+.afilt-n{font-size:12.5px;color:var(--c-ink3);}
 .afilt-x{margin-left:auto;border:1px solid var(--c-accent);background:#fff;color:var(--c-accent);
-  border-radius:999px;padding:3px 11px;font:600 12px/1.4 var(--f);cursor:pointer;}
+  border-radius:999px;padding:5px 13px;font:600 12.5px/1.4 var(--f);cursor:pointer;}
 .afilt-x:hover{background:var(--c-accent);color:#fff;}
 /* Secili bir degeri olan acilir kutu da gorsel olarak isaretlenir. */
 .inp-on{border-color:var(--c-accent)!important;box-shadow:inset 0 0 0 1px var(--c-accent-soft);font-weight:600;}
@@ -1161,25 +1165,38 @@ i.tk-p{min-width:10px;height:10px;padding:0;border-radius:3px;}
    Sprint 1 satirlari 26px avatar + genis bosluk tasiyordu. Metin gorsel
    odak; baglam ikincil. */
 .pu-list{display:flex;flex-direction:column;padding-top:4px;}
-.pu{padding:9px 4px 9px 10px;border-left:2px solid transparent;border-radius:0 var(--r) var(--r) 0;}
+/* §7: satır biraz daha yer kaplayabilir ama KART OLMAZ. Hedef normal bir
+   güncelleme için 2-3 görsel satır ve ekranda rahat 10-15 kayıt. */
+.pu{padding:8px 6px 9px 12px;border-left:2px solid transparent;border-radius:0 var(--r) var(--r) 0;}
 .pu+.pu{border-top:1px solid var(--c-line2);}
 .pu:hover{background:var(--c-alt);}
 .pu.mine{border-left-color:var(--c-accent);}
-.pu.sys{opacity:.72;}
-.pu-h{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:1px;}
-.pu-h b{font:600 12px/1.5 var(--f);color:var(--c-ink2);}
-.pu-h time{font:500 11.5px/1.5 var(--f);color:var(--c-ink3);font-variant-numeric:tabular-nums;}
-.pu-b{border-radius:var(--r-sm);padding:1px 7px;font:700 10.5px/1.6 var(--f);white-space:nowrap;}
-.pu-b.acil{background:var(--c-accent);color:#fff;}
+.pu.sys{opacity:.78;}
+.pu-h{display:flex;align-items:baseline;gap:9px;flex-wrap:wrap;margin-bottom:1px;}
+.pu-h b{font:650 13px/1.5 var(--f);color:var(--c-ink);}
+/* §6: oluşturma zamanı ZORUNLU ve okunaklı - hover'da gizlenmez, chip
+   kalabalığında kaybolmaz. Tabular rakam hizalı okuma sağlar. */
+.pu-h time{font:500 12.5px/1.5 var(--f);color:var(--c-ink3);font-variant-numeric:tabular-nums;}
+.pu-b{border-radius:var(--r-sm);padding:1px 7px;font:700 11px/1.5 var(--f);white-space:nowrap;}
+.pu-b.acil{background:var(--c-accent);color:#fff;letter-spacing:.03em;}
+.pu-b.mine{background:var(--c-accent-soft);color:var(--c-accent);}
 .pu-b.due{background:var(--c-line2);color:var(--c-ink2);}
 .pu-b.gec{background:var(--c-red-soft);color:var(--c-red);}
-.pu-t{margin:0;font-size:13.5px;line-height:1.45;color:var(--c-ink);overflow-wrap:anywhere;cursor:pointer;
-  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
+/* §5: güncelleme metni satırın EN GÜÇLÜ öğesidir. */
+.pu-t{margin:0;font-size:14.5px;line-height:1.5;color:var(--c-ink);overflow-wrap:anywhere;cursor:pointer;
+  display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;}
 .pu-t.acik{-webkit-line-clamp:unset;display:block;}
-.pu-c{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px;}
-.pu-chip{display:inline-flex;align-items:center;border:1px solid var(--c-line);background:#fff;
-  color:var(--c-ink3);border-radius:var(--r-sm);padding:1px 7px;font:500 11px/1.6 var(--f);
+.pu-c{display:flex;flex-wrap:wrap;gap:5px;margin-top:4px;align-items:center;}
+.pu-chip{display:inline-flex;align-items:center;gap:4px;border:1px solid var(--c-line);background:#fff;
+  color:var(--c-ink2);border-radius:var(--r-sm);padding:1px 7px;font:500 12px/1.5 var(--f);
   max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+/* §8: uzun resmi unvanlar satırı ele geçirmesin - görsel olarak kırpılır,
+   tam metin title ile erişilebilir kalır. Kimlik verisi DEĞİŞMEZ. */
+.pu-chip.org{max-width:min(260px,42%);}
+/* §5: son tarih oluşturma zamanından AYRI bir satırda. */
+.pu-due{display:flex;gap:8px;align-items:center;margin-top:3px;font:600 12.5px/1.5 var(--f);}
+.pu-due .g{color:var(--c-red);}
+.pu-due .n{color:var(--c-ink2);}
 button.pu-chip{cursor:pointer;transition:.13s;}
 button.pu-chip:hover{border-color:var(--c-ink);color:var(--c-ink);}
 .pu-chip.org{color:var(--c-ink2);}
@@ -1188,17 +1205,17 @@ button.pu-chip:hover{border-color:var(--c-ink);color:var(--c-ink);}
 .pu-more{align-self:flex-start;margin:10px 0 2px;}
 
 /* --- dikkat / takip satirlari (§12, §17) ---------------------------- */
-.pd-row{display:grid;grid-template-columns:auto minmax(0,1fr) minmax(0,auto);gap:9px;align-items:center;
-  width:100%;text-align:left;background:none;border:0;padding:7px 4px;border-radius:var(--r);
+.pd-row{display:grid;grid-template-columns:auto minmax(0,1fr) minmax(0,auto);gap:10px;align-items:center;
+  width:100%;text-align:left;background:none;border:0;padding:9px 5px;border-radius:var(--r);
   cursor:pointer;font:inherit;color:var(--c-ink);}
 .pd-row:hover{background:var(--c-alt);}
 .pd-row+.pd-row{border-top:1px solid var(--c-line2);}
-.pd-i{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;font-size:11px;}
+.pd-i{width:25px;height:25px;border-radius:50%;display:grid;place-items:center;font-size:12.5px;flex:0 0 auto;}
 .pd-i.gec{background:var(--c-red-soft);color:var(--c-red);}
 .pd-i.acil{background:var(--c-accent-soft);color:var(--c-accent);}
 .pd-b{min-width:0;}
-.pd-t{display:block;font:600 12.5px/1.4 var(--f);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.pd-s{display:block;font-size:11.5px;color:var(--c-ink3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.pd-t{display:block;font:600 13.5px/1.45 var(--f);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.pd-s{display:block;font-size:12.5px;color:var(--c-ink3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .pd-r{white-space:nowrap;display:flex;gap:4px;min-width:0;justify-content:flex-end;}
 .pd-r .pill{overflow:hidden;text-overflow:ellipsis;max-width:100%;}
 .chip.clay{background:var(--c-red-soft);color:var(--c-red);}
@@ -1206,32 +1223,32 @@ button.pu-chip:hover{border-color:var(--c-ink);color:var(--c-ink);}
 /* --- bugun & yaklasan ajandasi (§13) -------------------------------- */
 .pa-list{display:flex;flex-direction:column;gap:9px;}
 .pa-d{border-left:2px solid var(--c-line);padding-left:9px;}
-.pa-dh{font:700 11px/1.6 var(--f);color:var(--c-ink2);letter-spacing:.02em;}
+.pa-dh{font:700 12px/1.7 var(--f);color:var(--c-ink2);letter-spacing:.02em;}
 .pa-dh.now{color:var(--c-accent);}
-.pa-e{display:flex;align-items:center;gap:7px;width:100%;text-align:left;background:none;border:0;
-  padding:3px 5px;border-radius:var(--r-sm);cursor:pointer;font:inherit;}
+.pa-e{display:flex;align-items:center;gap:8px;width:100%;text-align:left;background:none;border:0;
+  padding:5px 6px;border-radius:var(--r-sm);cursor:pointer;font:inherit;}
 .pa-e:hover{background:var(--c-alt);}
-.pa-k{flex:0 0 auto;border-radius:var(--r-sm);padding:1px 6px;font:700 10px/1.6 var(--f);
+.pa-k{flex:0 0 auto;border-radius:var(--r-sm);padding:2px 7px;font:700 11px/1.6 var(--f);
   text-transform:uppercase;letter-spacing:.03em;}
 .pa-k.takip{background:var(--c-accent-soft);color:var(--c-accent);}
 .pa-k.op{background:var(--c-green-soft);color:var(--c-green);}
-.pa-x{flex:1;min-width:0;font-size:12.5px;color:var(--c-ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.pa-e em{font-style:normal;font:700 10.5px/1.6 var(--f);color:var(--c-red);white-space:nowrap;}
+.pa-x{flex:1;min-width:0;font-size:13.5px;color:var(--c-ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.pa-e em{font-style:normal;font:700 11.5px/1.6 var(--f);color:var(--c-red);white-space:nowrap;}
 .pa-e.gec .pa-k{background:var(--c-red-soft);color:var(--c-red);}
 
 /* --- composer (§9-§11) ---------------------------------------------- */
 .qc-tags{display:flex;flex-wrap:wrap;gap:5px;align-items:center;margin:0 0 12px;}
-.qc-mini{font:700 10.5px/1.6 var(--f);letter-spacing:.05em;text-transform:uppercase;color:var(--c-ink3);}
-.qc-who{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--c-line);
-  background:#fff;border-radius:999px;padding:4px 10px;font-size:12px;cursor:pointer;user-select:none;}
+.qc-mini{font:700 11.5px/1.6 var(--f);letter-spacing:.05em;text-transform:uppercase;color:var(--c-ink3);}
+.qc-who{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--c-line);
+  background:#fff;border-radius:999px;padding:6px 12px;font-size:13px;cursor:pointer;user-select:none;}
 .qc-who:hover{border-color:var(--c-ink3);}
 .qc-who input{margin:0;cursor:pointer;}
 .qc-who:has(input:checked){border-color:var(--c-accent);background:var(--c-accent);color:#fff;}
 .qc-line{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0 0 10px;}
 .qc-line .inp-sm{flex:1 1 150px;max-width:260px;}
 .qc-opt{padding-top:10px;border-top:1px solid var(--c-line2);}
-.qc-acil{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--c-line);
-  background:#fff;border-radius:999px;padding:5px 11px;font:600 12px/1.3 var(--f);cursor:pointer;user-select:none;}
+.qc-acil{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--c-line);
+  background:#fff;border-radius:999px;padding:7px 13px;font:600 13px/1.3 var(--f);cursor:pointer;user-select:none;}
 .qc-acil input{margin:0;cursor:pointer;}
 .qc-acil:has(input:checked){border-color:var(--c-accent);background:var(--c-accent);color:#fff;}
 
@@ -1250,8 +1267,8 @@ button.pu-chip:hover{border-color:var(--c-ink);color:var(--c-ink);}
    Eskiden hucrede yalnizca minik yesil/kirmizi sayi kareleri vardi;
    neyin oldugunu gormek icin gune tiklamak gerekiyordu. */
 .tk-evs{display:flex;flex-direction:column;gap:2px;margin-top:2px;width:100%;overflow:hidden;}
-.tk-ev{display:flex;align-items:center;gap:4px;border-radius:3px;padding:1px 4px;
-  font:600 10.5px/1.5 var(--f);overflow:hidden;}
+.tk-ev{display:flex;align-items:center;gap:5px;border-radius:3px;padding:2px 5px;
+  font:600 11.5px/1.5 var(--f);overflow:hidden;}
 .tk-ev i{flex:0 0 auto;width:4px;height:4px;border-radius:50%;background:currentColor;}
 .tk-ev b{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;}
 .tk-ev.takip{background:var(--c-accent-soft);color:var(--c-accent);}
@@ -1304,25 +1321,25 @@ button.pu-chip:hover{border-color:var(--c-ink);color:var(--c-ink);}
    Arama ekranin hakimi; liste yogun ve taranabilir. Dev kart yok (§13). */
 .haf-search{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px;}
 .haf-q{flex:1 1 340px;min-width:240px;height:42px;font-size:14.5px;}
-.haf-hint{margin:0 0 10px;font-size:12.5px;color:var(--c-ink3);}
-.haf-say{margin:0 0 6px;font-size:11.5px;color:var(--c-ink3);}
-.haf-grp{font:700 10.5px/1.6 var(--f);letter-spacing:.06em;text-transform:uppercase;
-  color:var(--c-ink3);margin:14px 0 4px;display:flex;gap:6px;align-items:center;}
+.haf-hint{margin:0 0 12px;font-size:13px;color:var(--c-ink3);}
+.haf-say{margin:0 0 8px;font-size:12.5px;color:var(--c-ink3);}
+.haf-grp{font:700 11.5px/1.6 var(--f);letter-spacing:.06em;text-transform:uppercase;
+  color:var(--c-ink3);margin:16px 0 6px;display:flex;gap:6px;align-items:center;}
 .haf-grp:first-child{margin-top:0;}
 
-.haf-row{display:grid;grid-template-columns:auto minmax(0,1fr) minmax(0,auto);gap:10px;
+.haf-row{display:grid;grid-template-columns:auto minmax(0,1fr) minmax(0,auto);gap:11px;
   align-items:center;width:100%;text-align:left;background:var(--c-panel);
-  border:1px solid var(--c-line2);border-radius:var(--r);padding:8px 11px;
-  margin-bottom:4px;cursor:pointer;font:inherit;color:var(--c-ink);transition:.12s;}
+  border:1px solid var(--c-line2);border-radius:var(--r);padding:10px 13px;
+  margin-bottom:5px;cursor:pointer;font:inherit;color:var(--c-ink);transition:.12s;}
 .haf-row:hover{border-color:var(--c-ink3);background:var(--c-alt);}
-.haf-k{flex:0 0 auto;border-radius:var(--r-sm);padding:1px 7px;
-  font:700 10px/1.7 var(--f);text-transform:uppercase;letter-spacing:.04em;}
+.haf-k{flex:0 0 auto;border-radius:var(--r-sm);padding:2px 8px;
+  font:700 11px/1.7 var(--f);text-transform:uppercase;letter-spacing:.04em;}
 .haf-k.kisi{background:var(--c-accent-soft);color:var(--c-accent);}
 .haf-k.kurum{background:var(--c-line2);color:var(--c-ink2);}
 .haf-b{min-width:0;}
-.haf-t{display:block;font:600 13px/1.4 var(--f);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.haf-s{display:block;font-size:11.5px;color:var(--c-ink3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.haf-r{text-align:right;font-size:11.5px;color:var(--c-ink2);white-space:nowrap;
+.haf-t{display:block;font:600 14px/1.45 var(--f);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.haf-s{display:block;font-size:12.5px;color:var(--c-ink3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.haf-r{text-align:right;font-size:12.5px;color:var(--c-ink2);white-space:nowrap;
   overflow:hidden;text-overflow:ellipsis;}
 .haf-r em{font-style:normal;color:var(--c-ink3);}
 /* §27: koken/kanit ikincil kalir - kimligin onune gecmez. */
@@ -1345,3 +1362,5 @@ button.pu-chip:hover{border-color:var(--c-ink);color:var(--c-ink);}
   .haf-row{grid-template-columns:auto minmax(0,1fr);}
   .haf-r{grid-column:2;text-align:left;white-space:normal;}
 }
+/* §12: dikkat satirinda tarih, NEDEN rozetinin yaninda ikincil kalir. */
+.pd-d{font:500 11.5px/1.6 var(--f);color:var(--c-ink3);white-space:nowrap;}
