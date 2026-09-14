@@ -1299,3 +1299,49 @@ button.pu-chip:hover{border-color:var(--c-ink);color:var(--c-ink);}
   .op-bar{padding:9px 10px;}
   .op-bar .inp-sm{flex:1 1 46%;max-width:none;}
 }
+
+/* ===== PS3: Hafıza ===================================================
+   Arama ekranin hakimi; liste yogun ve taranabilir. Dev kart yok (§13). */
+.haf-search{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px;}
+.haf-q{flex:1 1 340px;min-width:240px;height:42px;font-size:14.5px;}
+.haf-hint{margin:0 0 10px;font-size:12.5px;color:var(--c-ink3);}
+.haf-say{margin:0 0 6px;font-size:11.5px;color:var(--c-ink3);}
+.haf-grp{font:700 10.5px/1.6 var(--f);letter-spacing:.06em;text-transform:uppercase;
+  color:var(--c-ink3);margin:14px 0 4px;display:flex;gap:6px;align-items:center;}
+.haf-grp:first-child{margin-top:0;}
+
+.haf-row{display:grid;grid-template-columns:auto minmax(0,1fr) minmax(0,auto);gap:10px;
+  align-items:center;width:100%;text-align:left;background:var(--c-panel);
+  border:1px solid var(--c-line2);border-radius:var(--r);padding:8px 11px;
+  margin-bottom:4px;cursor:pointer;font:inherit;color:var(--c-ink);transition:.12s;}
+.haf-row:hover{border-color:var(--c-ink3);background:var(--c-alt);}
+.haf-k{flex:0 0 auto;border-radius:var(--r-sm);padding:1px 7px;
+  font:700 10px/1.7 var(--f);text-transform:uppercase;letter-spacing:.04em;}
+.haf-k.kisi{background:var(--c-accent-soft);color:var(--c-accent);}
+.haf-k.kurum{background:var(--c-line2);color:var(--c-ink2);}
+.haf-b{min-width:0;}
+.haf-t{display:block;font:600 13px/1.4 var(--f);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.haf-s{display:block;font-size:11.5px;color:var(--c-ink3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.haf-r{text-align:right;font-size:11.5px;color:var(--c-ink2);white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis;}
+.haf-r em{font-style:normal;color:var(--c-ink3);}
+/* §27: koken/kanit ikincil kalir - kimligin onune gecmez. */
+.haf-r .pill{background:transparent;color:var(--c-ink3);font-weight:500;padding:0 0 0 6px;}
+.haf-ev{font-size:11.5px;color:var(--c-ink3);}
+
+.haf-pick{display:flex;gap:10px;flex-wrap:wrap;}
+.haf-pick-b{flex:1 1 190px;text-align:left;background:#fff;border:1px solid var(--c-line);
+  border-radius:var(--r);padding:14px;cursor:pointer;font:inherit;transition:.13s;}
+.haf-pick-b:hover{border-color:var(--c-accent);background:var(--c-accent-soft);}
+.haf-pick-b b{display:block;font-size:14px;margin-bottom:3px;}
+.haf-pick-b span{display:block;font-size:12px;color:var(--c-ink3);}
+
+.haf-dup{margin:-4px 0 12px;padding:8px 11px;border-radius:var(--r);
+  background:var(--c-amber-soft);font-size:12.5px;line-height:1.7;}
+.haf-dup b{color:var(--c-amber);}
+
+@media(max-width:760px){
+  .haf-q{flex:1 1 100%;}
+  .haf-row{grid-template-columns:auto minmax(0,1fr);}
+  .haf-r{grid-column:2;text-align:left;white-space:normal;}
+}

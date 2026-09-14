@@ -29,6 +29,10 @@ seeds/*
 # Upstream reconciliation: mirrors legacy seviye from app_role and
 # translates jobs.durum to canonical phase/lifecycle. No company data.
 !seeds/97_upstream_compat_backfill.sql
+# PS3: contact_affiliations backfill replayed after the company-data seed,
+# because db reset runs migrations against an empty database. Deterministic
+# logic only - no company data.
+!seeds/98_ps3_affiliation_backfill.sql
 
 # Eski düzen (seeds/ öncesi) — geri gelmesin
 seed.sql
