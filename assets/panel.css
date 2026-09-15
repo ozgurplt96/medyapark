@@ -1202,7 +1202,19 @@ button.pu-chip:hover{border-color:var(--c-ink);color:var(--c-ink);}
 .pu-chip.org{color:var(--c-ink2);}
 .pu-chip.who{border-style:none;background:var(--c-accent-soft);color:var(--c-accent);font-weight:600;}
 .pu-chip.dim{border-style:dashed;}
-.pu-more{align-self:flex-start;margin:10px 0 2px;}
+/* --- akis sayfalayici (S4.1 §4) ------------------------------------
+   Sonsuz kaydirma DEGIL: kullanici kacinci sayfada oldugunu bilir ve
+   ayni sayfaya geri donebilir. */
+/* Ajanda gun tasmasi (§31): sessizce kesmek yerine nereye gidilecegini soyler. */
+.pa-more{display:block;width:100%;text-align:left;background:none;border:0;cursor:pointer;
+  padding:5px 4px 2px;font:600 12.5px/1.5 var(--f);color:var(--c-accent);}
+.pa-more:hover{text-decoration:underline;text-underline-offset:2px;}
+.pgr{display:flex;align-items:center;justify-content:space-between;gap:10px;
+  flex-wrap:wrap;padding:11px 14px 13px;border-top:1px solid var(--c-line2);}
+.pgr-n{font:600 13.5px/1.5 var(--f);color:var(--c-ink2);text-align:center;flex:1 1 auto;}
+.pgr-n b{color:var(--c-ink);}
+.pgr-n em{display:block;font:500 12.5px/1.5 var(--f);font-style:normal;color:var(--c-ink3);}
+.pgr .btn[disabled]{opacity:.45;cursor:default;}
 
 /* --- dikkat / takip satirlari (§12, §17) ---------------------------- */
 .pd-row{display:grid;grid-template-columns:auto minmax(0,1fr) minmax(0,auto);gap:10px;align-items:center;
@@ -1302,6 +1314,15 @@ button.pu-chip:hover{border-color:var(--c-ink);color:var(--c-ink);}
 .op-bar+.op-bar{margin-top:-4px;}
 .op-bar .inp-sm{margin:0;}
 .op-ozel{background:var(--c-alt);}
+/* Muhasebe satirindaki iki eylem yan yana sigsin. */
+.acc-a{white-space:nowrap;}
+.acc-a .btn+.btn{margin-left:6px;}
+/* Operasyon satirinda "Is / Kurum" hucresi Work'u acar (§15). */
+.op-j{cursor:pointer;}
+.op-j:hover{text-decoration:underline;text-underline-offset:2px;}
+/* Operasyon modalinda Work koprusu (§15) - ayri bir yorum alani DEGIL. */
+.op-lnk{display:flex;gap:14px;flex-wrap:wrap;margin:0 0 14px;
+  padding-bottom:10px;border-bottom:1px solid var(--c-line2);}
 .op-say{gap:6px;}
 .op-say .pf-t{display:inline-flex;align-items:center;gap:6px;}
 .op-say .pf-t b{font-size:12px;opacity:.85;}
