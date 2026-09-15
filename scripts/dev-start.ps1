@@ -1,4 +1,4 @@
-<#
+﻿<#
     Medyapark — local development starter
     ------------------------------------------------------------------
     Starts the LOCAL Supabase stack (Docker) and a static web server for
@@ -45,8 +45,21 @@ if ($LASTEXITCODE -ne 0) {
 Write-Ok 'Docker is running.'
 
 # ------------------------------------------------------------- Supabase
+# `supabase start` prints informational lines to STDERR - notably
+# "Stopped services: [supabase_imgproxy... supabase_pooler...]", which is
+# normal (those optional services are disabled in config.toml). Under
+# $ErrorActionPreference = 'Stop', PowerShell 5.1 promotes any native-command
+# stderr to a terminating NativeCommandError, so the script aborted after a
+# PERFECTLY SUCCESSFUL start. Same quirk the `supabase status` call below
+# already guards against. Trust the exit code, not the stream.
 Write-Step 'Starting local Supabase'
-npx --yes supabase@latest start
+$prevEAP = $ErrorActionPreference
+try {
+    $ErrorActionPreference = 'Continue'
+    npx --yes supabase@latest start
+} finally {
+    $ErrorActionPreference = $prevEAP
+}
 if ($LASTEXITCODE -ne 0) {
     Write-Host 'supabase start failed. See output above.' -ForegroundColor Red
     exit 1
@@ -55,7 +68,13 @@ if ($LASTEXITCODE -ne 0) {
 if ($Reset) {
     Write-Step 'Resetting local database (migrations + seed)'
     Write-Warn2 'This rebuilds the LOCAL database only. Remote is never touched.'
-    npx --yes supabase@latest db reset
+    $prevEAP = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        npx --yes supabase@latest db reset
+    } finally {
+        $ErrorActionPreference = $prevEAP
+    }
     if ($LASTEXITCODE -ne 0) { exit 1 }
 }
 
