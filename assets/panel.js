@@ -510,7 +510,13 @@ async function api(action, body){
       if(q.job_id)        sel=sel.eq('job_id',q.job_id);
       if(q.assignee_id)   sel=sel.eq('assignee_id',q.assignee_id);
       if(q.action_status) sel=sel.eq('action_status',q.action_status);
+      /* `occurred_at` tek basina BENZERSIZ DEGIL (gercek veride esit
+         damgali satirlar var). Sayfalama geldikten sonra esitlik bir
+         sayfa sinirina denk gelirse ayni satir iki sayfada gorunup
+         baska bir satir hic gorunmeyebilirdi (S4.1 §27). `id` kirici
+         olarak eklendi — siralama artik toplam ve tekrarlanabilir. */
       const {data,error}=await sel.order('occurred_at',{ascending:false})
+        .order('id',{ascending:false})
         .limit(q.limit?+q.limit:200);
       if(error)throw error; return ok(data); }
     case 'entry_save':{
@@ -916,6 +922,10 @@ function showApp(){
             <button class="btn btn-primary btn-sm" onclick="qcAc({})" title="Bir güncelleme paylaş">${ic('plus',15)} Güncelleme</button>
             <button class="btn btn-outline btn-sm" onclick="jobForm()" title="Yeni iş aç">${ic('plus',15)} Yeni İş</button>
             <button class="btn btn-outline btn-sm" onclick="hafEkle()" title="Hafızaya kişi veya kurum ekle">${ic('plus',15)} Hafızaya Ekle</button>
+            ${/* §14: AYNI operasyon formu, ikinci bir modal YOK. Global
+                 baglamda Is secimi zorunludur cunku operasyon bir Work'un
+                 child'idir; Work Detail'den acildiginda Is on-secilidir. */''}
+            <button class="btn btn-outline btn-sm" onclick="opForm(0)" title="Baskı veya montaj kaydı ekle">${ic('plus',15)} Baskı/Montaj</button>
           </div>
           <a class="btn btn-outline btn-sm" href="index.html" target="_blank">${ic('ext',15)} Siteyi Aç</a>
           ${userChip()}
@@ -945,6 +955,106 @@ async function yeniTeklifKontrol(){
     if(lb && !lr.error){ const k=(lr.data||[]).length; lb.textContent=k||''; lb.style.display=k?'inline-flex':'none'; }
   }catch(e){}
 }
+/* ============ GEZİNME GEÇMİŞİ (S4.1 §2–§3) ==========================
+   ÖNCE: panelde History API hiç kullanılmıyordu. `go()` yalnız
+   `ui.section` yazıp yeniden çiziyor; `workAc()/orgAc()/personAc()/
+   quoteView()` ise `ui.section`'a hiç dokunmadan doğrudan #content'e
+   yazıyordu. İki sonuç: (a) tarayıcı Geri tuşu paneli tamamen TERK
+   ediyordu, (b) ekrandaki "‹ İşler" düğmesi kullanıcı Muhasebe'den,
+   Takvim'den, Panelim'den veya Hafıza'dan gelmiş olsa bile SABİT
+   olarak İşler'e atıyordu.
+
+   SONRA: her ayırt edilebilir görünüm bir history girdisidir. Yeni bir
+   router YAZILMADI (§2) — mevcut `go()/workAc()/orgAc()/personAc()`
+   çağrı yüzeyi aynen duruyor; yalnızca ne gösterdiklerini history'ye
+   bildiren ince bir katman eklendi.
+
+   Tek değişmez: BİR GÖRÜNÜM = BİR GİRDİ. Aynı görünüm yeniden
+   çizilirse girdi PUSH edilmez, REPLACE edilir. Bu, `workAc(id)`'nin
+   kaydetme sonrası ~15 tazeleme çağrısını tek satır kod değiştirmeden
+   doğru yapar; aksi halde bir işte üç kez kaydeden kullanıcının geri
+   dönmek için Geri'ye üç kez basması gerekirdi.
+
+   FİLTRE DURUMU BURADA SAKLANMAZ (§3). Zaten sessionStorage'da yaşıyor
+   (mp_is_filtre, mp_is_tab, mp_is_sira, mp_acc, mp_op_filtre, mp_haf,
+   mp_panelim, mp_tkv) ve gezinmeden sağ çıkıyor. İkinci bir kopya
+   tutmak iki gerçeklik yaratırdı. */
+
+let _navPop=false;                     /* popstate sırasında tekrar push etme */
+let _navSon=null;                      /* en son uygulanan durum — iptalde geri yazılır */
+try{ if('scrollRestoration' in history) history.scrollRestoration='manual'; }catch(e){}
+
+/* Bir görünümün insan tarafından okunabilir adı — Geri düğmesinin
+   üstünde yazan şey budur, bu yüzden "İşler" değil "Muhasebe" der. */
+function navEtiket(v,s,id,ad){
+  if(v==='work') return ad||'İş';
+  if(v==='org')  return ad||'Kurum';
+  if(v==='kisi') return ad||'Kişi';
+  return TITLES[s]||'Panel';
+}
+const navAyni=(a,b)=>!!a&&!!b&&a.v===b.v&&String(a.id||'')===String(b.id||'')&&a.s===b.s;
+
+/* Ekranda ne olduğunu history'ye bildirir. Aynı görünümse replace. */
+function navKayit(v,s,id,ad){
+  if(_navPop) return;                  /* Geri'den geliyoruz: girdi zaten var */
+  const onceki=(history.state&&history.state.mp)?history.state:null;
+  const lbl=navEtiket(v,s,id,ad);
+  const bu={mp:1,v,s,id:id||0,lbl};
+  try{
+    if(navAyni(onceki,bu)){            /* aynı görünümün tazelenmesi: PUSH YOK */
+      _navSon={...onceki,lbl};
+      history.replaceState(_navSon,'',location.href); return; }
+    /* Ayrıldığımız görünümün kaydırma konumunu kendi girdisine yaz —
+       §2 "tercihen scroll position". */
+    if(onceki) history.replaceState({...onceki,sy:window.scrollY},'',location.href);
+    _navSon=onceki?{...bu,i:(onceki.i||0)+1,gl:onceki.lbl}:{...bu,i:0,gl:''};
+    if(onceki) history.pushState(_navSon,'',location.href);
+    else       history.replaceState(_navSon,'',location.href);
+  }catch(e){}
+}
+
+/* Geri'den gelen bir durumu ekrana uygular. Push YAPMAZ. */
+async function navUygula(st){
+  if(!document.getElementById('content')) return;   /* login ekranındayız */
+  /* Mecra düzenleyicisinin kaydedilmemiş-değişiklik koruması `go()` içinde
+     yaşıyordu; tarayıcı Geri'si onu atlamasın. Kullanıcı vazgeçerse
+     ayrıldığımız girdiyi geri iterek gezinmeyi İPTAL ederiz. */
+  if(ui._dirty && typeof dirtyGuard==='function' && !(await dirtyGuard())){
+    if(_navSon){ try{ history.pushState(_navSon,'',location.href); }catch(e){} }
+    return; }
+  _navSon=st;
+  _navPop=true;
+  try{
+    if(st.s&&ui.section!==st.s){ ui.section=st.s; navCiz();
+      const t=document.getElementById('ttl'); if(t) t.textContent=TITLES[st.s]||''; }
+    if(st.v==='work')       await workAc(st.id);
+    else if(st.v==='org')   await orgAc(st.id);
+    else if(st.v==='kisi')  await personAc(st.id);
+    else                    await renderSection();
+  } finally { _navPop=false; }
+  if(typeof st.sy==='number') setTimeout(()=>window.scrollTo(0,st.sy),0);
+}
+window.addEventListener('popstate',e=>{
+  const st=e.state;
+  if(!st||!st.mp) return;              /* panel dışı bir girdi: tarayıcıya bırak */
+  navUygula(st);
+});
+
+/* Görünür Geri düğmesi. SABİT bir hedefe gitmez: gerçek önceki
+   bağlama döner ve etiketi de onu söyler (§2). Panel içinde önceki
+   girdi yoksa (derin bağlantı, yenileme) makul bir varsayılana düşer. */
+function geri(vars){
+  const st=history.state;
+  if(st&&st.mp&&(st.i||0)>0){ history.back(); return; }
+  go(vars||'is-takibi');
+}
+function geriBtn(vars){
+  const st=history.state;
+  const lbl=(st&&st.mp&&(st.i||0)>0&&st.gl)?st.gl:(TITLES[vars]||'Geri');
+  return `<button class="btn btn-ghost btn-sm" onclick="geri('${vars}')"
+    title="Önceki ekrana dön">‹ ${esc(lbl)}</button>`;
+}
+
 async function go(s){ if(typeof dirtyGuard==='function' && !(await dirtyGuard())) return;
   /* Yüzey koruması. UI gizleme yetkilendirme DEĞİLDİR (08 §9) — asıl
      koruma RLS'tedir; bu yalnız team_member'ı ona kapalı olan ve boş
@@ -957,6 +1067,7 @@ async function go(s){ if(typeof dirtyGuard==='function' && !(await dirtyGuard())
   const g=navGrupOf(s);                        /* kapali gruptaki bolume gidilirse grubu ac */
   if(g){ const set=navAcikGruplar(); if(!set.has(g)){ set.add(g); try{localStorage.setItem('mp_nav_acik',JSON.stringify([...set]));}catch(e){} } }
   navCiz();
+  navKayit('sec',s,0);
   document.getElementById('ttl').textContent=TITLES[s]||''; renderSection(); yeniTeklifKontrol&&yeniTeklifKontrol(); }
 
 async function renderSection(){
@@ -1469,7 +1580,11 @@ const ISTABS=[['pano','Pano'],['liste','Liste'],['takvim','Takvim']];
    Aktif = acik + bekliyor. Backend degerleri aynen duruyor; `bekliyor`
    bir rozet ve filtre olarak yasiyor, ama ASLA "geciken" demek degil.
    PS1.1 §20: kisi filtresi `asg` (Sorumlu) degil `ilgili`. */
-const ISF_DEF={life:['acik','bekliyor'],q:'',org:'',phase:'',ilgili:'',acil:false};
+/* `gec` (S4.1 §5): Panelim'deki "Dikkat Gerekenler" kartinin gercek bir
+   hedefi olsun diye eklendi. YENI BIR MODUL DEGIL - mevcut `acil`
+   anahtarinin kardesi olan bir Liste filtresi. Tanim S1.1 ile ayni:
+   TERMINI GECMIS ACIK AKSIYONU olan isler. Yastan aciliyet cikarilmaz. */
+const ISF_DEF={life:['acik','bekliyor'],q:'',org:'',phase:'',ilgili:'',acil:false,gec:false};
 /* Work görünümü filtresi oturum içinde korunur (07 §18/2). */
 function isFiltre(){
   let f={};
@@ -1480,7 +1595,7 @@ function isFiltre(){
   if(f.mine===true && !f.asg && !o.ilgili) o.asg='me';
   if(f.asg && !o.ilgili) o.ilgili=f.asg;
   delete o.mine; delete o.asg;
-  o.acil=!!o.acil;
+  o.acil=!!o.acil; o.gec=!!o.gec;
   return o;
 }
 function isFiltreYaz(f){ try{ sessionStorage.setItem('mp_is_filtre',JSON.stringify(f)); }catch(e){} }
@@ -1597,6 +1712,9 @@ function coordSuz(D,f,opt){
   if(f.phase&&!opt.faziAtla) list=list.filter(j=>(j.status||'temas_takip')===f.phase);
   if(f.org) list=list.filter(j=>String(j.customer_id)===String(f.org));
   if(f.acil) list=list.filter(j=>!!j.is_urgent);
+  if(f.gec){ const bg=_cIso(new Date());
+    list=list.filter(j=>{ const nx=D.sonraki[j.id];
+      return !!(nx&&nx.due_at&&String(nx.due_at).slice(0,10)<bg); }); }
   /* `Ilgili` (PS1.1 §20) = bu kisiyi gercekten baglayan her sey:
      Work'u TAKIP EDIYOR (acik niyet, work_followers), Work'un sahibi,
      ya da uzerinde acik bir aksiyonu var. "Sorumlu" degil - kimseye is
@@ -1664,6 +1782,9 @@ function coordFiltreKart(tab,D,f){
       </div>
       <button type="button" class="pf-t ${f.acil?'on':''}" aria-pressed="${f.acil}"
         onclick="isFiltre2({acil:${!f.acil}})">⚡ Acil</button>
+      <button type="button" class="pf-t ${f.gec?'on':''}" aria-pressed="${f.gec}"
+        title="Termini geçmiş açık aksiyonu olan işler"
+        onclick="isFiltre2({gec:${!f.gec}})">⚠ Geciken</button>
       <span class="fhint" style="margin-left:auto">Aktif = açık + bekliyor</span>
     </div>`:''}
   </div>
@@ -1681,6 +1802,7 @@ function isFiltreBanner(tab,D,f){
   if(f.ilgili){ const id=coordAsgId(D,f);
     p.push('İlgili: '+esc((D.tm&&D.tm[id])||(f.ilgili==='me'?'Ben':'#'+f.ilgili))); }
   if(f.acil)   p.push('Acil');
+  if(f.gec)    p.push('Geciken');
   if(arsiv)    p.push('Arşiv');
   if(!p.length) return '';
   return `<div class="afilt">
@@ -2218,13 +2340,23 @@ async function qcKaydet(){
    KUYRUK görünümü. Muhasebe tablosu, defter, fatura ekranı YOKTUR
    (01 §14, 06 §26). Medyapark bir cari/muhasebe sistemi değildir;
    burada yalnız "hangi iş muhasebeye gitmeye hazır" sorusu cevaplanır. */
-const ACCST=[['hazir','Hazır'],['gonderildi','Gönderildi'],['islendi','İşlendi'],['yok','Yok']];
+/* Kanonik `jobs.accounting_status` sozlugu AYNEN korunur - CHECK
+   kisiti tam olarak bunlari kabul eder (yok|hazir|gonderildi|islendi).
+   Paralel bir durum kumesi UYDURULMAZ (§7). `Henuz yok` yalniz daha
+   iyi okunan bir ETIKETTIR; depolanan deger hala 'yok'. */
+const ACCST=[['hazir','Hazır'],['gonderildi','Gönderildi'],['islendi','İşlendi'],['yok','Henüz yok']];
 const accLbl=v=>(ACCST.find(x=>x[0]===v)||[null,v])[1];
 const ACC_CLS={hazir:'sand',gonderildi:'teal',islendi:'',yok:''};
 
+/* §7: varsayilan artik tek bir durum dilimi DEGIL. Yalniz `Hazır`
+   gostermek "muhasebeye gidecek olanlar" sorusunu cevapliyordu ama
+   "bu isin muhasebesi ne durumda?" sorusunu cevaplayamiyordu -
+   kullanici once tum kumeyi gorup sonra daraltabilmeli. */
 function accFiltre(){
-  try{ return JSON.parse(sessionStorage.getItem('mp_acc')||'null')||{st:'hazir',q:''}; }
-  catch(e){ return {st:'hazir',q:''}; }
+  let f; try{ f=JSON.parse(sessionStorage.getItem('mp_acc')||'null'); }catch(e){ f=null; }
+  f={st:'tumu',q:'',...(f||{})};
+  if(f.st!=='tumu'&&!ACCST.some(x=>x[0]===f.st)) f.st='tumu';
+  return f;
 }
 function accYaz(f){ try{ sessionStorage.setItem('mp_acc',JSON.stringify(f)); }catch(e){} }
 function accSekme(st){ accYaz({...accFiltre(),st}); renderSection(); }
@@ -2243,19 +2375,33 @@ async function muhasebe(c){
   ui._accCm=cm;
 
   const say={}; ACCST.forEach(([k])=>say[k]=(jobs||[]).filter(j=>(j.accounting_status||'yok')===k).length);
-  let list=(jobs||[]).filter(j=>(j.accounting_status||'yok')===f.st);
+  say.tumu=(jobs||[]).length;
+  let list=f.st==='tumu'?(jobs||[]).slice():(jobs||[]).filter(j=>(j.accounting_status||'yok')===f.st);
   if(f.q){ const t=f.q.toLocaleLowerCase('tr');
     list=list.filter(j=>[j.title,cm[j.customer_id],j.accounting_note]
       .some(v=>String(v||'').toLocaleLowerCase('tr').includes(t))); }
-  list.sort((a,b)=>String(b.accounting_sent_at||b.end_day||'').localeCompare(String(a.accounting_sent_at||a.end_day||'')));
+  /* Tumu gorunumunde duz tarih siralamasi 'Henuz yok' yigininin altina
+     dikkat gerektirenleri gomerdi. Devir sirasi: Hazır -> Gönderildi ->
+     Henüz yok -> İşlendi (biten en sonda), icinde tarihe gore. */
+  const ACC_SIRA={hazir:0,gonderildi:1,yok:2,islendi:3};
+  list.sort((a,b)=>
+    (f.st==='tumu'
+      ? (ACC_SIRA[a.accounting_status||'yok']-ACC_SIRA[b.accounting_status||'yok'])
+      : 0)
+    || String(b.accounting_sent_at||b.end_day||'').localeCompare(String(a.accounting_sent_at||a.end_day||''))
+    || (b.id-a.id));
 
   const satir=j=>{
     const fatura=billTo[j.id]&&billTo[j.id]!==j.customer_id?cm[billTo[j.id]]:null;
+    const ast=j.accounting_status||'yok';
     return `<tr onclick="workAc(${j.id})">
       <td><div class="lz-t">${esc(j.title)}</div>
           <div class="lz-s">${esc(JOBLBL[j.status]||j.status)} · ${esc(LIFELBL[j.lifecycle_status||'acik'])}</div></td>
-      <td><div class="lz-o" title="${esc(cm[j.customer_id]||'')}">${esc(cm[j.customer_id]||'—')}</div>
-          ${fatura?`<div class="lz-s">Fatura: ${esc(fatura)}</div>`:''}</td>
+      <td><div class="lz-o" title="${esc(cm[j.customer_id]||'')}">${esc(orgKisa(cm[j.customer_id]||'')||'—')}</div>
+          ${fatura?`<div class="lz-s">Fatura: ${esc(orgKisa(fatura))}</div>`:''}</td>
+      ${/* §7/§8: `Tümü` varsayilan olunca durum artik ortulu degil -
+           satirda YAZMALI, yoksa hangi isin nerede oldugu okunmaz. */''}
+      <td><span class="pill ${esc(ACC_CLS[ast]||'')}">${esc(accLbl(ast))}</span></td>
       <td class="mono">${j.accounting_amount!=null?esc(money(j.accounting_amount)):'<span class="muted">—</span>'}</td>
       <td>${j.contract_status==='signed'?'<span class="pill">İmzalı</span>'
            :j.contract_status==='pending'?'<span class="pill sand">Bekleniyor</span>'
@@ -2263,16 +2409,18 @@ async function muhasebe(c){
       <td class="mono dim">${j.accounting_sent_at?esc(trTarih(j.accounting_sent_at)):''}
           ${j.accounting_processed_at?`<div class="lz-s">işlendi ${esc(trTarih(j.accounting_processed_at))}</div>`:''}</td>
       <td>${esc(j.accounting_note||'')}</td>
-      <td onclick="event.stopPropagation()">${accAksiyon(j)}</td>
+      <td class="acc-a" onclick="event.stopPropagation()">${accAksiyon(j)}
+        <button class="btn btn-ghost btn-sm" onclick="accDuzenle(${j.id})"
+          title="Tutar, not ve durumu düzenle">Düzenle</button></td>
     </tr>`;};
 
   c.innerHTML=`<div class="sec-head">
       <div><h3>Muhasebeye Gidecekler</h3>
-        <p class="sub" id="accSub">${list.length} iş · ${esc(accLbl(f.st))} · muhasebe devri, cari sistem değil</p></div>
+        <p class="sub" id="accSub">${list.length} iş · ${f.st==='tumu'?'tüm işler':esc(accLbl(f.st))} · muhasebe devri, cari sistem değil</p></div>
       <button class="btn btn-outline btn-sm" onclick="accExport()">${ic('download',15)} Excel'e Aktar</button></div>
     ${coordKisayol('muhasebe')}
     <div class="ws-switch inline" role="group" aria-label="Muhasebe durumu">
-      ${ACCST.map(([k,l])=>`<button type="button" class="${f.st===k?'on':''}" aria-pressed="${f.st===k}"
+      ${[['tumu','Tümü']].concat(ACCST).map(([k,l])=>`<button type="button" class="${f.st===k?'on':''}" aria-pressed="${f.st===k}"
         onclick="accSekme('${k}')">${esc(l)}${say[k]?` <span class="tabn mono">${say[k]}</span>`:''}</button>`).join('')}
     </div>
     <div class="sec-card">
@@ -2283,11 +2431,11 @@ async function muhasebe(c){
     </div>
     ${list.length?`<div class="sec-card pad0"><div class="tbl-wrap">
       <table class="tbl rowlink lz"><thead><tr>
-        <th>İş</th><th>Kurum</th><th>Tutar</th><th>Sözleşme</th><th>Tarih</th><th>Not</th><th>İşlem</th>
+        <th>İş</th><th>Kurum</th><th>Muhasebe</th><th>Tutar</th><th>Sözleşme</th><th>Tarih</th><th>Not</th><th>İşlem</th>
       </tr></thead><tbody>${list.map(satir).join('')}</tbody></table></div></div>`
     :`<div class="sec-card"><p class="empty">${f.st==='hazir'
         ? 'Muhasebeye gitmeye hazır iş yok.'
-        : 'Bu durumda iş yok.'}</p></div>`}`;
+        : f.st==='tumu' ? 'Henüz iş kaydı yok.' : 'Bu durumda iş yok.'}</p></div>`}`;
   ui._accList=list;
 }
 /* İleri yönlü devir. Geri alma yalnız admin'de: kayıt düzeltme yetkisi
@@ -2303,12 +2451,9 @@ function accAksiyon(j){
 async function accDurum(id,yeni){
   const j=(ui._jobs||[]).find(x=>x.id===id)||{};
   const eski=j.accounting_status||'yok';
-  const body={id, accounting_status:yeni};
-  /* Zaman damgaları tutarlı yazılır; kullanıcıdan tekrar istenmez (BR-E03). */
-  const now=new Date().toISOString();
-  if(yeni==='gonderildi'){ body.accounting_sent_at=j.accounting_sent_at||now; body.accounting_processed_at=null; }
-  if(yeni==='islendi'){    body.accounting_sent_at=j.accounting_sent_at||now; body.accounting_processed_at=now; }
-  if(yeni==='hazir'){      body.accounting_sent_at=null; body.accounting_processed_at=null; }
+  /* Zaman damgaları tutarlı yazılır; kullanıcıdan tekrar istenmez (BR-E03).
+     Yazar TEK: `accZaman` - modal yolu da aynısını kullanır. */
+  const body={id, accounting_status:yeni, ...accZaman(j,yeni,'')};
   const r=await guard(()=>api('job_save',body),'Muhasebe durumu güncellenemedi');
   if(r===null)return;
   if(eski!==yeni) await sysEntry(id,`Muhasebe durumu: ${accLbl(eski)} → ${accLbl(yeni)}`);
@@ -2363,10 +2508,11 @@ async function workAc(id){
   ui._work=d.job; ui._workParties=d.parties; ui._workEntries=d.entries;
   ui._workQuotes=d.quotes||[]; ui._workBookings=d.bookings||[];
   const j=d.job, org=(cu||[]).find(x=>x.id===j.customer_id);
+  navKayit('work',ui.section,j.id,orgKisa(j.title,34));
   const ls=j.lifecycle_status||'acik';
   const c=document.getElementById('content');
   c.innerHTML=`<div class="sec-head">
-      <div><h3><button class="btn btn-ghost btn-sm" onclick="go('is-takibi')">‹ İşler</button> ${esc(j.title)}</h3>
+      <div><h3>${geriBtn('is-takibi')} ${esc(j.title)}</h3>
         <p class="sub">${j.is_urgent?'<span class="pu-b acil">⚡ Acil</span> ':''}${org?esc(org.firma):'<span class="muted">kurum bağlı değil</span>'} · ${esc(JOBLBL[j.status]||j.status)} · ${esc(LIFELBL[ls])}${j.closed_reason?' · '+esc(CLOSELBL[j.closed_reason]||j.closed_reason):''}${folAdlari.length?' · ilgili: '+esc(folAdlari.join(', ')):''}</p></div>
       <div style="display:flex;gap:8px">
         <button class="btn btn-primary btn-sm" onclick="qcAc({jobId:${j.id}})">${ic('plus',15)} Güncelleme</button>
@@ -2607,8 +2753,14 @@ async function partyDel(id){
   const r=await guard(()=>api('work_party_delete&id='+id),'Kaldırılamadı'); if(r===null)return;
   toast('Kaldırıldı.'); workAc(jid);
 }
-function workMetaForm(id){
-  const j=ui._work||{};
+/* Ayni duzenleyici hem Work Detail'den hem Muhasebe kuyrugundan acilir
+   (§9). Ikinci bir muhasebe formu YAZILMADI; yalniz `ui._work`e olan
+   ortuk bagimlilik kaldirildi - kuyrukta `ui._work` bos olurdu ve form
+   her alani bos gosterirdi. */
+function workMetaForm(id,job){
+  const j=job||((ui._work&&ui._work.id===id)?ui._work:null)
+           ||(ui._jobs||[]).find(x=>x.id===id)||{};
+  const as0=j.accounting_status||'yok';
   modal(`<h3 style="margin:0 0 6px">Sözleşme ve Muhasebe</h3>
     <p class="muted" style="font-size:12.5px;margin:0 0 14px">Sözleşme eksikliği bir uyarıdır, engel değildir (D-218). Kapanmış iş muhasebenin işlendiği anlamına gelmez (BR-W04).</p>
     <input type="hidden" id="wmid" value="${id}">
@@ -2620,26 +2772,64 @@ function workMetaForm(id){
     <div class="field"><label class="flabel" for="wcu">Sözleşme bağlantısı (Drive)</label><input class="inp" id="wcu" value="${esc(j.contract_url)}" placeholder="https://drive.google.com/..."></div>
     <div class="row2">
       <div class="field"><label class="flabel" for="was">Muhasebe durumu</label>
-        <select class="inp" id="was">${[['yok','Yok'],['hazir','Hazır'],['gonderildi','Gönderildi'],['islendi','İşlendi']].map(o=>`<option value="${o[0]}" ${j.accounting_status===o[0]?'selected':''}>${o[1]}</option>`).join('')}</select></div>
+        <select class="inp" id="was" onchange="workMetaDurumDegis()">${ACCST.slice().sort((a,b)=>['yok','hazir','gonderildi','islendi'].indexOf(a[0])-['yok','hazir','gonderildi','islendi'].indexOf(b[0])).map(o=>`<option value="${o[0]}" ${as0===o[0]?'selected':''}>${esc(o[1])}</option>`).join('')}</select></div>
       <div class="field"><label class="flabel" for="waa">Tutar</label>
         <input class="inp" type="number" step="0.01" id="waa" value="${esc(j.accounting_amount)}"></div></div>
+    ${/* §9: devir tarihi de duzeltilebilmeli - "3'unde gonderdik ama bugun
+         giriyorum" gercek bir durum. Sema `accounting_sent_at` tasiyor;
+         yeni alan UYDURULMADI. Bos birakilirsa sistem kendi damgasini
+         yazar (§10). */''}
+    <div class="field" id="wasdBox" ${(as0==='gonderildi'||as0==='islendi')?'':'hidden'}>
+      <label class="flabel" for="wasd">Muhasebeye gönderim tarihi</label>
+      <input class="inp" type="date" id="wasd" value="${esc(j.accounting_sent_at?String(j.accounting_sent_at).slice(0,10):'')}">
+      <span class="fhint">Boş bırakılırsa gönderildi işaretlendiği an yazılır.</span></div>
     <div class="field"><label class="flabel" for="wan">Muhasebe notu</label><input class="inp" id="wan" value="${esc(j.accounting_note)}"></div>
     <div style="display:flex;gap:8px;justify-content:flex-end">
       <button class="btn btn-ghost btn-sm" onclick="closeModal()">Vazgeç</button>
       <button class="btn btn-primary btn-sm" onclick="workMetaSave()">Kaydet</button></div>`);
 }
+function workMetaDurumDegis(){
+  const v=gv('was'), b=document.getElementById('wasdBox');
+  if(b) b.hidden=!(v==='gonderildi'||v==='islendi');
+}
+/* Devir zaman damgalarinin TEK yazari (§10).
+   ONCE: kuyruktaki `accDurum` damgalari yaziyordu ama Work Detail'deki
+   `workMetaSave` YAZMIYORDU - ayni is gecisi hangi dugmeye basildigina
+   gore farkli veri uretiyordu ve "Gonderildi" bir is gonderim tarihsiz
+   kalip yanlis siralanip yanlis disa aktariliyordu. */
+function accZaman(j,yeni,elleTarih){
+  const now=new Date().toISOString();
+  const o={};
+  if(yeni==='yok'||yeni==='hazir'){ o.accounting_sent_at=null; o.accounting_processed_at=null; return o; }
+  /* Tarih girisi gun bazli; gun kaymasini onlemek icin yerel ogleye sabitlenir. */
+  const elle=elleTarih?new Date(elleTarih+'T12:00:00').toISOString():null;
+  o.accounting_sent_at=elle||j.accounting_sent_at||now;
+  o.accounting_processed_at=(yeni==='islendi')?(j.accounting_processed_at||now):null;
+  return o;
+}
 async function workMetaSave(){
-  const id=+gv('wmid'); const j=ui._work||{};
+  const id=+gv('wmid');
+  const j=((ui._work&&ui._work.id===id)?ui._work:null)||(ui._jobs||[]).find(x=>x.id===id)||{};
   const cs=gv('wcs'), as=gv('was');
   modalBusy(true);
   const r=await guard(()=>api('job_save',{id,contract_status:cs,contract_signed_at:gv('wcd')||null,
     contract_url:gv('wcu')||null,accounting_status:as,
-    accounting_amount:gv('waa')?+gv('waa'):null,accounting_note:gv('wan')||null}),'Kaydedilemedi');
+    accounting_amount:gv('waa')?+gv('waa'):null,accounting_note:gv('wan')||null,
+    ...accZaman(j,as,gv('wasd'))}),'Kaydedilemedi');
   modalBusy(false);
   if(r===null)return;
   if(j.contract_status!==cs) await sysEntry(id,`Sözleşme durumu: ${({missing:'Eksik',pending:'Bekleniyor',signed:'İmzalı'})[cs]}`);
-  if(j.accounting_status!==as) await sysEntry(id,`Muhasebe durumu: ${({yok:'Yok',hazir:'Hazır',gonderildi:'Gönderildi',islendi:'İşlendi'})[as]}`);
-  closeModal(); toast('Kaydedildi.'); workAc(id);
+  if((j.accounting_status||'yok')!==as) await sysEntry(id,`Muhasebe durumu: ${accLbl(j.accounting_status||'yok')} → ${accLbl(as)}`);
+  closeModal(); toast('Kaydedildi.');
+  /* Nereden acildiysa oraya don - kuyruktan acilip Work Detail'e
+     firlatilmak kullanicinin yerini kaybettirirdi (§9). */
+  if(ui.section==='muhasebe') renderSection(); else workAc(id);
+}
+/* Kuyruktan duzenleme: ayni form, satirin isiyle onceden doldurulmus. */
+function accDuzenle(id){
+  const j=(ui._jobs||[]).find(x=>x.id===id);
+  if(!j){ toast('Kayıt bulunamadı.'); return; }
+  workMetaForm(id,j);
 }
 
 /* PS1.1 §23-§25: bir işi AÇMAK hızlı olmalı. Yeni iş formu artık yalnız
@@ -2868,9 +3058,31 @@ function opDonem(kind){
   if(kind==='yil')  { return [_iso(new Date(n.getFullYear(),0,1)), _iso(new Date(n.getFullYear(),11,31))]; }
   return ['',''];
 }
+/* §11/§12 - gunluk kullanim sadelesti.
+   DONEM: birincil serit artik `Bugün | Bu hafta | Tümü`. `Yaklaşan`,
+   `Bu ay`, `Geçen ay`, `Bu yıl` ve `Özel aralık` ikincil bir aciliste
+   yasiyor. Backend tarih suzmesi AYNEN duruyor (opDonem degismedi);
+   yalnizca birincil yuzeyde yer kaplamiyorlar.
+   DURUM: calisan artik bes mikro-durum arasinda karar vermiyor.
+   `kapsam` uc degerlidir ve DB durumlarina soyle esler:
+     aktif  -> planned + waiting + in_progress
+     tamam  -> done
+     iptal  -> cancelled   (istisnai; sayisi 0'sa gosterilmez)
+   `work_operations.status` CHECK kisiti ve degerleri DEGISMEDI (§12);
+   bu yalnizca bir gorunum eslemesidir. */
+const OP_KAPSAM={aktif:['planned','waiting','in_progress'],tamam:['done'],iptal:['cancelled']};
+const OP_DONEM_BIR=[['bugun','Bugün'],['hafta','Bu hafta'],['tum','Tümü']];
+const OP_DONEM_IKI=[['yaklasan','Yaklaşan 30 gün'],['ay','Bu ay'],['gecen','Geçen ay'],
+                    ['yil','Bu yıl'],['ozel','Özel aralık']];
+const OP_DEF={donem:'hafta',from:'',to:'',type:'',kapsam:'aktif',q:''};
 function opFiltre(){
-  try{ return JSON.parse(sessionStorage.getItem('mp_op_filtre')||'null')||{donem:'ay',from:'',to:'',type:'',status:'',q:''}; }
-  catch(e){ return {donem:'ay',from:'',to:'',type:'',status:'',q:''}; }
+  let f; try{ f=JSON.parse(sessionStorage.getItem('mp_op_filtre')||'null'); }catch(e){ f=null; }
+  f={...OP_DEF,...(f||{})};
+  /* Eski surumden gelen tekil `status` kapsama cevrilir; veri kaybi yok. */
+  if(f.status){ f.kapsam=(f.status==='done')?'tamam':(f.status==='cancelled')?'iptal':'aktif'; }
+  delete f.status;
+  if(!OP_KAPSAM[f.kapsam]&&f.kapsam!=='tum') f.kapsam='aktif';
+  return f;
 }
 function opFiltreYaz(f){ try{ sessionStorage.setItem('mp_op_filtre',JSON.stringify(f)); }catch(e){} }
 
@@ -2879,7 +3091,9 @@ async function operasyon(c){
   let [from,to]=f.donem==='ozel'?[f.from,f.to]:opDonem(f.donem);
   const qs=['operations_list'];
   if(from) qs.push('from='+from); if(to) qs.push('to='+to);
-  if(f.type) qs.push('type='+f.type); if(f.status) qs.push('status='+f.status);
+  if(f.type) qs.push('type='+f.type);
+  /* Kapsam birden cok DB durumuna denk geldigi icin sunucuya tekil
+     `status` gonderilmez; sayaclar da tum kumeden hesaplanmali. */
   const [ops,jobs,custs,units]=await Promise.all([
     api(qs.join('&')), api('jobs_list'), api('customers_list'), api('units_full').catch(()=>[])]);
   const jm={}; (jobs||[]).forEach(j=>jm[j.id]=j);
@@ -2887,27 +3101,38 @@ async function operasyon(c){
   const um={}; (units||[]).forEach(u=>um[u.id]=u);
   ui._ops=ops||[]; ui._opJobs=jm; ui._opCust=cm; ui._opUnits=um;
   ui._veriOkunma=new Date();                 /* S2 §5 — veri okunma anı */
+  const ikincilAd=(OP_DONEM_IKI.find(x=>x[0]===f.donem)||[])[1]||'';
+  const ikincilAktif=!!ikincilAd;
 
-  let list=(ops||[]).slice();
+  let tum=(ops||[]).slice();
+  const kapsamSay={aktif:0,tamam:0,iptal:0};
+  tum.forEach(o=>{ for(const k in OP_KAPSAM) if(OP_KAPSAM[k].includes(o.status)) kapsamSay[k]++; });
+  let list=(f.kapsam==='tum')?tum:tum.filter(o=>(OP_KAPSAM[f.kapsam]||[]).includes(o.status));
   if(f.q){ const t=f.q.toLocaleLowerCase('tr');
     list=list.filter(o=>[o.description,o.location_text,o.dimensions,o.note,
       (jm[o.job_id]||{}).title, cm[(jm[o.job_id]||{}).customer_id], cm[o.supplier_org_id],
       (um[o.unit_id]||{}).name].some(v=>String(v||'').toLocaleLowerCase('tr').includes(t))); }
   ui._opFiltered=list;
-
-  const sayim={}; OPSTAT.forEach(s=>sayim[s[0]]=list.filter(o=>o.status===s[0]).length);
   const rows=list.map(o=>{
     const j=jm[o.job_id]||{};
     const gec=o.planned_date&&o.planned_date<_iso(new Date())&&['planned','waiting','in_progress'].includes(o.status);
     return `<tr onclick="opForm(${o.id})" style="cursor:pointer">
       <td class="mono dim">${o.planned_date?esc(trTarih(o.planned_date)):'<span class="muted">tarihsiz</span>'}${gec?' <span style="color:#b3261e" title="Gecikti">⚠</span>':''}</td>
-      <td>${esc(j.title||('#'+o.job_id))}<br><span class="muted" style="font-size:12px">${esc(cm[j.customer_id]||'')}</span></td>
+      ${/* §15: operasyon satirindan ISE gecis. Hucre kaydin duzenleme
+           modalini DEGIL, Work'u acar; satirin geri kalani duzenlemeye
+           gider. Operasyon ve Work ayri kayitlar olarak KALIR. */''}
+      <td onclick="event.stopPropagation();workAc(${o.job_id})" class="op-j"
+          title="İşi aç: ${esc(j.title||'')}">${esc(j.title||('#'+o.job_id))}<br>
+        <span class="muted" style="font-size:12px">${esc(orgKisa(cm[j.customer_id]||''))}</span></td>
       <td><span class="pill">${esc(opTypeLbl(o.operation_type))}</span></td>
       <td>${esc(o.description||'')}</td>
       <td class="mono">${o.quantity!=null?esc(o.quantity):''}</td>
       <td>${esc(o.dimensions||'')}</td>
       <td>${esc((um[o.unit_id]||{}).name||o.location_text||'')}</td>
-      <td>${esc(cm[o.supplier_org_id]||'')}</td>
+      ${/* Kurum sutunuyla ayni gorunum kurali: tuzel unvan ekleri satiri
+           uc satira yayiyordu. Tam unvan `title` ile erisilebilir kalir,
+           kimlik verisine dokunulmaz (S3.1 §8). */''}
+      <td title="${esc(cm[o.supplier_org_id]||'')}">${esc(orgKisa(cm[o.supplier_org_id]||''))}</td>
       <td><span class="badge-st st-${esc(o.status)}">${esc(opStatLbl(o.status))}</span>
           ${o.note?`<div class="lz-s">${esc(String(o.note).slice(0,52))}</div>`:''}</td></tr>`;}).join('');
 
@@ -2922,21 +3147,25 @@ async function operasyon(c){
     ${/* S2 §8: dönem artık bir formun içine gömülü select değil, doğrudan
          tıklanabilir bir şerit. Gerçek tablonun sorduğu dört soru —
          bugün / bu hafta / sırada ne var / ne bitti — tek tıkla. */''}
+    ${/* §11: gunluk serit uc secenek. Digerleri kaybolmadi, ikincil
+         acilistede - ve secili olan serit icinde chip olarak yaziyor ki
+         kullanici hangi donemde oldugunu kaybetmesin. */''}
     <div class="op-bar">
       <div class="ws-switch inline" role="group" aria-label="Dönem">
-        ${[['bugun','Bugün'],['hafta','Bu hafta'],['yaklasan','Yaklaşan'],['ay','Bu ay'],
-           ['gecen','Geçen ay'],['tum','Tümü'],['ozel','Özel aralık']]
-          .map(o=>`<button type="button" class="${f.donem===o[0]?'on':''}" aria-pressed="${f.donem===o[0]}"
+        ${OP_DONEM_BIR.map(o=>`<button type="button" class="${f.donem===o[0]?'on':''}" aria-pressed="${f.donem===o[0]}"
             onclick="opDonemSec('${o[0]}')">${o[1]}</button>`).join('')}
+        ${ikincilAktif?`<button type="button" class="on" aria-pressed="true"
+            title="Dönem seçimini temizle" onclick="opDonemSec('hafta')">${esc(ikincilAd)} ✕</button>`:''}
       </div>
+      <select class="inp inp-sm ${ikincilAktif?'inp-on':''}" id="opDonem2" aria-label="Diğer dönem"
+        onchange="opDonemSec(this.value)">
+        <option value="">Diğer dönem…</option>
+        ${OP_DONEM_IKI.map(o=>`<option value="${o[0]}" ${f.donem===o[0]?'selected':''}>${esc(o[1])}</option>`).join('')}</select>
       <input class="inp inp-sm" id="opQ" value="${esc(f.q)}" style="flex:1 1 190px;max-width:280px"
         placeholder="İş, kurum, tedarikçi, yer, açıklama" oninput="opFiltreDegis()" aria-label="Ara">
       <select class="inp inp-sm ${f.type?'inp-on':''}" id="opType" onchange="opFiltreDegis()" aria-label="Tür">
         <option value="">Tüm türler</option>
-        ${OPTYPE.map(o=>`<option value="${o[0]}" ${f.type===o[0]?'selected':''}>${o[1]}</option>`).join('')}</select>
-      <select class="inp inp-sm ${f.status?'inp-on':''}" id="opStatus" onchange="opFiltreDegis()" aria-label="Durum">
-        <option value="">Tüm durumlar</option>
-        ${OPSTAT.map(o=>`<option value="${o[0]}" ${f.status===o[0]?'selected':''}>${o[1]}</option>`).join('')}</select>
+        ${OPTYPE.filter(o=>o[0]!=='diger'||f.type==='diger').map(o=>`<option value="${o[0]}" ${f.type===o[0]?'selected':''}>${o[1]}</option>`).join('')}</select>
     </div>
     <div class="op-bar op-ozel" id="opOzelBox" ${f.donem==='ozel'?'':'hidden'}>
       <label class="qc-mini" for="opFrom">Başlangıç</label>
@@ -2944,11 +3173,17 @@ async function operasyon(c){
       <label class="qc-mini" for="opTo">Bitiş</label>
       <input class="inp inp-sm" type="date" id="opTo" value="${esc(f.to)}" onchange="opFiltreDegis()">
     </div>
-    ${/* Durum sayaçları artık okunacak bir metin değil, tıklanabilir filtre. */''}
+    ${/* §12: calisan artik bes mikro-durum arasinda gezinmiyor.
+         `İptal` istisnaidir - hic kayit yoksa gosterilmez bile. */''}
     <div class="op-bar op-say">
-      ${OPSTAT.map(st=>`<button type="button" class="pf-t ${f.status===st[0]?'on':''}"
-        onclick="opFiltre2({status:'${f.status===st[0]?'':st[0]}'})">${st[1]}
-        <b class="mono">${sayim[st[0]]}</b></button>`).join('')}
+      <div class="ws-switch inline" role="group" aria-label="Durum kapsamı">
+        ${[['aktif','Aktif'],['tamam','Tamamlananlar']]
+          .concat(kapsamSay.iptal?[['iptal','İptal']]:[])
+          .concat(f.kapsam==='tum'?[['tum','Tümü']]:[])
+          .map(([k,l])=>`<button type="button" class="${f.kapsam===k?'on':''}" aria-pressed="${f.kapsam===k}"
+            onclick="opFiltre2({kapsam:'${k}'})">${esc(l)}${kapsamSay[k]?` <span class="tabn mono">${kapsamSay[k]}</span>`:''}</button>`).join('')}
+      </div>
+      <span class="fhint">Aktif = planlandı + bekliyor + devam ediyor</span>
     </div>
     ${opFiltreBanner(f,from,to,list.length)}
 
@@ -2962,26 +3197,27 @@ async function operasyon(c){
 /* Ana Sayfa "Bu Hafta Baski & Montaj" karti icin tek giris noktasi:
    donem filtresini kurup operasyon ekranina gecer (C4 §17). */
 function opFiltre2(patch){ opFiltreYaz({...opFiltre(),...patch}); renderSection(); }
-function opDonemSec(d){ opFiltre2({donem:d}); }
+function opDonemSec(d){ if(!d) return; opFiltre2({donem:d}); }
 /* S2 §8/§13 + S1.1 §8: hangi dönemi ve hangi filtreyi görüyoruz — ekranda
    açıkça yazar. Aynı zamanda İŞ TARİHİ ile VERİNİN OKUNDUĞU AN'ı ayırır:
    burada yazan aralık iş dönemidir, dosya adındaki tarih değil. */
 function opFiltreBanner(f,from,to,adet){
   const donemAd={bugun:'Bugün',hafta:'Bu hafta',yaklasan:'Yaklaşan 30 gün',ay:'Bu ay',
                  gecen:'Geçen ay',yil:'Bu yıl',ozel:'Özel aralık',tum:'Tüm zamanlar'}[f.donem]||f.donem;
-  const p=[`İş dönemi: <b>${esc(donemAd)}</b>${from&&to?` (${esc(trTarih(from))} – ${esc(trTarih(to))})`:''}`];
+  const kapsamAd={aktif:'Aktif',tamam:'Tamamlananlar',iptal:'İptal',tum:'Tüm durumlar'}[f.kapsam]||f.kapsam;
+  const p=[`İş dönemi: <b>${esc(donemAd)}</b>${from&&to?` (${esc(trTarih(from))} – ${esc(trTarih(to))})`:''}`,
+           `Durum: <b>${esc(kapsamAd)}</b>`];
   if(f.type)   p.push('Tür: '+esc(opTypeLbl(f.type)));
-  if(f.status) p.push('Durum: '+esc(opStatLbl(f.status)));
   if(f.q)      p.push(`Ara: “${esc(f.q)}”`);
-  const filtreli=!!(f.type||f.status||f.q);
+  const filtreli=!!(f.type||f.q||f.kapsam!=='aktif');
   return `<div class="afilt ${filtreli?'':'neutral'}">
     <span class="afilt-l">${filtreli?'Aktif filtre':'Görünüm'}</span>
     <span class="afilt-v">${p.join(' · ')}</span>
     <span class="afilt-n">${adet} kayıt</span>
-    ${filtreli?`<button type="button" class="afilt-x" onclick="opFiltre2({type:'',status:'',q:''})">Temizle ✕</button>`:''}</div>`;
+    ${filtreli?`<button type="button" class="afilt-x" onclick="opFiltre2({type:'',kapsam:'aktif',q:''})">Temizle ✕</button>`:''}</div>`;
 }
-function opGo(donem){
-  opFiltreYaz({...opFiltre(),donem:donem||'hafta',from:'',to:''});
+function opGo(donem,kapsam){
+  opFiltreYaz({...opFiltre(),donem:donem||'hafta',from:'',to:'',kapsam:kapsam||'aktif'});
   go('operasyon');
 }
 function opFiltreDegis(){
@@ -2989,7 +3225,7 @@ function opFiltreDegis(){
      yalnız serbest alanlar okunur; mevcut dönem korunur. */
   const f=opFiltre();
   opFiltreYaz({...f, from:gv('opFrom')||'', to:gv('opTo')||'',
-    type:gv('opType')||'', status:gv('opStatus')||'', q:gv('opQ')||''});
+    type:gv('opType')||'', q:gv('opQ')||''});
   renderSection();
 }
 
@@ -3000,13 +3236,31 @@ async function opForm(id,jobId){
   if(!veri)return;
   const [jobs,custs,units]=veri;
   const jid=jobId||o.job_id||((ui._work||{}).id)||0;
-  modal(`<h3 style="margin:0 0 14px">${id?'Kaydı Düzenle':'Yeni Baskı / Montaj Kaydı'}</h3>
+  modal(`<h3 style="margin:0 0 6px">${id?'Kaydı Düzenle':'Yeni Baskı / Montaj Kaydı'}</h3>
+    ${/* §15: Work ve Work Operation AYRI kayitlar olarak kalir. Burada
+         yalniz gecis guclendirilir: ise gec, ya da insan diliyle bir
+         guncelleme birak. Operasyona ozel bir yorum alani ACILMAZ -
+         anlatimin yeri kanonik Entry / Work zaman cizelgesidir. */''}
+    ${(id&&jid)?`<div class="op-lnk">
+      <button type="button" class="btn-link" onclick="opIse(${jid})">İşi aç →</button>
+      <button type="button" class="btn-link" onclick="opGuncelle(${jid})">Bu işe güncelleme ekle</button>
+    </div>`:'<div style="height:8px"></div>'}
     <input type="hidden" id="opid" value="${id||0}">
     <div class="row2">
+      ${/* §14: global baglamdan acildiginda Is ON-SECILI DEGILDIR.
+           Once listenin ilk isini secili gosteriyorduk; kullanici fark
+           etmeden yanlis ise kayit acabilirdi. Secim artik aciktir. */''}
       <div class="field"><label class="flabel" for="opJob">İş *</label>
-        <select class="inp" id="opJob">${(jobs||[]).map(j=>`<option value="${j.id}" ${String(jid)===String(j.id)?'selected':''}>${esc(j.title)}</option>`).join('')}</select></div>
+        <select class="inp" id="opJob">
+          ${jid?'':'<option value="">— iş seçin —</option>'}
+          ${(jobs||[]).map(j=>`<option value="${j.id}" ${String(jid)===String(j.id)?'selected':''}>${esc(j.title)}</option>`).join('')}</select></div>
+      ${/* §13: `diger` gercek kullanimda SIFIR satir tasiyor (canli sayim);
+           yeni kayitta bir "cop kutusu" secenegi sunmak siniflandirmayi
+           bozardi. Backend degeri KALDIRILMADI - eski bir kayit onu
+           tasiyorsa secenek gorunur ve kaydedilebilir. */''}
       <div class="field"><label class="flabel" for="opT">Tür *</label>
-        <select class="inp" id="opT">${OPTYPE.map(t=>`<option value="${t[0]}" ${o.operation_type===t[0]?'selected':''}>${t[1]}</option>`).join('')}</select></div>
+        <select class="inp" id="opT">${OPTYPE.filter(t=>t[0]!=='diger'||o.operation_type==='diger')
+          .map(t=>`<option value="${t[0]}" ${o.operation_type===t[0]?'selected':''}>${t[1]}</option>`).join('')}</select></div>
     </div>
     <div class="field"><label class="flabel" for="opDesc">Açıklama</label><input class="inp" id="opDesc" value="${esc(o.description)}" placeholder="ör. M1 AVM megalight baskı"></div>
     <div class="row2">
@@ -3082,6 +3336,11 @@ async function opSave(){
   closeModal(); toast('Kaydedildi.');
   if(ui.section==='operasyon') renderSection(); else workAc(jid);
 }
+/* Modal icinden ise/guncellemeye gecis. Ikisi de kaydedilmemis form
+   icerigini birakip gider; bu yuzden yalniz KAYITLI bir operasyonda
+   gosterilir (opForm'da id&&jid kosulu). */
+function opIse(jid){ closeModal(); workAc(jid); }
+function opGuncelle(jid){ closeModal(); qcAc({jobId:jid}); }
 async function opDel(id){
   if(!await mpConfirm('Bu baskı/montaj kaydı silinsin mi?','Kaydı Sil'))return;
   const jid=(ui._ops||ui._workOps||[]).find(x=>x.id===id)?.job_id||(ui._work||{}).id;
@@ -3114,7 +3373,8 @@ async function opExport(){
   await exportRows('baski-montaj','Baskı & Montaj',OP_COLS,list,[
     ['İş dönemi', donemAd + (from&&to?` (${trTarih(from)} – ${trTarih(to)})`:'')],
     ['Tür filtresi', f.type?opTypeLbl(f.type):'Tümü'],
-    ['Durum filtresi', f.status?opStatLbl(f.status):'Tümü'],
+    ['Durum filtresi', {aktif:'Aktif (planlandı + bekliyor + devam ediyor)',
+      tamam:'Tamamlananlar',iptal:'İptal',tum:'Tüm durumlar'}[f.kapsam]||f.kapsam],
     ['Arama', f.q||'—']]);
 }
 function opImport(){
@@ -3276,15 +3536,24 @@ function wsHafta(){
 }
 
 /* ---- Panelim gorunum durumu ---- */
+/* Akis artik sayfa sayfa (S4.1 §4). Onceki model `n`'i 30'ar artiran
+   "Daha fazla goster" idi; Panelim sinirsiz uzuyordu. */
+const PS_SAYFA=20;
+const PS_DEF={p:1,job:'',org:'',kisi:'',acil:false,gec:false,benim:false};
 function psDurum(){
-  try{ return JSON.parse(sessionStorage.getItem('mp_panelim')||'null')
-        ||{n:30,job:'',org:'',kisi:'',acil:false,gec:false,benim:false}; }
-  catch(e){ return {n:30,job:'',org:'',kisi:'',acil:false,gec:false,benim:false}; }
+  let d; try{ d=JSON.parse(sessionStorage.getItem('mp_panelim')||'null'); }catch(e){ d=null; }
+  d={...PS_DEF,...(d||{})};
+  delete d.n;                          /* eski surumden kalan alan */
+  d.p=Math.max(1,+d.p||1);
+  return d;
 }
 function psYaz(d){ try{ sessionStorage.setItem('mp_panelim',JSON.stringify(d)); }catch(e){} }
-function psFiltre(patch){ psYaz({...psDurum(),...patch,n:30}); renderSection(); }
-function psTemizle(){ psYaz({n:30,job:'',org:'',kisi:'',acil:false,gec:false,benim:false}); renderSection(); }
-function psDaha(){ psYaz({...psDurum(),n:psDurum().n+30}); renderSection(); }
+/* Filtre degisimi HER ZAMAN 1. sayfaya doner: 3. sayfadayken filtre
+   daraltilinca bos ekrana bakmak "sonuc yok" gibi okunurdu (§27). */
+function psFiltre(patch){ psYaz({...psDurum(),...patch,p:1}); renderSection(); }
+function psTemizle(){ psYaz({...PS_DEF}); renderSection(); }
+function psSayfa(p){ psYaz({...psDurum(),p:Math.max(1,p)}); renderSection();
+  const b=document.querySelector('.pnl-a .card'); if(b) b.scrollIntoView({block:'start'}); }
 function psAc(el){ if(el)el.classList.toggle('acik'); }
 function psFiltreDegis(){
   psFiltre({ job:gv('psJob')||'', org:gv('psOrg')||'', kisi:gv('psKisi')||'' });
@@ -3336,8 +3605,11 @@ async function workspaceHome(c){
   const gecmis=d=>!!d&&String(d).slice(0,10)<bugun;
 
   /* ---- KRONOLOJIK feed (§6) ---- */
+  /* Sunucu ayni sirayi verir; burada da AYNI toplam siralama kullanilir
+     ki istemci tarafi suzme sayfa sinirinda kaymasin (§27). */
   const tumEnt=(ents||[]).slice()
-    .sort((a,b)=>String(b.occurred_at||'').localeCompare(String(a.occurred_at||'')));
+    .sort((a,b)=>String(b.occurred_at||'').localeCompare(String(a.occurred_at||''))
+                 || (b.id-a.id));
   tumEnt.forEach(e=>{ e._benim=psBenimMi(e,benim,ilgiSet,takipJobs); });
 
   /* ---- Filtreler (§7) - hizli, calisan kontroller ---- */
@@ -3350,7 +3622,12 @@ async function workspaceHome(c){
   if(st.gec)   suz=suz.filter(e=>e.action_status==='open'&&gecmis(e.due_at));
   if(st.benim) suz=suz.filter(e=>e._benim);
   const filtreAktif=!!(st.job||st.org||st.kisi||st.acil||st.gec||st.benim);
-  const gosterilen=suz.slice(0,st.n);
+  /* Suzme SAYFALAMADAN ONCE biter (§4): sayfa sayisi filtrelenmis
+     kumeden hesaplanir, ham kumeden degil. */
+  const sayfaAdet=Math.max(1,Math.ceil(suz.length/PS_SAYFA));
+  const sayfa=Math.min(st.p,sayfaAdet);          /* filtre daralinca tasma duzelt */
+  const bas=(sayfa-1)*PS_SAYFA;
+  const gosterilen=suz.slice(bas,bas+PS_SAYFA);
 
   /* ---- Feed satiri: kompakt, metin odakli (§5) ---- */
   /* §4/§5 — satır şu sırayla cevap verir:
@@ -3441,11 +3718,18 @@ async function workspaceHome(c){
   (ops||[]).filter(o=>o.planned_date&&o.planned_date>=bugun&&o.planned_date<=ufukIso)
     .forEach(o=>{ (ajanda[o.planned_date]=ajanda[o.planned_date]||[]).push({t:'op',d:o.planned_date,o}); });
   const gunler=Object.keys(ajanda).filter(d=>d>=bugun).sort().slice(0,7);
+  /* GUN BASINA tavan. Kart 7 GUN ile sinirliydi ama "Bugün" kovasi TUM
+     gecikmisleri yutuyor (yukaridaki `d<bugun?bugun:d`), dolayisiyla
+     yogun veride tek basina 20+ satir cizip Panelim'i yine sonsuz
+     uzatiyordu (§31). Kartin ANLAMI degismedi (§5): ayni kayitlar, ayni
+     siralama - yalnizca tasan kisim tek satirlik bir baglantiya dondu. */
+  const PA_GUN_TAVAN=5;
   const tkvHtml=gunler.length?gunler.map(d=>{
     const yarin=new Date(); yarin.setDate(yarin.getDate()+1);
     const et=d===bugun?'Bugün':(d===_wsIso(yarin)?'Yarın':psGun(d));
+    const hepsi=ajanda[d], tasma=hepsi.length-PA_GUN_TAVAN;
     return `<div class="pa-d"><div class="pa-dh ${d===bugun?'now':''}">${esc(et)}</div>
-      ${ajanda[d].map(x=>x.t==='takip'
+      ${hepsi.slice(0,PA_GUN_TAVAN).map(x=>x.t==='takip'
         ? `<button type="button" class="pa-e ${x.gec?'gec':''}" onclick="${x.e.job_id?`workAc(${x.e.job_id})`:'void 0'}">
              <span class="pa-k takip">Takip</span>
              <span class="pa-x">${esc(String(x.e.body).slice(0,64))}</span>
@@ -3453,6 +3737,8 @@ async function workspaceHome(c){
         : `<button type="button" class="pa-e" onclick="workAc(${x.o.job_id})">
              <span class="pa-k op">${esc(opTypeLbl(x.o.operation_type))}</span>
              <span class="pa-x">${esc(x.o.description||(jm[x.o.job_id]||{}).title||'')}</span></button>`).join('')}
+      ${tasma>0?`<button type="button" class="pa-more" onclick="${d===bugun?'dikkatGoruntule()':`isGo('takvim',{})`}">
+        +${tasma} kayıt daha →</button>`:''}
       </div>`;}).join('')
     :'<p class="empty">Önümüzdeki günlerde planlı bir şey yok.</p>';
 
@@ -3516,9 +3802,16 @@ async function workspaceHome(c){
             <span class="afilt-v">${ozet.join(' · ')}</span>
             <span class="afilt-n">${suz.length} güncelleme</span>
             <button type="button" class="afilt-x" onclick="psTemizle()">Temizle ✕</button></div>`:''}
-          <div class="card-b pu-list">${feedHtml}
-            ${suz.length>st.n?`<button class="btn btn-outline btn-sm pu-more" onclick="psDaha()">Daha fazla göster</button>`:''}
-          </div></section>
+          <div class="card-b pu-list">${feedHtml}</div>
+          ${suz.length?`<div class="pgr">
+            <button class="btn btn-outline btn-sm" ${sayfa<=1?'disabled':''}
+              onclick="psSayfa(${sayfa-1})" aria-label="Önceki sayfa">‹ Önceki</button>
+            <span class="pgr-n" aria-live="polite">
+              <b>${sayfa}</b> / ${sayfaAdet}
+              <em>${bas+1}–${bas+gosterilen.length} · ${suz.length} güncelleme</em></span>
+            <button class="btn btn-outline btn-sm" ${sayfa>=sayfaAdet?'disabled':''}
+              onclick="psSayfa(${sayfa+1})" aria-label="Sonraki sayfa">Sonraki ›</button>
+          </div>`:''}</section>
       </div>
 
       <div class="pnl-b">
@@ -3528,7 +3821,9 @@ async function workspaceHome(c){
           <div class="card-b pa-list">${tkvHtml}</div></section>
 
         <section class="card">
-          <div class="card-h"><h3>Dikkat Gerekenler ${dikkatN?`<span class="chip clay">${dikkatN}</span>`:''}</h3></div>
+          <div class="card-h"><h3>Dikkat Gerekenler ${dikkatN?`<span class="chip clay">${dikkatN}</span>`:''}</h3>
+            ${dikkatN?`<button class="btn-link" onclick="dikkatGoruntule()"
+              title="Termini geçmiş açık aksiyonu olan işleri İşler / Liste'de aç">Görüntüle</button>`:''}</div>
           <div class="card-b">${dikkatHtml}</div></section>
 
         <section class="card">
@@ -3541,8 +3836,17 @@ async function workspaceHome(c){
 /* Panelim kisayollari - ayni kayda Isler ekranindaki filtreyle gider,
    ayri bir liste kopyasi uretmez (BR-V01). Hedef ekranda filtrenin AKTIF
    oldugu acikca gorunur (§8/§20). */
+/* "Dikkat Gerekenler" -> tek ve HER ZAMAN AYNI hedef: Isler / Liste,
+   `Geciken` filtresi acik. Yeni bir dikkat modulu YOK (§5); kart zaten
+   BR-V01 geregi ayni kayitlarin bir goruntusu. Filtre hedef ekranda
+   `Aktif filtre` seridinde acikca gorunur. Acil isler ayni satirdaki
+   mevcut `⚡ Acil` anahtariyla tek tikla eklenir. */
+function dikkatGoruntule(){
+  isGo('liste',{q:'',org:'',phase:'',ilgili:'',acil:false,gec:true,life:['acik','bekliyor']});
+}
 function wsTakipTumu(){
-  isGo('liste',{q:'',org:'',phase:'',ilgili:String((ui._me&&ui._me.id)||''),acil:false,life:['acik','bekliyor']});
+  isGo('liste',{q:'',org:'',phase:'',ilgili:String((ui._me&&ui._me.id)||''),
+                acil:false,gec:false,life:['acik','bekliyor']});
 }
 
 /* ---------- Workspace Mecralar hub (parity audit S1 §2/§9) ----------
@@ -5885,24 +6189,39 @@ function hafCiz(){
          kisiler=kisiler.filter(k=>hafKisiEsles(k,q,telAra,qMail.includes('@')?qMail:'')); }
   else if(st.rol){ kisiler=[]; }
 
-  const kisiSatir=k=>`<button type="button" class="haf-row" onclick="personAc(${k.id})">
+  /* §19 — KISI satiri onem sirasi: 1 ad · 2 kurum baglantilari ·
+     3 telefon/e-posta · 4 unvan. Unvan en sona dustu ve sustu; once
+     ortada durup kurum adiyla yarisiyordu. */
+  const kisiSatir=k=>`<button type="button" class="haf-row" onclick="personAc(${k.id})"
+      title="${esc(k.name)}${k.primaryOrg?' · '+esc(k.primaryOrg):''}">
       <span class="haf-k kisi">Kişi</span>
       <span class="haf-b"><span class="haf-t">${esc(k.name)}${k.active===false?' <span class="pill">pasif</span>':''}</span>
-        <span class="haf-s">${k.primaryOrg?esc(k.primaryOrg):'<span class="muted">kurum bağlantısı yok</span>'}${
+        <span class="haf-s">${k.primaryOrg?`<b>${esc(orgKisa(k.primaryOrg))}</b>`:'<span class="muted">kurum bağlantısı yok</span>'}${
           (k.affs||[]).length>1?` <span class="chip">+${k.affs.length-1} kurum</span>`:''}${
-          k.primaryAff&&k.primaryAff.title?' · '+esc(k.primaryAff.title):''}</span></span>
+          k.primaryAff&&k.primaryAff.title?` <span class="haf-ev">· ${esc(k.primaryAff.title)}</span>`:''}</span></span>
       <span class="haf-r">${k.phone?esc(k.phone):''}${k.phone&&k.email?'<br>':''}${k.email?`<em>${esc(k.email)}</em>`:''}</span></button>`;
 
+  /* §19 — KURUM satiri onem sirasi: 1 gorunen ad · 2 anlamli iliski /
+     aktif is baglami · 3 birincil kisi/telefon · 4 KOKEN EN SONDA.
+     ONCE: uzun tuzel unvan satiri yutuyor, iliski rolleri ve koken
+     rozeti "3 acik is"ten once geliyordu. Ad artik `orgKisa` ile
+     kisaltilir; TAM unvan `title` ile erisilebilir kalir ve kimlik
+     verisine DOKUNULMAZ (S3.1 §8 ile ayni karar). */
   const orgSatir=o=>{
     const roles=Array.isArray(o.relationship_roles)?o.relationship_roles:[];
-    return `<button type="button" class="haf-row" onclick="orgAc(${o.id})">
+    const baglam=[];
+    if(o.is_sayisi) baglam.push(`<b>${o.is_sayisi} açık iş</b>`);
+    if(o.son)       baglam.push(`son hareket ${esc(trTarih(o.son))}`);
+    if(o.kisi_sayisi) baglam.push(`${o.kisi_sayisi} kişi`);
+    if(!baglam.length) baglam.push('<span class="muted">aktif bağlam yok</span>');
+    return `<button type="button" class="haf-row" onclick="orgAc(${o.id})"
+      title="${esc(o.firma||('#'+o.id))}">
       <span class="haf-k kurum">Kurum</span>
-      <span class="haf-b"><span class="haf-t">${esc(o.firma||('#'+o.id))}${o.active===false?' <span class="pill">arşiv</span>':''}</span>
-        <span class="haf-s">${roles.length?roles.map(r=>`<span class="chip">${esc(orgRoleLabel(r))}</span>`).join(' ')+' · ':''}${
-          o.kisi_sayisi?`${o.kisi_sayisi} kişi`:'<span class="muted">kişi yok</span>'}${
-          o.is_sayisi?` · <b>${o.is_sayisi} açık iş</b>`:''}${
-          o.son?` · son hareket ${esc(trTarih(o.son))}`:''}</span></span>
-      <span class="haf-r">${o.telefon?esc(o.telefon):''}${evidencePill(o.relationship_evidence)}</span></button>`;};
+      <span class="haf-b"><span class="haf-t">${esc(orgKisa(o.firma||('#'+o.id),54))}${o.active===false?' <span class="pill">arşiv</span>':''}</span>
+        <span class="haf-s">${baglam.join(' · ')}${
+          roles.length?' '+roles.map(r=>`<span class="chip">${esc(orgRoleLabel(r))}</span>`).join(' '):''}${
+          o.relationship_evidence?` <span class="haf-ev">· ${esc(evidenceLabel(o.relationship_evidence))}</span>`:''}</span></span>
+      <span class="haf-r">${o.primary_contact?esc(o.primary_contact):''}${o.primary_contact&&o.telefon?'<br>':''}${o.telefon?`<em>${esc(o.telefon)}</em>`:''}</span></button>`;};
 
   if(st.tab==='kisiler'){
     kisiler=kisiler.slice().sort((a,b)=>String(a.name||'').localeCompare(String(b.name||''),'tr'));
@@ -5921,7 +6240,8 @@ function hafCiz(){
       String(b.son||'').localeCompare(String(a.son||'')) ||
       (b.kisi_sayisi-a.kisi_sayisi) ||
       String(a.firma||'').localeCompare(String(b.firma||''),'tr'));
-    box.innerHTML=hafSay(sirali.length,'kurum')+(sirali.length
+    box.innerHTML=(q?'':'<p class="haf-hint">Tüm kurumlar — açık işi olan ve son hareket eden önce.</p>')
+      +hafSay(sirali.length,'kurum')+(sirali.length
       ?sirali.slice(0,300).map(orgSatir).join('')+(sirali.length>300
         ?'<p class="muted" style="font-size:12.5px;padding:8px 2px">İlk 300 kayıt gösteriliyor — aramayı daraltın.</p>':'')
       :'<p class="empty">Eşleşen kurum yok.</p>');
@@ -5930,13 +6250,19 @@ function hafCiz(){
   /* Tümü: karışık sonuç. Arama yokken devasa liste dökmek yerine kısa bir
      "işe yarayan" kesit gösterilir (§11). */
   if(!q && !st.rol){
+    /* §18: arama yokken PSEUDO-DIZIN dokulmez. 531 kurum + 22 kisi
+       gorunum yuksekligini doldurmaz; yalniz "isine yarayan" kisa bir
+       kesit gosterilir. Tam dolasim `Kurumlar` sekmesinde (§20). */
     const aktifOrg=orgs.filter(o=>o.is_sayisi>0)
-      .sort((a,b)=>String(b.son||'').localeCompare(String(a.son||''))).slice(0,8);
-    const sonKisi=kisiler.slice().sort((a,b)=>b.id-a.id).slice(0,6);
-    box.innerHTML=`<p class="haf-hint">Aramaya başlayın — isim, kurum, telefon veya e-posta.
-        Aşağıda aktif işi olan kurumlar ve son eklenen kişiler var.</p>
+      .sort((a,b)=>String(b.son||'').localeCompare(String(a.son||''))).slice(0,6);
+    const sonKisi=kisiler.slice().sort((a,b)=>b.id-a.id).slice(0,5);
+    box.innerHTML=`<p class="haf-hint"><b>Aramaya başlayın.</b>
+        İsim, kurum, telefon ya da e-posta yazın — telefonu nasıl yazdığınız önemli değil.
+        ${orgs.length} kurum ve ${kisiler.length} kişi aranıyor.</p>
       ${aktifOrg.length?`<div class="haf-grp">Aktif işi olan kurumlar</div>`+aktifOrg.map(orgSatir).join(''):''}
-      ${sonKisi.length?`<div class="haf-grp">Son eklenen kişiler</div>`+sonKisi.map(kisiSatir).join(''):''}`;
+      ${sonKisi.length?`<div class="haf-grp">Son eklenen kişiler</div>`+sonKisi.map(kisiSatir).join(''):''}
+      ${orgs.length>aktifOrg.length?`<p class="haf-hint" style="margin:12px 0 0">
+        Tüm kurumları gezmek için <button type="button" class="btn-link" onclick="hafTab('kurumlar')">Kurumlar</button> sekmesini kullanın.</p>`:''}`;
     return;
   }
   const toplam=orgs.length+kisiler.length;
@@ -5958,6 +6284,7 @@ function orgListe(){ hafCiz(); }
 async function orgAc(id){
   const d=await guard(()=>api('org_detail&id='+id),'Kurum açılamadı'); if(!d)return;
   ui._org=d.org; ui._orgContacts=d.contacts; ui._orgDetay=d;
+  navKayit('org',ui.section,d.org.id,orgKisa(d.org.firma,30));
   const o=d.org, roles=Array.isArray(o.relationship_roles)?o.relationship_roles:[];
   const jobs=d.jobs||[], ents=d.entries||[], quotes=d.quotes||[];
   const acik=jobs.filter(j=>(j.lifecycle_status||'acik')!=='kapandi');
@@ -5971,7 +6298,7 @@ async function orgAc(id){
                .filter(Boolean).join('<br>');
 
   c.innerHTML=`<div class="sec-head">
-      <div><h3><button class="btn btn-ghost btn-sm" onclick="go('kurumlar')">‹ Hafıza</button> ${esc(o.firma||('#'+o.id))}</h3>
+      <div><h3>${geriBtn('kurumlar')} ${esc(o.firma||('#'+o.id))}</h3>
         <p class="sub">${roles.length?roles.map(r=>`<span class="chip">${esc(orgRoleLabel(r))}</span>`).join(' ')
             :'<span class="muted">ilişki rolü tanımlı değil</span>'}${
           acik.length?` · <b>${acik.length} açık iş</b>`:''}${d.contacts.length?` · ${d.contacts.length} kişi`:''}</p></div>
@@ -6175,12 +6502,13 @@ async function personSave(){
 async function personAc(id){
   const d=await guard(()=>api('person_detail&id='+id),'Kişi açılamadı'); if(!d)return;
   ui._person=d.person; ui._personAffs=d.affiliations;
+  navKayit('kisi',ui.section,d.person.id,d.person.name);
   const k=d.person, affs=d.affiliations||[], jobs=d.jobs||[], ents=d.entries||[];
   const tm={}; (ui._team||[]).forEach(t=>tm[t.id]=t.name);
   const pr=affs.find(a=>a.is_primary&&a.active)||affs[0]||null;
   const c=document.getElementById('content');
   c.innerHTML=`<div class="sec-head">
-      <div><h3><button class="btn btn-ghost btn-sm" onclick="go('kurumlar')">‹ Hafıza</button> ${esc(k.name)}</h3>
+      <div><h3>${geriBtn('kurumlar')} ${esc(k.name)}</h3>
         <p class="sub">${pr?`${esc(pr.firma)}${pr.title?' · '+esc(pr.title):''}`:'<span class="muted">kurum bağlantısı yok</span>'}${
           affs.length>1?` · <span class="chip">${affs.length} kurum</span>`:''}${k.active===false?' · <span class="pill">pasif</span>':''}</p></div>
       <div style="display:flex;gap:8px">

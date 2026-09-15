@@ -105,7 +105,18 @@ if ($Reset) {
     # Local only. `db reset --linked` is forbidden by policy and is never
     # used here (LOCAL_DEV_SETUP.md §3).
     # Same invocation dev-start.ps1 uses - the CLI is not on PATH here.
-    npx --yes supabase@latest db reset
+    # `supabase db reset` writes progress lines ("Resetting local
+    # database...") to STDERR. Under $ErrorActionPreference = 'Stop',
+    # PowerShell 5.1 promotes any native command's stderr to a terminating
+    # NativeCommandError, so this aborted after a SUCCESSFUL reset. Trust
+    # the exit code, not the stream -- same fix as dev-start.ps1.
+    $prevEAP = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        npx --yes supabase@latest db reset
+    } finally {
+        $ErrorActionPreference = $prevEAP
+    }
     if ($LASTEXITCODE -ne 0) { throw "supabase db reset failed (exit $LASTEXITCODE)" }
     Write-Host "    Local DB rebuilt." -ForegroundColor Green
 } else {
