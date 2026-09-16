@@ -510,6 +510,12 @@ async function api(action, body){
       if(q.job_id)        sel=sel.eq('job_id',q.job_id);
       if(q.assignee_id)   sel=sel.eq('assignee_id',q.assignee_id);
       if(q.action_status) sel=sel.eq('action_status',q.action_status);
+      /* S4.3.1: kisisel takvim bir AYIN terminlerini okur. Olusturma
+         zamanina gore son N kayit penceresi eski ya da ileri tarihli
+         terminleri kacirabilirdi. Gun sonu dahil (lt ertesi gun). */
+      if(q.due_from) sel=sel.gte('due_at',q.due_from);
+      if(q.due_to){ const e=new Date(q.due_to+'T00:00:00'); e.setDate(e.getDate()+1);
+        sel=sel.lt('due_at',_cIso(e)); }
       /* `occurred_at` tek basina BENZERSIZ DEGIL (gercek veride esit
          damgali satirlar var). Sayfalama geldikten sonra esitlik bir
          sayfa sinirina denk gelirse ayni satir iki sayfada gorunup
@@ -1032,6 +1038,7 @@ function navEtiket(v,s,id,ad){
   if(v==='work') return ad||'İş';
   if(v==='org')  return ad||'Kurum';
   if(v==='kisi') return ad||'Kişi';
+  if(v==='ajanda') return 'Ajandam';
   return TITLES[s]||'Panel';
 }
 const navAyni=(a,b)=>!!a&&!!b&&a.v===b.v&&String(a.id||'')===String(b.id||'')&&a.s===b.s;
@@ -1064,11 +1071,23 @@ async function navUygula(st){
   if(ui._dirty && typeof dirtyGuard==='function' && !(await dirtyGuard())){
     if(_navSon){ try{ history.pushState(_navSon,'',location.href); }catch(e){} }
     return; }
+  /* S4.3.1 §13: acik bir diyalog varken tarayici Geri once DIYALOGU kapatir,
+     ekrandan AYRILMAZ. Ornek: Ajandam Takvim -> etkinlik duzenle -> Geri;
+     kullanici takvimde kalmali. Ayrildigimiz girdi geri itilir. */
+  const mbg=document.getElementById('modalBg');
+  if(mbg&&mbg.classList.contains('open')){
+    closeModal();
+    if(_navSon){ try{ history.pushState(_navSon,'',location.href); }catch(e){} }
+    return; }
   _navSon=st;
   _navPop=true;
   try{
     if(st.s&&ui.section!==st.s){ ui.section=st.s; navCiz();
       const t=document.getElementById('ttl'); if(t) t.textContent=TITLES[st.s]||''; }
+    /* Ajandam gorunumu gecmis durumundan TURETILIR: 'ajanda' girdisi
+       Takvim, Panelim'in 'sec' girdisi Liste demektir. */
+    if(st.v==='ajanda')      ui._ajGor='takvim';
+    else if(st.v==='sec')    ui._ajGor='liste';
     if(st.v==='work')       await workAc(st.id);
     else if(st.v==='org')   await orgAc(st.id);
     else if(st.v==='kisi')  await personAc(st.id);
@@ -1106,6 +1125,7 @@ async function go(s){ if(typeof dirtyGuard==='function' && !(await dirtyGuard())
     s='workspace-home';
   }
   ui.section=s;
+  ui._ajGor='liste';                           /* bolume girmek Ajandam'i Liste'de acar */
   const g=navGrupOf(s);                        /* kapali gruptaki bolume gidilirse grubu ac */
   if(g){ const set=navAcikGruplar(); if(!set.has(g)){ set.add(g); try{localStorage.setItem('mp_nav_acik',JSON.stringify([...set]));}catch(e){} } }
   navCiz();
@@ -2187,6 +2207,55 @@ function tkvOlaylar(D,ops,f){
   return ev;
 }
 
+/* ============ PAYLASILAN AY IZGARASI (S4.3.1 §3) =======================
+   Iki takvim var ve VERI KAPSAMLARI farkli, mekanikleri degil:
+     - Isler -> Takvim  : paylasilan SIRKET operasyon takvimi
+     - Ajandam -> Takvim: KISISEL takvim (kisisel etkinlik + bana ilgili
+                          sirket olaylari)
+   Izgara, hucre, "+N" tasmasi, bugun/secili isaretleri ve ay gezinmesi
+   burada TEK yerde. Cagiran yalniz olay haritasini, gun/ay tiklama
+   fonksiyonlarinin adlarini ve olay->sinif eslemesini verir.
+   Once bu kod `isTakvim` icine gomuluydu; ikinci bir bagimsiz takvim
+   renderer'i kopyalamak yerine parametrelestirildi.
+   Ay adlari mevcut global `AY_UZUN`dan okunur (dosyada zaten tanimli). */
+function takvimIzgara(o){
+  const ilk=new Date(o.y,o.m,1).getDay(), kaydir=(ilk+6)%7, gunSay=new Date(o.y,o.m+1,0).getDate();
+  const bugun=_cIso(new Date());
+  let hc='';
+  for(let i=0;i<kaydir;i++) hc+='<span class="tk-bos"></span>';
+  for(let d=1;d<=gunSay;d++){
+    const iso=o.y+'-'+pad(o.m+1)+'-'+pad(d);
+    const list=o.gunMap[iso]||[];
+    /* PS1.1 §21: hucrede okunabilir kompakt olay satirlari; dev kart YOK.
+       Yogun gunlerde ilk ikisi gosterilir, gerisi "+N". */
+    const goster=list.slice(0,2), kalan=list.length-goster.length;
+    hc+=`<button type="button" class="tk-d${iso===bugun?' tk-today':''}${iso===o.secili?' tk-sel':''}${list.length?' tk-has':''}"
+      onclick="${o.gunTik}('${iso}')" aria-pressed="${iso===o.secili}"
+      aria-label="${d} ${AY_UZUN[o.m]}${list.length?', '+list.length+' kayıt':''}"
+      title="${esc(list.map(x=>x.baslik).join(' · '))}">
+      <span class="tk-n">${d}${list.length>1?`<em class="tk-c">${list.length}</em>`:''}</span>
+      ${list.length?`<span class="tk-evs">
+        ${goster.map(x=>`<span class="tk-ev ${o.evSinif(x)}${x.gec?' gec':''}${x.acil?' acil':''}">
+            <i></i><b>${esc(String(x.baslik||'').slice(0,26))}</b></span>`).join('')}
+        ${kalan>0?`<span class="tk-ev more">+${kalan}</span>`:''}</span>`:''}
+    </button>`;
+  }
+  return `<div class="sec-card tk-wrap">
+      <div class="tk-h">
+        <div class="tk-nav">
+          <button class="btn btn-outline btn-sm" onclick="${o.navOnceki}" title="Önceki ay" aria-label="Önceki ay">‹</button>
+          <b>${AY_UZUN[o.m]} ${o.y}</b>
+          <button class="btn btn-outline btn-sm" onclick="${o.navSonraki}" title="Sonraki ay" aria-label="Sonraki ay">›</button>
+          <button class="btn btn-ghost btn-sm" onclick="${o.navBugun}">Bugün</button>
+        </div>
+        ${o.sagHtml||''}
+      </div>
+      <div class="tk-grid tk-head"><span>Pzt</span><span>Sal</span><span>Çar</span><span>Per</span><span>Cum</span><span>Cmt</span><span>Paz</span></div>
+      <div class="tk-grid">${hc}</div>
+      ${o.lejantHtml?`<div class="tk-lgnd">${o.lejantHtml}</div>`:''}
+    </div>`;
+}
+
 async function isTakvim(box,D,f){
   const st=tkvDurum();
   const [from,to,ayBase]=tkvAralik(st.ay);
@@ -2198,33 +2267,8 @@ async function isTakvim(box,D,f){
 
   const gunMap={}; ev.forEach(e=>(gunMap[e.d]=gunMap[e.d]||[]).push(e));
   const y=ayBase.getFullYear(), m=ayBase.getMonth();
-  const AY=['Ocak','Şubat','Mart','Nisan','Mayıs','Haziran','Temmuz','Ağustos','Eylül','Ekim','Kasım','Aralık'];
-  const ilk=new Date(y,m,1).getDay(), kaydir=(ilk+6)%7, gunSay=new Date(y,m+1,0).getDate();
   const bugun=_cIso(new Date());
   const secili=st.gun|| (gunMap[bugun]?bugun:null);
-
-  let hc='';
-  for(let i=0;i<kaydir;i++) hc+='<span class="tk-bos"></span>';
-  for(let d=1;d<=gunSay;d++){
-    const iso=y+'-'+pad(m+1)+'-'+pad(d);
-    const list=gunMap[iso]||[];
-    /* PS1.1 §21: eskiden burada yalnizca minik yesil/kirmizi sayi kareleri
-       vardi - neyin oldugunu anlamak icin gune tiklamak gerekiyordu.
-       Artik okunabilir kompakt olay satirlari var: tur, kisa metin ve
-       gecikme/acil durumu. Hucre icinde dev kart YOK; yogun gunlerde
-       ilk ikisi gosterilip gerisi "+N" ile ozetlenir. */
-    const gec=list.some(x=>x.gec);
-    const goster=list.slice(0,2), kalan=list.length-goster.length;
-    hc+=`<button type="button" class="tk-d${iso===bugun?' tk-today':''}${iso===secili?' tk-sel':''}${list.length?' tk-has':''}"
-      onclick="tkvGun('${iso}')" aria-pressed="${iso===secili}"
-      title="${esc(list.map(x=>x.baslik).join(' · '))}">
-      <span class="tk-n">${d}${list.length>1?`<em class="tk-c">${list.length}</em>`:''}</span>
-      ${list.length?`<span class="tk-evs">
-        ${goster.map(x=>`<span class="tk-ev ${x.tip==='op'?'op':'takip'}${x.gec?' gec':''}${x.acil?' acil':''}">
-            <i></i><b>${esc(String(x.baslik||'').slice(0,26))}</b></span>`).join('')}
-        ${kalan>0?`<span class="tk-ev more">+${kalan}</span>`:''}</span>`:''}
-    </button>`;
-  }
 
   /* Seçili günün ajandası — "Bugün ne yapmamız gerekiyor?" */
   const gunList=(secili?(gunMap[secili]||[]):[])
@@ -2242,21 +2286,15 @@ async function isTakvim(box,D,f){
            <em>${e.job?esc(e.job.title):''}${e.org?' · '+esc(e.org):''}${e.yer?' · '+esc(e.yer):''}${e.tedarik?' · '+esc(e.tedarik):''}</em></span>
          <span class="tk-i-r"><span class="badge-st st-${esc(e.durum)}">${esc(opStatLbl(e.durum))}</span></span>
        </button>`).join('')
-    : `<p class="empty">${secili?'Bu gün için planlanmış takip veya baskı/montaj yok.':'Bir gün seçin.'}</p>`;
+    : `<p class="empty">${secili?'Bu gün için planlanmış güncelleme veya baskı/montaj yok.':'Bir gün seçin.'}</p>`;
 
   const sub=document.getElementById('coordSub');
-  if(sub) sub.textContent=`${ev.length} kayıt · ${AY[m]} ${y} · takip terminleri ve baskı/montaj planları`;
+  if(sub) sub.textContent=`${ev.length} kayıt · ${AY_UZUN[m]} ${y} · güncelleme terminleri ve baskı/montaj planları`;
 
-  box.innerHTML=`
-    <div class="sec-card tk-wrap">
-      <div class="tk-h">
-        <div class="tk-nav">
-          <button class="btn btn-outline btn-sm" onclick="tkvAy(-1)" title="Önceki ay">‹</button>
-          <b>${AY[m]} ${y}</b>
-          <button class="btn btn-outline btn-sm" onclick="tkvAy(1)" title="Sonraki ay">›</button>
-          <button class="btn btn-ghost btn-sm" onclick="tkvBugun()">Bugün</button>
-        </div>
-        <div class="tk-f">
+  const izgara=takvimIzgara({y,m,gunMap,secili,
+    gunTik:'tkvGun', evSinif:x=>x.tip==='op'?'op':'takip',
+    navOnceki:'tkvAy(-1)', navSonraki:'tkvAy(1)', navBugun:'tkvBugun()',
+    sagHtml:`<div class="tk-f">
           <div class="ws-switch inline tk-src" role="group" aria-label="Kaynak filtresi">
             <button type="button" class="${!st.kaynak?'on':''}" onclick="tkvKaynak('')">Tümü</button>
             ${TKV_KAYNAK.map(([k,l])=>`<button type="button" class="${st.kaynak===k?'on':''}" onclick="tkvKaynak('${k}')">${esc(l)}</button>`).join('')}
@@ -2266,15 +2304,13 @@ async function isTakvim(box,D,f){
             <option value="me" ${f.ilgili==='me'?'selected':''}>Benim</option>
             ${(D.team||[]).filter(t=>t.active!==false).map(t=>`<option value="${t.id}" ${String(f.ilgili)===String(t.id)?'selected':''}>${esc(t.name)}</option>`).join('')}
           </select>
-        </div>
-      </div>
-      <div class="tk-grid tk-head"><span>Pzt</span><span>Sal</span><span>Çar</span><span>Per</span><span>Cum</span><span>Cmt</span><span>Paz</span></div>
-      <div class="tk-grid">${hc}</div>
-      <div class="tk-lgnd">
-        <span><i class="tk-p tk-takip"></i> Takip (aksiyon termini)</span>
-        <span><i class="tk-p tk-op"></i> Baskı & Montaj (planlanan)</span>
-      </div>
-    </div>
+        </div>`,
+    /* S4.3 §11 artigi: gosterge hala "Takip" diyordu; kaynak filtresi ve
+       rozetler "Günc." olmustu. Ayni dile cekildi. */
+    lejantHtml:`<span><i class="tk-p tk-takip"></i> Güncelleme (termin)</span>
+        <span><i class="tk-p tk-op"></i> Baskı & Montaj (planlanan)</span>`});
+
+  box.innerHTML=`${izgara}
     <section class="sec-card">
       <div class="sec-head" style="margin-bottom:8px">
         <h4 style="font-size:14px;margin:0">${secili?esc(trTarih(secili)):'Gün'} <span class="chip">${gunList.length}</span></h4>
@@ -3688,7 +3724,15 @@ function surfaceSwitchHtml(){
 
    Sirket panosu bilesenleri (dash*Card) burada CAGRILMAZ; Admin
    Dashboard onlari aynen kullanmaya devam eder. */
-const _wsIso=d=>d.toISOString().slice(0,10);
+/* S4.3.1 — BUG DUZELTMESI. Eskiden `d.toISOString().slice(0,10)` idi, yani
+   UTC takvim gunu. Turkiye UTC+3 oldugu icin her gece 00:00-03:00 arasi
+   Panelim "bugun"u DUN olarak hesapliyordu: bugun terminli `15:30 Dişçi`
+   Ajandam Listesinde "Yarın" altinda gorunuyor, ayni anda Ajandam
+   Takviminde (yerel `_cIso` kullanan) dogru gunde duruyordu - ayni veri
+   kumesinin iki gorunumu "bugun" konusunda anlasamiyordu. QA 01:14'te
+   calistigi icin ortaya cikti. Tum cagiranlar (bugun, yarin, 14 gunluk
+   ufuk, ISO hafta araligi) YEREL takvim gunu istiyor. */
+const _wsIso=d=>_cIso(d);
 const PS_AY=['Oca','Şub','Mar','Nis','May','Haz','Tem','Ağu','Eyl','Eki','Kas','Ara'];
 /* Olusturma zamani: "14 Eyl · 11:50". Belirsizlik birakmaz, hover
    gerektirmez (§6). */
@@ -3784,6 +3828,9 @@ function psBenimMi(e,benim,ilgiSet,takipJobs){
 }
 
 async function workspaceHome(c){
+  /* S4.3.1: Ajandam Takvim gorunumu Panelim'in bir DURUMU. Yeni bir yan
+     menu modulu ya da ayri bir takvim uygulamasi degil. */
+  if(ui._ajGor==='takvim') return ajandaTakvim(c);
   const [h1,h2]=wsHafta();
   const st=psDurum();
   const benim=(ui._me&&ui._me.id)||0;
@@ -3814,7 +3861,6 @@ async function workspaceHome(c){
   const tm={}; (team||[]).forEach(t=>tm[t.id]=t.name);
   ui._opJobs=jm; ui._opCust=cm;
   ui._kisisel=kisisel||[];                   /* keForm duzenlemede buradan okur */
-  ui._ajandaAcik=false;
 
   /* entry_id -> [team_id] ve benim etiketlerim */
   ui._contactMap={}; (kisiler||[]).forEach(k=>ui._contactMap[k.id]=k);
@@ -3986,25 +4032,18 @@ async function workspaceHome(c){
      Bir operasyon ajandamdadir eger Work'unu takip ediyorsam (d).
      Kisisel etkinlikler her zaman dahildir - zaten yalniz benim.
      Sirketin geri kalani `İşler → Takvim`de kalir (§24). */
-  const ajandaIlgili=e=>
-    ilgiSet.has(e.id) ||
-    (benim && e.assignee_id===benim) ||
-    (benim && e.created_by_team_id===benim) ||
-    (e.job_id && takipJobs.has(e.job_id));
+  /* Kisisel ilgi kurallari artik TEK yerde: `ajandaOlaylar` (S4.3.1).
+     Liste ve Takvim ayni veri kumesinin iki gorunumu; kurallar iki kez
+     yazilirsa bir gun ayrisirlar. Liste yalniz kendi sunum kurallarini
+     uygular: gecikmis GUNC. bugunun ustunde toplanir, gecmis operasyon
+     ve gecmis kisisel etkinlik listede yer tutmaz, ufuk 14 gun. */
   const ajanda={};
-  tumEnt.filter(e=>e.due_at&&ajandaIlgili(e)).forEach(e=>{
-    const d=String(e.due_at).slice(0,10);
-    if(d>ufukIso) return;
-    /* Kapanmis bir aksiyon ajandada yer tutmaz. */
-    if(e.action_status==='done'||e.action_status==='cancelled') return;
-    const k=d<bugun?bugun:d;               /* gecikmisler bugunun ustunde toplanir */
-    (ajanda[k]=ajanda[k]||[]).push({t:'takip',gec:d<bugun,d,e}); });
-  (ops||[]).filter(o=>o.planned_date&&o.planned_date>=bugun&&o.planned_date<=ufukIso
-                      &&o.job_id&&takipJobs.has(o.job_id))
-    .forEach(o=>{ (ajanda[o.planned_date]=ajanda[o.planned_date]||[]).push({t:'op',d:o.planned_date,o}); });
-  /* Kisisel etkinlikler (§17): yalniz sahibinde gorunur. */
-  (kisisel||[]).filter(k=>k.event_date>=bugun&&k.event_date<=ufukIso)
-    .forEach(k=>{ (ajanda[k.event_date]=ajanda[k.event_date]||[]).push({t:'ozel',d:k.event_date,k}); });
+  ajandaOlaylar({ents:tumEnt,ops,kisisel,ilgiSet,takipJobs,benim}).forEach(x=>{
+    if(x.d>ufukIso) return;
+    if(x.t==='takip'){ const k=x.d<bugun?bugun:x.d; (ajanda[k]=ajanda[k]||[]).push(x); return; }
+    if(x.d<bugun) return;
+    (ajanda[x.d]=ajanda[x.d]||[]).push(x);
+  });
   Object.keys(ajanda).forEach(d=>ajanda[d].sort((a,b)=>
     (a.t==='ozel'?(a.k.event_time||'99'):'00').localeCompare(b.t==='ozel'?(b.k.event_time||'99'):'00')));
   const gunler=Object.keys(ajanda).filter(d=>d>=bugun).sort().slice(0,7);
@@ -4135,10 +4174,14 @@ async function workspaceHome(c){
           ${/* §20: kart artik KISISEL. Ust-sag eylem kullaniciyi dogrudan
                sirket operasyon takvimine atmiyor; kendi genisletilmis
                kisisel takvimini aciyor (§21). */''}
+          ${/* S4.3.1 §2: Ajandam'in IKI gorunumu var. Onceki "Takvim"
+               baglantisi ayni kronolojik listeyi buyuk bir modalde
+               aciyordu - takvim degildi. Artik gercek bir ay izgarasina
+               gecen gorunur bir anahtar. */''}
           <div class="card-h"><h3>Ajandam</h3>
-            <div style="display:flex;gap:4px;align-items:center">
+            <div style="display:flex;gap:8px;align-items:center">
               <button class="btn-link ekle" onclick="keForm(0)" title="Yalnız sizin göreceğiniz bir etkinlik ekleyin">+ Kişisel</button>
-              <button class="btn-link" onclick="ajandaAc()">Takvim</button>
+              ${ajandaAnahtar('liste')}
             </div></div>
           <div class="card-b pa-list">${tkvHtml}</div></section>
 
@@ -4160,7 +4203,160 @@ async function workspaceHome(c){
    Panelim'in icinde bir modal yuzeydir. `İşler → Takvim` paylasilan
    SIRKET operasyon takvimi olarak aynen kalir ve kisisel etkinlikleri
    ASLA gostermez (§24). */
-function keForm(id){
+/* ---- Kisisel ilgi kurallari — TEK kaynak (S4.3 §19, S4.3.1 §4) ----
+   Liste ve Takvim bu fonksiyonu kullanir. Olaylar GERCEK tarihlerinde
+   doner; gecikmisleri bugune toplamak gibi sunum kararlari cagirana aittir.
+   Tarihli bir Entry benimdir eger:
+     (a) o guncellemede ETIKETLIYSEM        (entry_relevance)
+     (b) BANA ATANMISSA                     (legacy assignee_id)
+     (c) onu BEN YAZDIYSAM                  (kendi verdigim soz)
+     (d) bagli oldugu Work'u TAKIP EDIYORSAM (work_followers)
+   Operasyon benimdir eger Work'unu takip ediyorsam (d).
+   Kisisel etkinlikler her zaman dahildir - RLS zaten yalniz benimkileri verir.
+   Kapali aksiyonlar ve IPTAL edilmis operasyonlar kisisel takvimde yer tutmaz.
+   Sirketin geri kalani `İşler → Takvim`de kalir. */
+function ajandaOlaylar(x){
+  const benim=x.benim||0;
+  const bugun=_cIso(new Date());
+  const ilgili=e=> x.ilgiSet.has(e.id) || (benim&&e.assignee_id===benim)
+                || (benim&&e.created_by_team_id===benim)
+                || (e.job_id&&x.takipJobs.has(e.job_id));
+  const ev=[];
+  (x.ents||[]).forEach(e=>{
+    if(!e.due_at||!ilgili(e)) return;
+    if(e.action_status==='done'||e.action_status==='cancelled') return;
+    const d=String(e.due_at).slice(0,10);
+    ev.push({t:'takip',d,e,baslik:e.body,gec:d<bugun,acil:!!e.is_urgent});
+  });
+  (x.ops||[]).forEach(o=>{
+    if(!o.planned_date||!o.job_id||!x.takipJobs.has(o.job_id)) return;
+    if(o.status==='cancelled') return;
+    const d=String(o.planned_date).slice(0,10);
+    ev.push({t:'op',d,o,baslik:o.description||opTypeLbl(o.operation_type),
+      gec:d<bugun&&['planned','waiting','in_progress'].includes(o.status)});
+  });
+  (x.kisisel||[]).forEach(k=>{
+    ev.push({t:'ozel',d:k.event_date,k,
+      baslik:(k.event_time?String(k.event_time).slice(0,5)+' ':'')+k.title});
+  });
+  return ev;
+}
+
+/* ---- Liste | Takvim anahtari (S4.3.1 §2) ---- */
+function ajandaAnahtar(aktif){
+  return `<div class="ws-switch inline aj-sw" role="group" aria-label="Ajandam görünümü">
+    <button type="button" class="${aktif==='liste'?'on':''}" aria-pressed="${aktif==='liste'}" onclick="ajandaGor('liste')">Liste</button>
+    <button type="button" class="${aktif==='takvim'?'on':''}" aria-pressed="${aktif==='takvim'}" onclick="ajandaGor('takvim')">Takvim</button>
+  </div>`;
+}
+/* Gorunum degisimi S4.1 gecmis mekanizmasiyla kaydedilir; yeni router YOK.
+   Takvim'e gecis bir girdi ekler, boylece tarayici Geri Listeye doner.
+   Takvim'den Liste'ye gecis, girdi zaten bizimse GERI sarar (ikinci bir
+   ileri girdi biriktirmez). */
+function ajandaGor(v){
+  if(v==='takvim'){
+    if(ui._ajGor==='takvim') return;
+    ui._ajGor='takvim';
+    ui._ajTkv=ui._ajTkv||{ay:0,gun:null};
+    navKayit('ajanda','workspace-home',0);
+    renderSection(); window.scrollTo(0,0);
+    return;
+  }
+  const st=history.state;
+  if(st&&st.mp&&st.v==='ajanda'&&(st.i||0)>0){ history.back(); return; }
+  ui._ajGor='liste'; renderSection();
+}
+function ajTkvAy(delta){ const t=ui._ajTkv||{ay:0,gun:null}; ui._ajTkv={ay:t.ay+delta,gun:null}; renderSection(); }
+function ajTkvBugun(){ ui._ajTkv={ay:0,gun:_cIso(new Date())}; renderSection(); }
+function ajTkvGun(iso){ ui._ajTkv={...(ui._ajTkv||{ay:0}),gun:iso}; renderSection(); }
+
+/* ---- Ajandam Takvim: GERCEK ay izgarasi (S4.3.1 §1, §6-§8) ----
+   Isler -> Takvim ile AYNI `takvimIzgara` renderer'i; yalniz veri kapsami
+   farkli (`ajandaOlaylar`). Tek tur toplu okuma; gun ya da Work basina
+   sorgu YOK. */
+async function ajandaTakvim(c){
+  const t=ui._ajTkv||{ay:0,gun:null};
+  const [from,to,ayBase]=tkvAralik(t.ay);
+  const benim=(ui._me&&ui._me.id)||0;
+  const veri=await guard(()=>Promise.all([
+    api(`personal_events_list&from=${from}&to=${to}`),
+    /* Termin araligina gore okunur: "son 400 guncelleme" penceresi gecmis
+       ya da ileri bir ayin terminlerini kacirabilirdi. */
+    api(`entries_list&due_from=${from}&due_to=${to}&limit=1000`),
+    api(`operations_list&from=${from}&to=${to}&limit=1000`),
+    api('jobs_list'),
+    api('entry_relevance_all&team_id='+benim).catch(()=>[]),
+    api('work_followers_all&team_id='+benim).catch(()=>[])
+  ]),'Ajanda açılamadı');
+  if(!veri) return;
+  const [ozel,ents,ops,jobs,ilgi,takip]=veri;
+  ui._kisisel=ozel||[];
+  const jm={}; (jobs||[]).forEach(j=>jm[j.id]=j);
+  const ev=ajandaOlaylar({ents,ops,kisisel:ozel,benim,
+    ilgiSet:new Set((ilgi||[]).map(r=>r.entry_id)),
+    takipJobs:new Set((takip||[]).map(r=>r.job_id))});
+
+  const gunMap={}; ev.forEach(x=>(gunMap[x.d]=gunMap[x.d]||[]).push(x));
+  /* Hucre icinde de gun listesinde de ONCE kendi etkinliklerim (saate
+     gore), sonra sirket olaylari - kompakt Liste ile ayni sira. */
+  const sira=(a,b)=>{ const oa=a.t==='ozel'?0:1, ob=b.t==='ozel'?0:1;
+    if(oa!==ob) return oa-ob;
+    return oa===0?String(a.k.event_time||'99').localeCompare(String(b.k.event_time||'99')):0; };
+  Object.keys(gunMap).forEach(d=>gunMap[d].sort(sira));
+
+  const y=ayBase.getFullYear(), m=ayBase.getMonth();
+  const bugun=_cIso(new Date());
+  const ayIci=d=>d&&d.slice(0,7)===y+'-'+pad(m+1);
+  const secili=(t.gun&&ayIci(t.gun))?t.gun:(ayIci(bugun)?bugun:null);
+
+  const izgara=takvimIzgara({y,m,gunMap,secili,
+    gunTik:'ajTkvGun',
+    evSinif:x=>x.t==='ozel'?'ozel':(x.t==='op'?'op op-'+x.o.operation_type:'takip'),
+    navOnceki:'ajTkvAy(-1)', navSonraki:'ajTkvAy(1)', navBugun:'ajTkvBugun()',
+    sagHtml:`<div class="tk-f">${ajandaAnahtar('takvim')}</div>`,
+    lejantHtml:`<span><i class="tk-p tk-ozel"></i> Kişisel (yalnız siz)</span>
+      <span><i class="tk-p tk-takip"></i> Güncelleme (size bağlı termin)</span>
+      <span><i class="tk-p tk-op"></i> Baskı & Montaj (takip ettiğiniz iş)</span>`});
+
+  /* §8: secili gunun kisisel gorunumu + o tarihle on-dolu `+ Kişisel etkinlik`. */
+  const gunList=secili?(gunMap[secili]||[]):[];
+  const satir=x=>x.t==='ozel'
+    ? `<button type="button" class="tk-i" onclick="keForm(${x.k.id})">
+         <span class="tk-i-k tk-ozel">Kişisel</span>
+         <span class="tk-i-b"><b>${x.k.event_time?esc(String(x.k.event_time).slice(0,5))+' · ':''}${esc(x.k.title)}</b>
+           <em>${x.k.note?esc(x.k.note):'yalnız siz görürsünüz'}</em></span>
+         <span class="tk-i-r"><span class="muted">düzenle</span></span></button>`
+    : x.t==='takip'
+    ? `<button type="button" class="tk-i" onclick="${x.e.job_id?`workAc(${x.e.job_id})`:'void 0'}">
+         <span class="tk-i-k tk-takip">Günc.</span>
+         <span class="tk-i-b"><b>${esc(x.e.body)}</b>
+           <em>${x.e.job_id&&jm[x.e.job_id]?esc(jm[x.e.job_id].title):'<i>işe bağlı değil</i>'}</em></span>
+         <span class="tk-i-r">${x.gec?'<span class="pill clay">gecikti</span>':(x.acil?'<span class="pill clay">ACİL</span>':'')}</span></button>`
+    : `<button type="button" class="tk-i" onclick="workAc(${x.o.job_id})">
+         <span class="tk-i-k tk-op">${esc(opTypeLbl(x.o.operation_type))}</span>
+         <span class="tk-i-b"><b>${esc(x.baslik)}</b>
+           <em>${jm[x.o.job_id]?esc(jm[x.o.job_id].title):''}</em></span>
+         <span class="tk-i-r"><span class="badge-st st-${esc(x.o.status)}">${esc(opStatLbl(x.o.status))}</span></span></button>`;
+
+  c.innerHTML=`<div class="sec-head">
+      <div><h3>Ajandam</h3>
+        <p class="sub">Kişisel takviminiz — kendi etkinlikleriniz ve size bağlı şirket tarihleri.
+          Şirketin tamamı <button type="button" class="btn-link" style="padding:0 2px;min-height:0" onclick="isGo('takvim',{})">İşler → Takvim</button>'de.</p></div>
+      <button class="btn btn-sm act act-work" onclick="keForm(0,'${secili||bugun}')">${ic('plus',15)} Kişisel etkinlik</button>
+    </div>
+    ${izgara}
+    <section class="sec-card">
+      <div class="sec-head" style="margin-bottom:8px">
+        <h4 style="font-size:14px;margin:0">${secili?esc(psGun(secili)+' '+String(secili).slice(0,4)):'Gün seçin'} <span class="chip">${gunList.length}</span></h4>
+        ${secili?`<button class="btn btn-outline btn-sm" onclick="keForm(0,'${secili}')">${ic('plus',15)} Kişisel etkinlik</button>`:''}
+      </div>
+      ${gunList.length?gunList.map(satir).join('')
+        :`<p class="empty">${secili?'Bu gün için size bağlı bir şey yok.':'Takvimden bir gün seçin.'}</p>`}
+    </section>`;
+}
+
+/* ---- Kisisel etkinlik formu — Liste ve Takvim AYNI formu kullanir (§9) ---- */
+function keForm(id,tarih){
   const k=(ui._kisisel||[]).find(x=>x.id===id)||{};
   const bugun=_cIso(new Date());
   modal(`<h3 style="margin:0 0 4px">${id?'Kişisel etkinlik':'Kişisel etkinlik ekle'}</h3>
@@ -4172,7 +4368,7 @@ function keForm(id){
       <input class="inp" id="keTitle" value="${esc(k.title)}" placeholder="ör. Dişçi" autocomplete="off"></div>
     <div class="row2">
       <div class="field"><label class="flabel" for="keDate">Tarih</label>
-        <input class="inp" type="date" id="keDate" value="${esc(k.event_date||bugun)}"></div>
+        <input class="inp" type="date" id="keDate" value="${esc(k.event_date||tarih||bugun)}"></div>
       <div class="field"><label class="flabel" for="keTime">Saat <span class="fhint" style="display:inline">(isteğe bağlı)</span></label>
         <input class="inp" type="time" id="keTime" value="${esc(k.event_time?String(k.event_time).slice(0,5):'')}"></div>
     </div>
@@ -4196,82 +4392,18 @@ async function keKaydet(){
   modalBusy(false);
   if(r===null)return;
   closeModal(); toast('Kişisel etkinlik kaydedildi.');
-  if(ui._ajandaAcik) ajandaAc(); else renderSection();
+  /* Takvimde yeni etkinligin gununu sec ve ayina git. */
+  if(ui._ajGor==='takvim'){
+    const b=new Date(); const hedef=new Date(tarih+'T12:00:00');
+    ui._ajTkv={ay:(hedef.getFullYear()-b.getFullYear())*12+(hedef.getMonth()-b.getMonth()),gun:tarih};
+  }
+  renderSection();
 }
 async function keSil(id){
   if(!await mpConfirm('Bu kişisel etkinlik silinsin mi?','Etkinliği Sil'))return;
   const r=await guard(()=>api('personal_event_delete&id='+id),'Silinemedi'); if(r===null)return;
   closeModal(); toast('Silindi.');
-  if(ui._ajandaAcik) ajandaAc(); else renderSection();
-}
-
-/* §21: genisletilmis kisisel takvim. Kisisel etkinlikler + KISISEL OLARAK
-   ILGILI sirket olaylari (ayni kurallar: §19). Dort haftalik pencere. */
-async function ajandaAc(){
-  const bas=_cIso(new Date());
-  const son=new Date(); son.setDate(son.getDate()+27); const sonIso=_cIso(son);
-  const veri=await guard(()=>Promise.all([
-    api(`personal_events_list&from=${bas}&to=${sonIso}`),
-    api('entries_list&limit=400'),
-    api(`operations_list&from=${bas}&to=${sonIso}`),
-    api('jobs_list'),
-    api('entry_relevance_all').catch(()=>[]),
-    api('work_followers_all&team_id='+((ui._me&&ui._me.id)||0)).catch(()=>[])
-  ]),'Ajanda açılamadı');
-  if(!veri)return;
-  const [ozel,ents,ops,jobs,ilgi,takip]=veri;
-  ui._kisisel=ozel||[];
-  ui._ajandaAcik=true;
-  const benim=(ui._me&&ui._me.id)||0;
-  const jm={}; (jobs||[]).forEach(j=>jm[j.id]=j);
-  const ilgiSet=new Set((ilgi||[]).filter(r=>r.team_id===benim).map(r=>r.entry_id));
-  const takipJobs=new Set((takip||[]).map(r=>r.job_id));
-  const ilgiliMi=e=> ilgiSet.has(e.id) || (benim&&e.assignee_id===benim)
-                  || (benim&&e.created_by_team_id===benim)
-                  || (e.job_id&&takipJobs.has(e.job_id));
-  const gun={};
-  const koy=(d,x)=>{ if(d<bas||d>sonIso) return; (gun[d]=gun[d]||[]).push(x); };
-  /* Kompakt kartla TUTARLI: gecikmis kisisel olaylar dusurulmez, "Bugün"
-     kovasinin basina tasinir (§20 "overdue where relevant"). */
-  (ents||[]).filter(e=>e.due_at&&ilgiliMi(e)
-      &&e.action_status!=='done'&&e.action_status!=='cancelled')
-    .forEach(e=>{ const d=String(e.due_at).slice(0,10);
-      koy(d<bas?bas:d,{t:'gunc',e,gec:d<bas,gd:d}); });
-  (ops||[]).filter(o=>o.planned_date&&o.job_id&&takipJobs.has(o.job_id))
-    .forEach(o=>koy(o.planned_date,{t:'op',o}));
-  (ozel||[]).forEach(k=>koy(k.event_date,{t:'ozel',k}));
-  const gunler=Object.keys(gun).sort();
-  const yarin=new Date(); yarin.setDate(yarin.getDate()+1); const yarinIso=_cIso(yarin);
-  const et=d=>d===bas?'Bugün':(d===yarinIso?'Yarın':psGun(d));
-  const govde=gunler.length?gunler.map(d=>`<div class="pa-d"><div class="pa-dh ${d===bas?'now':''}">${esc(et(d))}</div>
-      ${/* Kompakt kartla AYNI gun ici sira: once kendi etkinliklerim
-           (saate gore), sonra sirket olaylari. */''}
-      ${gun[d].sort((a,b)=>{
-          const oa=a.t==='ozel'?0:1, ob=b.t==='ozel'?0:1;
-          if(oa!==ob) return oa-ob;
-          return oa===0 ? String(a.k.event_time||'99').localeCompare(String(b.k.event_time||'99')) : 0; })
-        .map(x=>x.t==='ozel'
-          ? `<button type="button" class="pa-e ozel" onclick="keAc(${x.k.id})">
-               <span class="pa-k ozel">Kişisel</span>
-               <span class="pa-x">${x.k.event_time?`<b>${esc(String(x.k.event_time).slice(0,5))}</b> `:''}${esc(x.k.title)}</span></button>`
-          : x.t==='gunc'
-          ? `<button type="button" class="pa-e ${x.gec?'gec':''}" onclick="${x.e.job_id?`closeModal();workAc(${x.e.job_id})`:'void 0'}">
-               <span class="pa-k takip">Günc.</span>
-               <span class="pa-x">${esc(String(x.e.body).slice(0,70))}</span>
-               ${x.gec?`<em>${psGecikme(x.gd)} gün gecikti</em>`:''}</button>`
-          : `<button type="button" class="pa-e" onclick="closeModal();workAc(${x.o.job_id})">
-               <span class="pa-k op op-${esc(x.o.operation_type)}">${esc(opTypeLbl(x.o.operation_type))}</span>
-               <span class="pa-x">${esc(x.o.description||(jm[x.o.job_id]||{}).title||'')}</span></button>`).join('')}
-    </div>`).join('')
-    :'<p class="empty">Önümüzdeki dört haftada bir şey yok.</p>';
-  modal(`<h3 style="margin:0 0 4px">Ajandam</h3>
-    <p class="muted" style="font-size:12.5px;margin:0 0 14px">
-      Kişisel etkinlikleriniz ve size bağlı şirket tarihleri — önümüzdeki dört hafta.
-      Şirketin tamamı <b>İşler → Takvim</b>'de.</p>
-    <div class="pa-list" style="max-height:52vh;overflow:auto">${govde}</div>
-    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
-      <button class="btn btn-sm act act-work" onclick="keForm(0)">${ic('plus',15)} Kişisel etkinlik</button>
-      <button class="btn btn-ghost btn-sm" onclick="ui._ajandaAcik=false;closeModal()">Kapat</button></div>`);
+  renderSection();
 }
 
 /* Panelim kisayollari - ayni kayda Isler ekranindaki filtreyle gider,

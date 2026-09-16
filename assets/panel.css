@@ -1476,6 +1476,20 @@ button.pu-chip:hover{border-color:var(--c-ink);color:var(--c-ink);}
 .tk-ev.gec{background:var(--c-red-soft);color:var(--c-red);}
 .tk-ev.acil{box-shadow:inset 2px 0 0 var(--c-accent);}
 .tk-ev.more{background:transparent;color:var(--c-ink3);font-weight:700;padding-left:6px;}
+
+/* --- S4.3.1 Ajandam Takvim -------------------------------------------
+   Ayni izgara (Isler -> Takvim), farkli veri kapsami. Kisisel etkinlik
+   sirket olaylarindan GORULEREK ayrilir ama yuksek sesle degil: notr
+   zemin + kesikli kenar, Liste'deki `KİŞİSEL` rozetiyle ayni dil. */
+.tk-ev.ozel{background:#fff;color:var(--c-ink2);border:1px dashed var(--c-ink3);padding:1px 4px;}
+.tk-ev.op-baski{background:var(--c-orange-soft);color:var(--c-orange);}
+.tk-ev.op-montaj{background:var(--c-green-soft);color:var(--c-green);}
+.tk-ev.op-sokum{background:var(--c-blue-soft);color:var(--c-blue);}
+i.tk-p.tk-ozel,.tk-i-k.tk-ozel{background:#fff;color:var(--c-ink2);border:1px dashed var(--c-ink3);}
+i.tk-p.tk-ozel{border-radius:3px;}
+/* Kart basligindaki Liste | Takvim anahtari: kompakt, basligi sisirmez. */
+.ws-switch.aj-sw{margin:0;padding:2px;}
+.ws-switch.aj-sw button{flex:0 0 auto;padding:4px 10px;font-size:12px;}
 .tk-n{display:flex;align-items:center;justify-content:space-between;gap:4px;}
 .tk-c{font-style:normal;font:700 9.5px/1.5 var(--f);color:var(--c-ink3);
   background:var(--c-line2);border-radius:999px;padding:0 5px;}
