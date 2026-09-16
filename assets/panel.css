@@ -503,6 +503,8 @@ details.grp>summary:hover .chev{color:var(--c-accent);}
   border:1px solid transparent;padding:5px 10px;gap:5px;}
 .card-h .btn-link::after{content:"›";font-weight:700;font-size:14px;line-height:1;opacity:.75;}
 .card-h .btn-link:hover{background:var(--c-accent-soft);border-color:#f6ccd6;}
+/* Olusturma eylemi gezinme degildir: yon oku tasimaz. */
+.card-h .btn-link.ekle::after{content:none;}
 
 /* alan grafiği */
 .areachart{position:relative;}
@@ -1251,7 +1253,9 @@ i.tk-p{min-width:10px;height:10px;padding:0;border-radius:3px;}
 .pu{padding:13px 14px 14px 13px;border-left:2px solid transparent;border-radius:0 var(--r) var(--r) 0;}
 .pu+.pu{border-top:1px solid var(--c-line2);}
 .pu:hover{background:var(--c-alt);}
-.pu.mine{border-left-color:var(--c-accent);}
+/* S4.3 §26 — `.pu.mine` kirmizi sol cizgisi KALDIRILDI. Uc farkli
+   anlami vardi ve hicbiri okunamiyordu; ucu de artik acikca temsil
+   ediliyor (vurgulu `@Adin` ve `Benimle ilgili` filtresi). */
 .pu.sys{opacity:.78;}
 /* §5/§10: baslik iki bolgeli - solda kim/ne zaman, sagda Is·Kurum baglami.
    Baglam artik metnin ALTINDA degil, ustte ve sagda; guncelleme metniyle
@@ -1323,10 +1327,31 @@ i.tk-p{min-width:10px;height:10px;padding:0;border-radius:3px;}
 /* Etiketlenen kisiler: gorunur ama KISIK (§8). */
 .pu-who{font:600 12px/1.5 var(--f);color:var(--c-ink3);
   background:var(--c-line2);border-radius:999px;padding:2px 9px;white-space:nowrap;}
-/* "Sana özel" gorunur kalir ama DOLU KIRMIZI hap degil (§8: kisik). */
-.pu-who.ozel{background:var(--c-accent-soft);color:var(--c-accent-d);font-weight:700;}
+/* §3: oturum sahibinin kendi etiketi AYNI bicimde cizilir, yalnizca
+   fark edilsin diye vurgulanir. Ayri bir kavram/sozcuk YOK. */
+.pu-who.ben{background:var(--c-accent-soft);color:var(--c-accent-d);font-weight:700;
+  box-shadow:inset 0 0 0 1px #f6ccd6;}
 .pu-sys{font:500 11.5px/1.5 var(--f);color:var(--c-ink3);
   border:1px dashed var(--c-line);border-radius:999px;padding:1px 8px;}
+
+/* --- S4.3: duzenlendi isareti + satir menusu ------------------------ */
+/* §6: mevcut `entries.updated_at` kullanilir; yeni alan ACILMADI. */
+.pu-duz{font:500 11.5px/1.5 var(--f);color:var(--c-ink3);font-style:italic;}
+/* §4: kalici Duzenle/Sil dugmeleri YOK - tek, sessiz bir `⋯`. */
+.pu-mb{flex:0 0 auto;width:26px;height:24px;border:0;background:none;cursor:pointer;
+  color:var(--c-ink3);border-radius:6px;font:700 15px/1 var(--f);letter-spacing:.06em;
+  opacity:.55;transition:.13s;}
+.pu:hover .pu-mb{opacity:1;}
+.pu-mb:hover{background:var(--c-line2);color:var(--c-ink);}
+.pu-mb:focus-visible{opacity:1;}
+.pu-pop{position:absolute;z-index:60;min-width:132px;background:var(--c-panel);
+  border:1px solid var(--c-line);border-radius:10px;padding:5px;
+  box-shadow:0 8px 24px rgba(17,24,39,.14);display:flex;flex-direction:column;gap:2px;}
+.pu-pop button{text-align:left;background:none;border:0;cursor:pointer;
+  padding:8px 11px;border-radius:7px;font:600 13px/1.3 var(--f);color:var(--c-ink);}
+.pu-pop button:hover{background:var(--c-alt);}
+.pu-pop button.sil{color:var(--c-red);}
+.pu-pop button.sil:hover{background:var(--c-red-soft);}
 button.pu-chip{cursor:pointer;transition:.13s;}
 button.pu-chip:hover{border-color:var(--c-ink);color:var(--c-ink);}
 .pu-chip.org{color:var(--c-ink2);}
@@ -1401,6 +1426,12 @@ button.pu-chip:hover{border-color:var(--c-ink);color:var(--c-ink);}
 .pa-k.op-baski{background:var(--c-orange-soft);color:var(--c-orange);}
 .pa-k.op-montaj{background:var(--c-green-soft);color:var(--c-green);}
 .pa-k.op-sokum{background:var(--c-blue-soft);color:var(--c-blue);}
+/* S4.3 §23: kisisel etkinlik notr/kisisel bir tonda - sirket olaylarinin
+   semantik renkleriyle yarismaz ve gurultulu bir gizlilik uyarisi degil.
+   Kesikli kenarlik "bu yalniz senin" isaretidir. */
+.pa-k.ozel{background:#fff;color:var(--c-ink2);border:1px dashed var(--c-ink3);}
+.pa-e.ozel .pa-x{color:var(--c-ink2);}
+.pa-e.ozel .pa-x b{color:var(--c-ink);font-variant-numeric:tabular-nums;}
 .pa-x{flex:1;min-width:0;font-size:13.5px;color:var(--c-ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .pa-e em{font-style:normal;font:700 11.5px/1.6 var(--f);color:var(--c-red);white-space:nowrap;}
 .pa-e.gec .pa-k{background:var(--c-red-soft);color:var(--c-red);}

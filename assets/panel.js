@@ -532,7 +532,21 @@ async function api(action, body){
          kullanıcıdan tekrar istenmez (BR-E03). */
       if(row.action_status==='done'&&!row.completed_at) row.completed_at=new Date().toISOString();
       if(row.action_status==='open') row.completed_at=null;
-      const r=await saveRow('entries',row);
+      /* S4.3 §4 — RLS bir UPDATE'i reddettiginde hata DONMEZ, yalnizca 0
+         satir etkiler. `saveRow` bunu basari sayardi ve kullanici
+         "kaydedildi" toast'i gorurdu. Yazarlik kurali sunucuda oldugu
+         icin (migration A) burada etkilenen satiri acikca dogruluyoruz.
+         Kontrol YALNIZ entries icin; paylasilan `saveRow` degistirilmedi. */
+      let r;
+      if(row.id){
+        const gid=row.id; const yaz={...row}; delete yaz.id;
+        const {data,error}=await sb.from('entries').update(yaz).eq('id',gid).select('id');
+        if(error)throw error;
+        if(!data||!data.length) throw new Error('Bu güncellemeyi değiştirme yetkiniz yok.');
+        r={id:gid};
+      } else {
+        r=await saveRow('entries',row);
+      }
       /* İlgi etiketi SORUMLULUK DEĞİLDİR (PS1 §9): yalnız "bunu özellikle
          fark et" demektir, aksiyon üretmez ve görünürlüğü kısıtlamaz.
          Yalnız açıkça bir liste geldiğinde dokunulur; alan hiç
@@ -578,6 +592,32 @@ async function api(action, body){
       const {error}=await sb.from('work_followers').delete()
         .eq('job_id',body.id).eq('team_id',me);
       if(error)throw error; logYaz(act,body); return ok(); }
+    /* ---- Kisisel takvim (S4.3 §17-§18) ----
+       Sirket kaydi DEGIL, kisisel uretkenlik ogesi. RLS sahiplik ile
+       sinirlar (`team_id = current_team_id()`); burada team_id istemciden
+       gonderilse bile sunucu WITH CHECK ile kendi satirini zorunlu kilar.
+       Admin dahil baska hicbir kullanici bu satirlari GOREMEZ. */
+    case 'personal_events_list':{
+      let sel=sb.from('personal_events').select('*');
+      if(q.from) sel=sel.gte('event_date',q.from);
+      if(q.to)   sel=sel.lte('event_date',q.to);
+      const {data,error}=await sel.order('event_date').order('event_time',{nullsFirst:true})
+        .limit(q.limit?+q.limit:500);
+      if(error)throw error; return ok(data); }
+    case 'personal_event_save':{
+      const me=(ui._me&&ui._me.id)||null;
+      if(!me) throw new Error('Kişisel etkinlik için ekip profili gerekiyor.');
+      const row={...body, team_id:me};
+      if(row.id) row.updated_at=new Date().toISOString();
+      const r=await saveRow('personal_events',row);
+      /* logYaz KASITLI OLARAK CAGRILMAZ: `activity_log` sirket denetim
+         izidir ve ic kullanicilara aciktir; kisisel etkinlik basligini
+         oraya yazmak gizliligi delerdi. */
+      return ok(r); }
+    case 'personal_event_delete':{
+      const delId=(q.id!=null&&q.id!=='')?q.id:(body&&body.id);
+      const {error}=await sb.from('personal_events').delete().eq('id',delId);
+      if(error)throw error; return ok(); }
     case 'entry_relevance_all':{
       let sel=sb.from('entry_relevance').select('entry_id,team_id');
       if(q.team_id) sel=sel.eq('team_id',q.team_id);
@@ -1072,6 +1112,37 @@ async function go(s){ if(typeof dirtyGuard==='function' && !(await dirtyGuard())
   navKayit('sec',s,0);
   document.getElementById('ttl').textContent=TITLES[s]||''; renderSection(); yeniTeklifKontrol&&yeniTeklifKontrol(); }
 
+/* ============ CANLI ARAMA (S4.3 §25) ================================
+   BUG: Baski & Montaj arama kutusuna yazarken her tus vurusu
+   `opFiltreDegis()` -> `renderSection()` cagiriyordu. `renderSection`
+   `#content`in innerHTML'ini bastan yaziyor, yani INPUT DUGUMUNUN
+   KENDISI yok ediliyor. Odak ve imlec kayboluyor, kullanici ancak tek
+   harf girebiliyordu ("Acıbadem" yazmak imkansiz).
+
+   COZUM iki parcali - ikisi de gerekli:
+     1) DEBOUNCE: yazma akisi ortasinda yeniden cizim yapilmaz. 200ms
+        standart bir yazma araligidir, keyfi bir bekleme degil.
+     2) ODAK/IMLEC GERI YUKLEME: yeniden cizim kaciniamaz oldugundan,
+        cizimden SONRA ayni id'li input yeniden bulunup odak ve imlec
+        konumu geri verilir.
+   Yalniz debounce yeterli olmazdi (cizim yine odagi alirdi); yalniz
+   odak geri yukleme de yeterli olmazdi (her harfte tam cizim). */
+let _aramaT=null;
+function canliArama(id,uygula,gecikme){
+  clearTimeout(_aramaT);
+  _aramaT=setTimeout(async ()=>{
+    const e=document.getElementById(id);
+    const kon=e?e.selectionStart:null;
+    await uygula();
+    const y=document.getElementById(id);
+    if(y&&document.activeElement!==y){
+      y.focus();
+      const pos=(kon==null?y.value.length:kon);
+      try{ y.setSelectionRange(pos,pos); }catch(err){}
+    }
+  },gecikme||200);
+}
+
 async function renderSection(){
   const c=document.getElementById('content'); c.innerHTML='<p class="muted">Yükleniyor…</p>';
   const F={dashboard,'is-takibi':isTakibi,urunler,mecralar,listeler,musteriler,kurumlar,teklifler,ekip,
@@ -1247,7 +1318,14 @@ function chartArea(rows,opt){
 }
 
 /* ---- İş akışı listesi: solda firma, sağda soldan sağa aşamalar ---- */
-const JOB_STEPS=[['temas_takip','Temas / Takip'],['teklif','Teklif'],['baski','Baskı'],['montaj','Montaj'],['yayinda_aktif','Yayında']];
+/* §12 — YALNIZ GORUNEN ETIKET. `jobs.status` degerleri (`temas_takip`,
+   `yayinda_aktif`) ve CHECK kisiti DEGISMEDI; migration YOK. Uc ayri
+   etiket kaynagi vardi (JOB_STEPS / JOBST / JOBLBL) ve hepsi ayni
+   sozlugu tekrarliyordu - ucu de asagidaki tek haritadan turuyor. */
+const FAZ_ETIKET={temas_takip:'Temas',teklif:'Teklif',baski:'Baskı',
+                  montaj:'Montaj',yayinda_aktif:'Yayında'};
+const FAZ_SIRA=['temas_takip','teklif','baski','montaj','yayinda_aktif'];
+const JOB_STEPS=FAZ_SIRA.map(k=>[k,FAZ_ETIKET[k]]);
 /* ================= BİLDİRİMLER: rezervasyon bitişi (7 gün) ================= */
 const AY_KISA=['Oca','Şub','Mar','Nis','May','Haz','Tem','Ağu','Eyl','Eki','Kas','Ara'];
 function bildirimAlicilar(){
@@ -1533,8 +1611,7 @@ async function dashboard(c){
    Phase rigid state machine DEĞİLDİR (BR-W02): atlanabilir, geri
    alınabilir, bazı Work'lerde hiç kullanılmaz. Lifecycle phase'den
    bağımsızdır (D-207). */
-const JOBST=[['temas_takip','Temas / Takip'],['teklif','Teklif'],['baski','Baskı'],
-             ['montaj','Montaj'],['yayinda_aktif','Yayında / Aktif']];
+const JOBST=FAZ_SIRA.map(k=>[k,FAZ_ETIKET[k]]);
 const JOBC={temas_takip:'violet',teklif:'amber',baski:'cyan',montaj:'green',yayinda_aktif:'slate'};
 const LIFE=[['acik','Açık'],['bekliyor','Bekliyor'],['kapandi','Kapandı']];
 const LIFELBL={acik:'Açık',bekliyor:'Bekliyor',kapandi:'Kapandı'};
@@ -1589,7 +1666,14 @@ const ISTABS=[['pano','Pano'],['liste','Liste'],['takvim','Takvim']];
    hedefi olsun diye eklendi. YENI BIR MODUL DEGIL - mevcut `acil`
    anahtarinin kardesi olan bir Liste filtresi. Tanim S1.1 ile ayni:
    TERMINI GECMIS ACIK AKSIYONU olan isler. Yastan aciliyet cikarilmaz. */
-const ISF_DEF={life:['acik','bekliyor'],q:'',org:'',phase:'',ilgili:'',acil:false,gec:false};
+/* S4.3 §14 — `dikkat` TURETILMIS bir gorunum ifadesidir: Acil VEYA
+   Geciken. Yeni bir Work DURUMU DEGILDIR, sema degismez.
+   ONCE: Panelim'deki "Görüntüle" yalniz `gec:true` aciyordu ve acil ama
+   henuz gecikmemis isleri DISARIDA birakiyordu; kullanici elle `Acil`i
+   de isaretleyince iki filtre VE'leniyor ve kume daha da daraliyordu -
+   dikkat gorunumu icin tam ters sonuc. */
+const ISF_DEF={life:['acik','bekliyor'],q:'',org:'',phase:'',ilgili:'',
+               acil:false,gec:false,dikkat:false};
 /* Work görünümü filtresi oturum içinde korunur (07 §18/2). */
 function isFiltre(){
   let f={};
@@ -1600,7 +1684,7 @@ function isFiltre(){
   if(f.mine===true && !f.asg && !o.ilgili) o.asg='me';
   if(f.asg && !o.ilgili) o.ilgili=f.asg;
   delete o.mine; delete o.asg;
-  o.acil=!!o.acil; o.gec=!!o.gec;
+  o.acil=!!o.acil; o.gec=!!o.gec; o.dikkat=!!o.dikkat;
   return o;
 }
 function isFiltreYaz(f){ try{ sessionStorage.setItem('mp_is_filtre',JSON.stringify(f)); }catch(e){} }
@@ -1716,10 +1800,13 @@ function coordSuz(D,f,opt){
   if(opt.life) list=list.filter(j=>(j.lifecycle_status||'acik')===opt.life);
   if(f.phase&&!opt.faziAtla) list=list.filter(j=>(j.status||'temas_takip')===f.phase);
   if(f.org) list=list.filter(j=>String(j.customer_id)===String(f.org));
+  const bugunIso=_cIso(new Date());
+  const geciken=j=>{ const nx=D.sonraki[j.id];
+    return !!(nx&&nx.due_at&&String(nx.due_at).slice(0,10)<bugunIso); };
+  /* §14: VEYA - tek bir kontrol, iki ayri filtrenin kesisimi DEGIL. */
+  if(f.dikkat) list=list.filter(j=>!!j.is_urgent||geciken(j));
   if(f.acil) list=list.filter(j=>!!j.is_urgent);
-  if(f.gec){ const bg=_cIso(new Date());
-    list=list.filter(j=>{ const nx=D.sonraki[j.id];
-      return !!(nx&&nx.due_at&&String(nx.due_at).slice(0,10)<bg); }); }
+  if(f.gec)  list=list.filter(geciken);
   /* `Ilgili` (PS1.1 §20) = bu kisiyi gercekten baglayan her sey:
      Work'u TAKIP EDIYOR (acik niyet, work_followers), Work'un sahibi,
      ya da uzerinde acik bir aksiyonu var. "Sorumlu" degil - kimseye is
@@ -1785,11 +1872,17 @@ function coordFiltreKart(tab,D,f){
         <button type="button" class="${!arsiv?'on':''}" aria-pressed="${!arsiv}" onclick="isKapsam('aktif')">Aktif</button>
         <button type="button" class="${arsiv?'on':''}" aria-pressed="${arsiv}" onclick="isKapsam('arsiv')">Arşiv</button>
       </div>
+      ${/* §15: `Dikkat` birlesik gorunum; `Acil` ve `Geciken` tekil
+           incelemeler icin KORUNUR. Dikkat acilinca tekiller kapanir ki
+           kullanici farkinda olmadan VE'lenmis bir kume gormesin. */''}
+      <button type="button" class="pf-t ${f.dikkat?'on':''}" aria-pressed="${f.dikkat}"
+        title="Acil VEYA termini geçmiş işler"
+        onclick="isFiltre2({dikkat:${!f.dikkat},acil:false,gec:false})">◎ Dikkat</button>
       <button type="button" class="pf-t ${f.acil?'on':''}" aria-pressed="${f.acil}"
-        onclick="isFiltre2({acil:${!f.acil}})">⚡ Acil</button>
+        onclick="isFiltre2({acil:${!f.acil},dikkat:false})">⚡ Acil</button>
       <button type="button" class="pf-t ${f.gec?'on':''}" aria-pressed="${f.gec}"
         title="Termini geçmiş açık aksiyonu olan işler"
-        onclick="isFiltre2({gec:${!f.gec}})">⚠ Geciken</button>
+        onclick="isFiltre2({gec:${!f.gec},dikkat:false})">⚠ Geciken</button>
       <span class="fhint" style="margin-left:auto">Aktif = açık + bekliyor</span>
     </div>`:''}
   </div>
@@ -1806,6 +1899,7 @@ function isFiltreBanner(tab,D,f){
   if(f.phase)  p.push('Aşama: '+esc((JOBST.find(x=>x[0]===f.phase)||[,f.phase])[1]));
   if(f.ilgili){ const id=coordAsgId(D,f);
     p.push('İlgili: '+esc((D.tm&&D.tm[id])||(f.ilgili==='me'?'Ben':'#'+f.ilgili))); }
+  if(f.dikkat) p.push('Dikkat <em>(Acil veya Geciken)</em>');
   if(f.acil)   p.push('Acil');
   if(f.gec)    p.push('Geciken');
   if(arsiv)    p.push('Arşiv');
@@ -1826,7 +1920,7 @@ function isFiltreDegis(){
     org:el('isOrg')?(gv('isOrg')||''):f.org,
     phase:el('isPhase')?(gv('isPhase')||''):f.phase,
     ilgili:el('isIlgili')?gv('isIlgili'):f.ilgili});
-  renderSection();
+  canliArama('isQ',renderSection);
 }
 function isFiltreSifirla(){ isFiltreYaz({...ISF_DEF}); renderSection(); }
 
@@ -2027,7 +2121,10 @@ async function isListeExport(){
      onu "dekoratif" diye işaretledi.
    - notes / sözleşme alanları: C5'e bırakıldı.
    ===================================================================== */
-const TKV_KAYNAK=[['takip','Takip'],['op','Baskı & Montaj']];
+/* §11: tarihli Entry'nin takvim etiketi `TAKİP` idi ve Work fazi
+   terminolojisiyle cakisiyordu. Entry depolamasi/turu DEGISMEDI,
+   yalniz kullaniciya gorunen ad. */
+const TKV_KAYNAK=[['takip','Güncelleme'],['op','Baskı & Montaj']];
 
 function tkvDurum(){
   try{ return JSON.parse(sessionStorage.getItem('mp_tkv')||'null')||{ay:0,gun:null,kaynak:''}; }
@@ -2134,7 +2231,7 @@ async function isTakvim(box,D,f){
     .slice().sort((a,b)=>(a.tip===b.tip?0:(a.tip==='takip'?-1:1)));
   const ajanda=gunList.length?gunList.map(e=>e.tip==='takip'
     ? `<button type="button" class="tk-i" onclick="${e.jobId?`workAc(${e.jobId})`:(e.custId?`orgAc(${e.custId})`:'')}">
-         <span class="tk-i-k tk-takip">Takip</span>
+         <span class="tk-i-k tk-takip">Günc.</span>
          <span class="tk-i-b"><b>${esc(e.baslik)}</b>
            <em>${e.job?esc(e.job.title):'<i>işe bağlı değil</i>'}${e.org?' · '+esc(e.org):''}${e.kisi?' · '+esc(e.kisi):''}</em></span>
          <span class="tk-i-r">${e.bitti?'<span class="pill">tamam</span>':(e.gec?'<span class="pill clay">gecikti</span>':'')}</span>
@@ -2213,18 +2310,23 @@ async function isTakvim(box,D,f){
 
 /* `mod` argumani artik anlamsiz; eski cagri sekilleri (qcAc('takip',ctx))
    kirilmasin diye imza toleransi korunuyor. */
+/* S4.3 §5 — AYNI composer hem olusturma hem DUZENLEME icin kullanilir.
+   Ayri bir duzenleme formu yazilmadi. Duzenlemede baglam KILITLENMEZ
+   (yazar Is/Kurum baglamini degistirebilmeli) ve tek bir Entry id
+   korunur - "duzenleme = yerine yeni Entry" YAPILMAZ. */
 function qcAc(a,b){
   const ctx=(a&&typeof a==='object')?a:(b||{});
+  const duz=ctx.entry||null;                 /* duzenlenen Entry (varsa) */
   const D=ui._coord||null;
   const jobs=(D?D.jobs:(ui._jobs||[]))||[];
   const custs=(D?D.custs:(ui._cust||[]))||[];
   const team=(D?D.team:(ui._team||[]))||[];
-  const kilitliJob=ctx.jobId||0;
-  const kilitliOrg=ctx.custId||0;
+  const kilitliJob=duz?0:(ctx.jobId||0);
+  const kilitliOrg=duz?0:(ctx.custId||0);
   /* PS3 §18: Kişi artık geçerli bir Entry bağlamı. `entries.contact_id`
      Sprint 1'den beri vardı ama Person kimliği oturmadan açılmamıştı.
      ZORUNLU DEĞİL - bir güncelleme hâlâ bağlamsız olabilir. */
-  const kilitliKisi=ctx.contactId||0;
+  const kilitliKisi=duz?(duz.contact_id||0):(ctx.contactId||0);
   const j=kilitliJob?jobs.find(x=>x.id===kilitliJob):null;
   const orgId=kilitliOrg||(j?j.customer_id:0);
   const cm={}; custs.forEach(x=>cm[x.id]=x.firma);
@@ -2268,38 +2370,95 @@ function qcAc(a,b){
              .map(x=>`<option value="${x.id}">${esc(x.firma||('#'+x.id))}</option>`).join('')}</select>
        </div>`);
 
-  /* Kendini etiketlemek anlamsiz: kendi guncellemeni zaten biliyorsun. */
-  const ekip=team.filter(t=>t.active!==false&&t.id!==benim);
+  /* §3/§27: oturum sahibi ARTIK kendini de etiketleyebilir. Onceden
+     "kendi guncellemeni zaten biliyorsun" gerekcesiyle listeden
+     cikariliyordu; fakat tek zihinsel model `@Kisi` olunca kendini
+     isaretlemek mesru bir hatirlatma bicimi. */
+  const ekip=team.filter(t=>t.active!==false);
+  const secili=new Set(duz?((ui._ilgiMap&&ui._ilgiMap[duz.id])||[]):[]);
 
-  modal(`<h3 style="margin:0 0 12px">Bir güncelleme paylaş…</h3>
+  const duzDue=duz&&duz.due_at?String(new Date(duz.due_at).toLocaleDateString('sv-SE')):'';
+  modal(`<h3 style="margin:0 0 12px">${duz?'Güncellemeyi düzenle':'Bir güncelleme paylaş…'}</h3>
+    <input type="hidden" id="qcId" value="${duz?duz.id:0}">
     ${kilitliKisi?`<input type="hidden" id="qcKisi" value="${kilitliKisi}">`:''}
     ${baglam}
     <div class="field" style="margin-bottom:10px">
       <textarea class="inp" id="qcBody" rows="3"
         placeholder="Ne oldu? ör. Müşteri M1'i onayladı, stadyumu almadı."
-        onkeydown="qcTus(event)"></textarea></div>
+        onkeydown="qcTus(event)">${duz?esc(duz.body):''}</textarea></div>
 
     ${ekip.length?`<div class="qc-tags">
       <span class="qc-mini">İlgili</span>
-      ${ekip.map(t=>`<label class="qc-who"><input type="checkbox" class="qcRel" value="${t.id}">
-        <span>${esc(t.name)}</span></label>`).join('')}
+      ${ekip.map(t=>`<label class="qc-who"><input type="checkbox" class="qcRel" value="${t.id}" ${secili.has(t.id)?'checked':''}>
+        <span>${esc(t.name)}${t.id===benim?' (ben)':''}</span></label>`).join('')}
     </div>`:''}
 
     ${secici}
 
     <div class="qc-line qc-opt">
       <label class="qc-mini" for="qcDue">Son tarih</label>
-      <input class="inp inp-sm" type="date" id="qcDue" style="max-width:170px">
-      <label class="qc-acil"><input type="checkbox" id="qcAcil"><span>⚡ Acil</span></label>
+      <input class="inp inp-sm" type="date" id="qcDue" style="max-width:170px" value="${esc(duzDue)}">
+      <label class="qc-acil"><input type="checkbox" id="qcAcil" ${duz&&duz.is_urgent?'checked':''}><span>⚡ Acil</span></label>
       <span class="fhint" style="margin:0 0 0 auto">Ctrl+Enter ile paylaş</span>
     </div>
 
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
       <button class="btn btn-ghost btn-sm" onclick="closeModal()">Vazgeç</button>
-      <button class="btn btn-primary btn-sm" onclick="qcKaydet()">Paylaş</button></div>`);
+      <button class="btn btn-primary btn-sm" onclick="qcKaydet()">${duz?'Kaydet':'Paylaş'}</button></div>`);
+  /* Duzenlemede mevcut Is/Kurum secimini isaretle (secici render sonrasi). */
+  if(duz){
+    const js=document.getElementById('qcJob'); if(js&&duz.job_id){ js.value=String(duz.job_id); qcJobDegis(); }
+    const os=document.getElementById('qcOrg'); if(os&&!duz.job_id&&duz.customer_id) os.value=String(duz.customer_id);
+  }
   const t=document.getElementById('qcBody'); if(t)t.focus();
 }
 function qcTus(e){ if((e.ctrlKey||e.metaKey)&&e.key==='Enter'){ e.preventDefault(); qcKaydet(); } }
+
+/* ============ Guncelleme satir menusu (S4.3 §4) =====================
+   Her satirda kalici Duzenle/Sil dugmeleri ISTENMEDI - akis okunakli
+   kalmali. Tek bir `⋯`, yalnizca kendi yazdigin insan guncellemesinde. */
+let _puMnu=null;
+function puMenuKapat(){
+  if(!_puMnu) return;
+  _puMnu.remove(); _puMnu=null;
+  document.removeEventListener('mousedown',puMenuDis,true);
+  document.removeEventListener('keydown',puMenuEsc,true);
+}
+function puMenuDis(e){ if(_puMnu&&!_puMnu.contains(e.target)) puMenuKapat(); }
+function puMenuEsc(e){ if(e.key==='Escape') puMenuKapat(); }
+function puMenu(ev,id){
+  ev.stopPropagation();
+  const acikti=!!_puMnu; puMenuKapat(); if(acikti) return;   /* toggle */
+  const b=ev.currentTarget.getBoundingClientRect();
+  const d=document.createElement('div');
+  d.className='pu-pop'; d.setAttribute('role','menu');
+  d.innerHTML=`<button type="button" role="menuitem" onclick="entryDuzenle(${id})">Düzenle</button>
+    <button type="button" role="menuitem" class="sil" onclick="entryKaldir(${id})">Sil</button>`;
+  document.body.appendChild(d);
+  d.style.top=(window.scrollY+b.bottom+5)+'px';
+  d.style.left=(window.scrollX+Math.max(8,b.right-d.offsetWidth))+'px';
+  _puMnu=d;
+  setTimeout(()=>{ document.addEventListener('mousedown',puMenuDis,true);
+                   document.addEventListener('keydown',puMenuEsc,true); },0);
+}
+function entryDuzenle(id){
+  puMenuKapat();
+  const e=(ui._feedEnt||[]).find(x=>x.id===id);
+  if(!e){ toast('Kayıt bulunamadı.'); return; }
+  qcAc({entry:e});
+}
+/* §7: gercek silme. `entry_relevance.entry_id` zaten ON DELETE CASCADE
+   oldugu icin etiket satirlari otomatik gider - yetim kalmaz. Soft-delete
+   modeli ACILMADI: `entries` icin repoda boyle bir konvansiyon yok ve
+   her okuyucuya `deleted_at is null` filtresi eklemek yeni ve unutulmasi
+   kolay bir sizinti yuzeyi yaratirdi. */
+async function entryKaldir(id){
+  puMenuKapat();
+  if(!await mpConfirm('Bu güncelleme kalıcı olarak silinsin mi? Etiketler de kaldırılır.',
+    'Güncellemeyi Sil')) return;
+  const r=await guard(()=>api('entry_delete&id='+id),'Silinemedi'); if(r===null)return;
+  toast('Güncelleme silindi.'); renderSection();
+}
 /* Is secilince kurumu ondan turet ve kilitle. */
 function qcJobDegis(){
   const jid=+gv('qcJob'), org=document.getElementById('qcOrg');
@@ -2319,21 +2478,44 @@ async function qcKaydet(){
   const acil=!!(document.getElementById('qcAcil')||{}).checked;
   /* Work'e bagliysa kurum Work uzerinden okunur (06 §9). */
   const kisi=+gv('qcKisi')||null;
-  const row={id:0, body, job_id:jid, customer_id: jid?null:oid, contact_id:kisi, is_urgent:acil};
-  /* SON TARIH: yalnizca acikca secildiyse yazilir. Secilmediyse due_at
-     NULL kalir - bugune ayarlanmaz (PS1.1 §2.A). action_status yalnizca
-     gercek bir son tarih varsa anlamli olur; sorumlu ATANMAZ. */
-  if(due){
-    row.due_at=new Date(due+'T09:00:00').toISOString();
-    row.action_status='open';
+  const id=+gv('qcId')||0;
+  const row={id, body, job_id:jid, customer_id: jid?null:oid, contact_id:kisi, is_urgent:acil};
+
+  /* ---- SON TARIH (S4.3 §8-§10) ----------------------------------
+     §8 degismedi: siradan bir guncelleme SIRF bugun yazildi diye
+     takvime dusmez; `created_at` bir termin DEGILDIR.
+
+     §9 YENI KURAL: urun sahibi `Acil`i "bugun ilgilenilmeli" diye
+     tanimladi. Bu yuzden Acil isaretli ve tarihi BOS birakilmis bir
+     guncelleme, kullanicinin YEREL bugun tarihini alir.
+
+     ZAMAN DILIMI: `_cIso(new Date())` yerel takvim gununu verir (UTC'ye
+     cevirip gun kaydirmaz), ardindan mevcut konvansiyonla yerel 09:00'a
+     sabitlenir - `new Date('YYYY-MM-DDT09:00:00')` yerel saat olarak
+     ayristirilir. Yani TR'de 23:30'da Acil isaretlenen bir guncelleme
+     yarina degil BUGUNE dusen bir termin alir.
+
+     §9: acikca secilmis tarih HER ZAMAN kazanir; Acil onu EZMEZ.
+     §10: Acil sonradan kaldirilirsa termin SESSIZCE SILINMEZ -
+     kullanici tarihi acikca temizleyebilir. Otomatik-mi-elle-mi
+     ayrimi icin ayri bir provenance alani ACILMADI (§10). */
+  const etkinDue=due||(acil?_cIso(new Date()):'');
+  if(etkinDue){
+    row.due_at=new Date(etkinDue+'T09:00:00').toISOString();
+    if(!id) row.action_status='open';
+  } else if(id){
+    row.due_at=null;                 /* duzenlemede tarih acikca silindi */
   }
   row._ilgili=Array.from(document.querySelectorAll('.qcRel:checked')).map(x=>+x.value);
   modalBusy(true);
-  const r=await guard(()=>api('entry_save',row),'Kayıt oluşturulamadı');
+  const r=await guard(()=>api('entry_save',row),id?'Güncelleme kaydedilemedi':'Kayıt oluşturulamadı');
   modalBusy(false);
   if(r===null)return;
   closeModal();
-  toast(due?'Güncelleme paylaşıldı — son tarih eklendi.':'Güncelleme paylaşıldı.');
+  toast(id?'Güncelleme düzenlendi.'
+          :(etkinDue?(due?'Güncelleme paylaşıldı — son tarih eklendi.'
+                         :'Güncelleme paylaşıldı — Acil olduğu için bugüne işaretlendi.')
+                   :'Güncelleme paylaşıldı.'));
   /* Ayni Entry; nereden bakildigina gore farkli gorunum (BR-V01). */
   if(ui.section==='is-takibi'||ui.section==='workspace-home'||ui.section==='kurumlar') renderSection();
   else if(jid) workAc(jid);
@@ -2365,7 +2547,8 @@ function accFiltre(){
 }
 function accYaz(f){ try{ sessionStorage.setItem('mp_acc',JSON.stringify(f)); }catch(e){} }
 function accSekme(st){ accYaz({...accFiltre(),st}); renderSection(); }
-function accAra(){ accYaz({...accFiltre(),q:gv('accQ')||''}); renderSection(); }
+/* Ayni renderer kalibi (§25). */
+function accAra(){ accYaz({...accFiltre(),q:gv('accQ')||''}); canliArama('accQ',renderSection); }
 
 async function muhasebe(c){
   const f=accFiltre();
@@ -2633,6 +2816,7 @@ function workPartyCiz(){
 function workTimelineCiz(){
   const box=document.getElementById('wTimeline'); if(!box)return;
   const tm={}; (ui._team||[]).forEach(t=>tm[t.id]=t.name);
+  const benimTeam=(ui._me&&ui._me.id)||0;
   box.innerHTML=(ui._workEntries||[]).map(e=>{
     const sys=e.source==='system';
     const aks=e.action_status;
@@ -2646,8 +2830,15 @@ function workTimelineCiz(){
         ${e.due_at?` · ${gecikti(e.due_at)&&aks==='open'?'<span style="color:#b3261e">⚠ gecikti </span>':''}termin ${esc(trTarih(e.due_at))}`:''}
       </div>
       ${aks==='open'?`<button class="btn btn-outline btn-sm" onclick="entryDone(${e.id})">Tamamla</button>`:''}
-      ${sys?'':`<button class="btn btn-outline btn-sm" onclick="entryForm(${e.id},${e.job_id},${!!aks})">Düzenle</button>`}
-      ${(sys||!isAdmin())?'':`<button class="btn btn-danger btn-sm" onclick="entryDel(${e.id})">Sil</button>`}
+      ${/* S4.3 §4/§28: Work zaman cizelgesinde de yazarlik kurali gecerli.
+           ONCE her ic kullanici baskasinin guncellemesini duzenleyebiliyordu
+           (Duzenle sistem disi HER Entry'de goruluyordu). Artik yalniz
+           yazarin kendisi - ya da mevcut admin yetkisi. Sistem Entry'sinde
+           hicbiri gosterilmez. */''}
+      ${(!sys&&(e.created_by_team_id===benimTeam||isAdmin()))
+        ?`<button class="btn btn-outline btn-sm" onclick="entryForm(${e.id},${e.job_id},${!!aks})">Düzenle</button>`:''}
+      ${(!sys&&(e.created_by_team_id===benimTeam||isAdmin()))
+        ?`<button class="btn btn-danger btn-sm" onclick="entryDel(${e.id})">Sil</button>`:''}
     </div>`;}).join('')
     ||'<p class="empty">Henüz güncelleme yok.</p>';
 }
@@ -3231,7 +3422,7 @@ function opFiltreDegis(){
   const f=opFiltre();
   opFiltreYaz({...f, from:gv('opFrom')||'', to:gv('opTo')||'',
     type:gv('opType')||'', q:gv('opQ')||''});
-  renderSection();
+  canliArama('opQ',renderSection);
 }
 
 /* ---------- Operation formu (hem shared view hem Work detail) ---------- */
@@ -3603,7 +3794,7 @@ async function workspaceHome(c){
   /* Tek turda paralel cekim; kart/gun/Work basina sorgu YOK (07 §20).
      entry_relevance TUM satirlariyla cekilir cunku feed etiketlenen
      kisileri chip olarak gosterir (§5) - Entry basina sorgu N+1 olurdu. */
-  const [jobs,ents,ops,custs,team,ilgi,takip,kisiler]=await Promise.all([
+  const [jobs,ents,ops,custs,team,ilgi,takip,kisiler,kisisel]=await Promise.all([
     api('jobs_list'),
     api('entries_list&limit=400'),
     api(`operations_list&from=${opBas}&to=${ufukIso}`),
@@ -3614,17 +3805,22 @@ async function workspaceHome(c){
     /* Kişi chip'i için (§5 bağlam satırı). Tek toplu okuma; Entry başına
        sorgu YOK. Soğuk açılışta ui._contactMap boş olurdu ve kişi bağlamı
        sessizce kaybolurdu. */
-    api('contacts_list').catch(()=>[])]);
+    api('contacts_list').catch(()=>[]),
+    /* S4.3: kisisel etkinlikler. RLS zaten sahiplikle sinirlar. */
+    api(`personal_events_list&from=${opBas}&to=${ufukIso}`).catch(()=>[])]);
   ui._team=team||[]; ui._jobs=jobs||[]; ui._cust=custs||[];
   const jm={}; (jobs||[]).forEach(j=>jm[j.id]=j);
   const cm={}; (custs||[]).forEach(x=>cm[x.id]=x.firma);
   const tm={}; (team||[]).forEach(t=>tm[t.id]=t.name);
   ui._opJobs=jm; ui._opCust=cm;
+  ui._kisisel=kisisel||[];                   /* keForm duzenlemede buradan okur */
+  ui._ajandaAcik=false;
 
   /* entry_id -> [team_id] ve benim etiketlerim */
   ui._contactMap={}; (kisiler||[]).forEach(k=>ui._contactMap[k.id]=k);
   const ilgiMap={}; (ilgi||[]).forEach(r=>{ (ilgiMap[r.entry_id]=ilgiMap[r.entry_id]||[]).push(r.team_id); });
   const ilgiSet=new Set((ilgi||[]).filter(r=>r.team_id===benim).map(r=>r.entry_id));
+  ui._ilgiMap=ilgiMap;
   const takipJobs=new Set((takip||[]).map(r=>r.job_id));
   ui._takipJobs=takipJobs;
   const orgAdi=j=>cm[(j||{}).customer_id]||'';
@@ -3636,6 +3832,7 @@ async function workspaceHome(c){
   const tumEnt=(ents||[]).slice()
     .sort((a,b)=>String(b.occurred_at||'').localeCompare(String(a.occurred_at||''))
                  || (b.id-a.id));
+  ui._feedEnt=tumEnt;                        /* satir menusu buradan okur */
   tumEnt.forEach(e=>{ e._benim=psBenimMi(e,benim,ilgiSet,takipJobs); });
 
   /* ---- Filtreler (§7) - hizli, calisan kontroller ---- */
@@ -3679,40 +3876,54 @@ async function workspaceHome(c){
     const kisi=(ui._contactMap&&ui._contactMap[e.contact_id])||null;
     const sys=e.source==='system';
     const kim=sys?'Sistem':(tm[e.created_by_team_id]||'—');
-    const banaOzel=e._benim&&ilgiSet.has(e.id);
-    /* §8: ayni kisi bir satirda IKI KEZ gorunmesin. Oturum sahibi
-       etiketliyse "Sana özel" rozetiyle temsil edilir; kendi @adi
-       etiket listesinden dusurulur. */
-    const etiket=(ilgiMap[e.id]||[])
-      .filter(t=>!(banaOzel&&t===benim)).map(t=>tm[t]).filter(Boolean);
+    /* S4.3 §3 — TEK zihinsel model: her ilgi iliskisi `@Kisi` olarak
+       cizilir. Onceki surum oturum sahibini "Sana özel" diye AYRI bir
+       kavramla gosteriyordu; kullanici ayni listede iki farkli dil
+       goruyordu. Artik oturum sahibi de `@Adi` olarak cikar, yalnizca
+       fark edilsin diye vurgulanir. Bir iliski -> bir gorunur etiket. */
+    const etiketler=(ilgiMap[e.id]||[])
+      .map(t=>({id:t,ad:tm[t]})).filter(x=>x.ad);
     const acikAks=e.action_status==='open';
     const gecGun=e.due_at?psGecikme(e.due_at):null;
     const gecikti=acikAks&&gecGun>0;
     const orgTekrar=!!(j&&org&&orgBaslikTekrari(j.title,org));
     const orgGoster=org&&!orgTekrar;
-    const baglam=(j||orgGoster||kisi)?`<div class="pu-hr">
+    /* §4: satir eylemi YALNIZ kendi yazdigi, insan yazimi bir guncellemede.
+       Sistem Entry'si ve baskasinin guncellemesi normal UI'da duzenlenemez;
+       ayni kural RLS ile sunucuda da zorlanir (migration A). */
+    const yazarim=!sys&&benim&&e.created_by_team_id===benim;
+    const baglam=(j||orgGoster||kisi)?`
         ${j?`<button type="button" class="pu-chip is" onclick="workAc(${j.id})" title="${esc(j.title)}">${esc(orgKisa(j.title,40))}</button>`:''}
         ${orgGoster?`<button type="button" class="pu-chip org" onclick="orgAc(${orgId})" title="${esc(org)}">${esc(orgKisa(org,26))}</button>`:''}
         ${kisi?`<button type="button" class="pu-chip" onclick="personAc(${kisi.id})" title="${esc(kisi.name)}">${esc(kisi.name)}</button>`:''}
-      </div>`:'';
+      `:'';
     /* §7: son tarih KENDI yerinde (alt-sol) ve siradan bir etiket gibi
        gorunmuyor. §9: ACIL bagimsiz bir kavram, basliktadir. */
     const sonTarih=e.due_at?`<span class="pu-son ${gecikti?'gec':''}">${gecikti
         ? `⚠ ${gecGun} gün gecikti <i>· Son tarih ${esc(psGun(e.due_at))}</i>`
         : `Son tarih: <b>${esc(psGun(e.due_at))}</b>`}</span>`:'';
     const ikincil=[
-      ...etiket.map(nm=>`<span class="pu-who">@${esc(nm)}</span>`),
-      banaOzel?'<span class="pu-who ozel">Sana özel</span>':'',
+      ...etiketler.map(x=>`<span class="pu-who ${x.id===benim?'ben':''}">@${esc(x.ad)}</span>`),
       sys?'<span class="pu-sys">sistem</span>':''
     ].filter(Boolean).join('');
-    return `<article class="pu ${sys?'sys':''} ${e._benim?'mine':''}">
+    /* §26: `mine` sinifi satira kirmizi bir sol cizgi ciziyordu ve UC
+       farkli seyden biri anlamina geliyordu - etiketlendin VEYA sana
+       atanmis VEYA isi takip ediyorsun. Ucu de baska yerde acikca
+       temsil ediliyor: etiket artik vurgulu `@Adin`, takip/atama ise
+       `Benimle ilgili` filtresi. Aciklanamayan dekoratif bir durum
+       sinyali birakilmaz. `_benim` HESAPLANMAYA devam ediyor cunku o
+       filtre onu kullaniyor. */
+    return `<article class="pu ${sys?'sys':''}">
       <div class="pu-h">
         <div class="pu-hl">
           <b>${esc(kim)}</b>
           <time datetime="${esc(String(e.occurred_at||''))}">${esc(psZaman(e.occurred_at))}</time>
+          ${e.updated_at?'<span class="pu-duz" title="Bu güncelleme sonradan değiştirildi">düzenlendi</span>':''}
           ${e.is_urgent?'<span class="pu-b acil">ACİL</span>':''}
         </div>
-        ${baglam}
+        ${(baglam||yazarim)?`<div class="pu-hr">${baglam}${yazarim
+          ? `<button type="button" class="pu-mb" title="Seçenekler" aria-label="Seçenekler"
+               onclick="puMenu(event,${e.id})">⋯</button>` : ''}</div>`:''}
       </div>
       <p class="pu-t" onclick="psAc(this)">${esc(e.body)}</p>
       ${(sonTarih||ikincil)?`<div class="pu-f">
@@ -3764,14 +3975,38 @@ async function workspaceHome(c){
      Kaynaklar zaten onaylanmis yapisal tarihler: Entry son tarihleri ve
      work_operations.planned_date. Work'e sirf burayi doldurmak icin
      termin EKLENMEZ (§14). */
+  /* ---- AJANDAM: kisisel ilgi kurallari (S4.3 §19) ------------------
+     Sirket takviminin filtresi DEGIL. Bu kart "benim gunum"u gosterir,
+     bu yuzden hangi sirket olayinin kisisel oldugu DETERMINISTIK olarak
+     tanimlanir. Bir tarihli Entry benim ajandamdadir eger:
+       (a) o guncellemede ETIKETLIYSEM        (entry_relevance)
+       (b) BANA ATANMISSA                     (legacy assignee_id)
+       (c) onu BEN YAZDIYSAM                  (kendi verdigim soz)
+       (d) bagli oldugu Work'u TAKIP EDIYORSAM (work_followers)
+     Bir operasyon ajandamdadir eger Work'unu takip ediyorsam (d).
+     Kisisel etkinlikler her zaman dahildir - zaten yalniz benim.
+     Sirketin geri kalani `İşler → Takvim`de kalir (§24). */
+  const ajandaIlgili=e=>
+    ilgiSet.has(e.id) ||
+    (benim && e.assignee_id===benim) ||
+    (benim && e.created_by_team_id===benim) ||
+    (e.job_id && takipJobs.has(e.job_id));
   const ajanda={};
-  tumEnt.filter(e=>e.action_status==='open'&&e.due_at).forEach(e=>{
+  tumEnt.filter(e=>e.due_at&&ajandaIlgili(e)).forEach(e=>{
     const d=String(e.due_at).slice(0,10);
     if(d>ufukIso) return;
+    /* Kapanmis bir aksiyon ajandada yer tutmaz. */
+    if(e.action_status==='done'||e.action_status==='cancelled') return;
     const k=d<bugun?bugun:d;               /* gecikmisler bugunun ustunde toplanir */
     (ajanda[k]=ajanda[k]||[]).push({t:'takip',gec:d<bugun,d,e}); });
-  (ops||[]).filter(o=>o.planned_date&&o.planned_date>=bugun&&o.planned_date<=ufukIso)
+  (ops||[]).filter(o=>o.planned_date&&o.planned_date>=bugun&&o.planned_date<=ufukIso
+                      &&o.job_id&&takipJobs.has(o.job_id))
     .forEach(o=>{ (ajanda[o.planned_date]=ajanda[o.planned_date]||[]).push({t:'op',d:o.planned_date,o}); });
+  /* Kisisel etkinlikler (§17): yalniz sahibinde gorunur. */
+  (kisisel||[]).filter(k=>k.event_date>=bugun&&k.event_date<=ufukIso)
+    .forEach(k=>{ (ajanda[k.event_date]=ajanda[k.event_date]||[]).push({t:'ozel',d:k.event_date,k}); });
+  Object.keys(ajanda).forEach(d=>ajanda[d].sort((a,b)=>
+    (a.t==='ozel'?(a.k.event_time||'99'):'00').localeCompare(b.t==='ozel'?(b.k.event_time||'99'):'00')));
   const gunler=Object.keys(ajanda).filter(d=>d>=bugun).sort().slice(0,7);
   /* GUN BASINA tavan. Kart 7 GUN ile sinirliydi ama "Bugün" kovasi TUM
      gecikmisleri yutuyor (yukaridaki `d<bugun?bugun:d`), dolayisiyla
@@ -3782,13 +4017,27 @@ async function workspaceHome(c){
   const tkvHtml=gunler.length?gunler.map(d=>{
     const yarin=new Date(); yarin.setDate(yarin.getDate()+1);
     const et=d===bugun?'Bugün':(d===_wsIso(yarin)?'Yarın':psGun(d));
-    const hepsi=ajanda[d], tasma=hepsi.length-PA_GUN_TAVAN;
+    /* S4.3: KISISEL etkinlikler gun tavanindan MUAF. Aksi halde gecikmis
+       sirket olaylari "Bugün" kovasini doldurunca kullanicinin az once
+       ekledigi kendi randevusu "+N kayıt daha"nin arkasinda kayboluyordu -
+       kisisel bir ajandada kabul edilemez. Tavan yalniz SIRKET
+       satirlarina uygulanir; gunun kendi ogeleri her zaman gorunur. */
+    const ozelG=ajanda[d].filter(x=>x.t==='ozel');
+    const sirketG=ajanda[d].filter(x=>x.t!=='ozel');
+    const tasma=sirketG.length-PA_GUN_TAVAN;
+    const hepsi=[...ozelG,...sirketG.slice(0,PA_GUN_TAVAN)];
     return `<div class="pa-d"><div class="pa-dh ${d===bugun?'now':''}">${esc(et)}</div>
-      ${hepsi.slice(0,PA_GUN_TAVAN).map(x=>x.t==='takip'
+      ${hepsi.map(x=>x.t==='takip'
         ? `<button type="button" class="pa-e ${x.gec?'gec':''}" onclick="${x.e.job_id?`workAc(${x.e.job_id})`:'void 0'}">
-             <span class="pa-k takip">Takip</span>
+             <span class="pa-k takip">Günc.</span>
              <span class="pa-x">${esc(String(x.e.body).slice(0,64))}</span>
              ${x.gec?`<em>${psGecikme(x.d)} gün gecikti</em>`:''}</button>`
+        : x.t==='ozel'
+        ? `<button type="button" class="pa-e ozel" onclick="keAc(${x.k.id})" title="Kişisel etkinlik — yalnız siz görürsünüz">
+             ${/* §23: kisisel oge notr/kisisel bir rozet tasir; gurultulu
+                  bir gizlilik uyarisi YOK, ama "bu benim" anlasilir. */''}
+             <span class="pa-k ozel">Kişisel</span>
+             <span class="pa-x">${x.k.event_time?`<b>${esc(String(x.k.event_time).slice(0,5))}</b> `:''}${esc(x.k.title)}</span></button>`
         : `<button type="button" class="pa-e" onclick="workAc(${x.o.job_id})">
              ${/* §16: Baski/Montaj/Sokum ayni yesili paylasiyordu ve ayirt
                   edilemiyordu. Her operasyon turu kendi tonunu alir. */''}
@@ -3883,8 +4132,14 @@ async function workspaceHome(c){
 
       <div class="pnl-b">
         <section class="card">
-          <div class="card-h"><h3>Bugün &amp; Yaklaşan</h3>
-            <button class="btn-link" onclick="isGo('takvim',{})">Takvime git</button></div>
+          ${/* §20: kart artik KISISEL. Ust-sag eylem kullaniciyi dogrudan
+               sirket operasyon takvimine atmiyor; kendi genisletilmis
+               kisisel takvimini aciyor (§21). */''}
+          <div class="card-h"><h3>Ajandam</h3>
+            <div style="display:flex;gap:4px;align-items:center">
+              <button class="btn-link ekle" onclick="keForm(0)" title="Yalnız sizin göreceğiniz bir etkinlik ekleyin">+ Kişisel</button>
+              <button class="btn-link" onclick="ajandaAc()">Takvim</button>
+            </div></div>
           <div class="card-b pa-list">${tkvHtml}</div></section>
 
         <section class="card">
@@ -3900,6 +4155,125 @@ async function workspaceHome(c){
       </div>
     </div>`;
 }
+/* ============ KISISEL ETKINLIK + AJANDAM (S4.3 §16-§24) =============
+   Ayri bir yan menu modulu ACILMADI (§21): genisletilmis kisisel takvim
+   Panelim'in icinde bir modal yuzeydir. `İşler → Takvim` paylasilan
+   SIRKET operasyon takvimi olarak aynen kalir ve kisisel etkinlikleri
+   ASLA gostermez (§24). */
+function keForm(id){
+  const k=(ui._kisisel||[]).find(x=>x.id===id)||{};
+  const bugun=_cIso(new Date());
+  modal(`<h3 style="margin:0 0 4px">${id?'Kişisel etkinlik':'Kişisel etkinlik ekle'}</h3>
+    <p class="muted" style="font-size:12.5px;margin:0 0 14px">
+      Yalnız siz görürsünüz. Ekip akışına, iş zaman çizelgesine veya
+      şirket takvimine düşmez.</p>
+    <input type="hidden" id="keId" value="${id||0}">
+    <div class="field"><label class="flabel" for="keTitle">Ne?</label>
+      <input class="inp" id="keTitle" value="${esc(k.title)}" placeholder="ör. Dişçi" autocomplete="off"></div>
+    <div class="row2">
+      <div class="field"><label class="flabel" for="keDate">Tarih</label>
+        <input class="inp" type="date" id="keDate" value="${esc(k.event_date||bugun)}"></div>
+      <div class="field"><label class="flabel" for="keTime">Saat <span class="fhint" style="display:inline">(isteğe bağlı)</span></label>
+        <input class="inp" type="time" id="keTime" value="${esc(k.event_time?String(k.event_time).slice(0,5):'')}"></div>
+    </div>
+    <div class="field"><label class="flabel" for="keNote">Not</label>
+      <input class="inp" id="keNote" value="${esc(k.note)}" placeholder="isteğe bağlı"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      ${id?`<button class="btn btn-danger btn-sm" style="margin-right:auto" onclick="keSil(${id})">Sil</button>`:''}
+      <button class="btn btn-ghost btn-sm" onclick="closeModal()">Vazgeç</button>
+      <button class="btn btn-primary btn-sm" onclick="keKaydet()">Kaydet</button></div>`);
+  const t=document.getElementById('keTitle'); if(t)t.focus();
+}
+function keAc(id){ keForm(id); }
+async function keKaydet(){
+  const title=(gv('keTitle')||'').trim();
+  if(!title){ mpAlert('Başlık zorunlu.'); return; }
+  const tarih=gv('keDate'); if(!tarih){ mpAlert('Tarih zorunlu.'); return; }
+  const saat=gv('keTime')||null;
+  modalBusy(true);
+  const r=await guard(()=>api('personal_event_save',{id:+gv('keId')||0,title,
+    event_date:tarih, event_time:saat, note:gv('keNote')||null}),'Kaydedilemedi');
+  modalBusy(false);
+  if(r===null)return;
+  closeModal(); toast('Kişisel etkinlik kaydedildi.');
+  if(ui._ajandaAcik) ajandaAc(); else renderSection();
+}
+async function keSil(id){
+  if(!await mpConfirm('Bu kişisel etkinlik silinsin mi?','Etkinliği Sil'))return;
+  const r=await guard(()=>api('personal_event_delete&id='+id),'Silinemedi'); if(r===null)return;
+  closeModal(); toast('Silindi.');
+  if(ui._ajandaAcik) ajandaAc(); else renderSection();
+}
+
+/* §21: genisletilmis kisisel takvim. Kisisel etkinlikler + KISISEL OLARAK
+   ILGILI sirket olaylari (ayni kurallar: §19). Dort haftalik pencere. */
+async function ajandaAc(){
+  const bas=_cIso(new Date());
+  const son=new Date(); son.setDate(son.getDate()+27); const sonIso=_cIso(son);
+  const veri=await guard(()=>Promise.all([
+    api(`personal_events_list&from=${bas}&to=${sonIso}`),
+    api('entries_list&limit=400'),
+    api(`operations_list&from=${bas}&to=${sonIso}`),
+    api('jobs_list'),
+    api('entry_relevance_all').catch(()=>[]),
+    api('work_followers_all&team_id='+((ui._me&&ui._me.id)||0)).catch(()=>[])
+  ]),'Ajanda açılamadı');
+  if(!veri)return;
+  const [ozel,ents,ops,jobs,ilgi,takip]=veri;
+  ui._kisisel=ozel||[];
+  ui._ajandaAcik=true;
+  const benim=(ui._me&&ui._me.id)||0;
+  const jm={}; (jobs||[]).forEach(j=>jm[j.id]=j);
+  const ilgiSet=new Set((ilgi||[]).filter(r=>r.team_id===benim).map(r=>r.entry_id));
+  const takipJobs=new Set((takip||[]).map(r=>r.job_id));
+  const ilgiliMi=e=> ilgiSet.has(e.id) || (benim&&e.assignee_id===benim)
+                  || (benim&&e.created_by_team_id===benim)
+                  || (e.job_id&&takipJobs.has(e.job_id));
+  const gun={};
+  const koy=(d,x)=>{ if(d<bas||d>sonIso) return; (gun[d]=gun[d]||[]).push(x); };
+  /* Kompakt kartla TUTARLI: gecikmis kisisel olaylar dusurulmez, "Bugün"
+     kovasinin basina tasinir (§20 "overdue where relevant"). */
+  (ents||[]).filter(e=>e.due_at&&ilgiliMi(e)
+      &&e.action_status!=='done'&&e.action_status!=='cancelled')
+    .forEach(e=>{ const d=String(e.due_at).slice(0,10);
+      koy(d<bas?bas:d,{t:'gunc',e,gec:d<bas,gd:d}); });
+  (ops||[]).filter(o=>o.planned_date&&o.job_id&&takipJobs.has(o.job_id))
+    .forEach(o=>koy(o.planned_date,{t:'op',o}));
+  (ozel||[]).forEach(k=>koy(k.event_date,{t:'ozel',k}));
+  const gunler=Object.keys(gun).sort();
+  const yarin=new Date(); yarin.setDate(yarin.getDate()+1); const yarinIso=_cIso(yarin);
+  const et=d=>d===bas?'Bugün':(d===yarinIso?'Yarın':psGun(d));
+  const govde=gunler.length?gunler.map(d=>`<div class="pa-d"><div class="pa-dh ${d===bas?'now':''}">${esc(et(d))}</div>
+      ${/* Kompakt kartla AYNI gun ici sira: once kendi etkinliklerim
+           (saate gore), sonra sirket olaylari. */''}
+      ${gun[d].sort((a,b)=>{
+          const oa=a.t==='ozel'?0:1, ob=b.t==='ozel'?0:1;
+          if(oa!==ob) return oa-ob;
+          return oa===0 ? String(a.k.event_time||'99').localeCompare(String(b.k.event_time||'99')) : 0; })
+        .map(x=>x.t==='ozel'
+          ? `<button type="button" class="pa-e ozel" onclick="keAc(${x.k.id})">
+               <span class="pa-k ozel">Kişisel</span>
+               <span class="pa-x">${x.k.event_time?`<b>${esc(String(x.k.event_time).slice(0,5))}</b> `:''}${esc(x.k.title)}</span></button>`
+          : x.t==='gunc'
+          ? `<button type="button" class="pa-e ${x.gec?'gec':''}" onclick="${x.e.job_id?`closeModal();workAc(${x.e.job_id})`:'void 0'}">
+               <span class="pa-k takip">Günc.</span>
+               <span class="pa-x">${esc(String(x.e.body).slice(0,70))}</span>
+               ${x.gec?`<em>${psGecikme(x.gd)} gün gecikti</em>`:''}</button>`
+          : `<button type="button" class="pa-e" onclick="closeModal();workAc(${x.o.job_id})">
+               <span class="pa-k op op-${esc(x.o.operation_type)}">${esc(opTypeLbl(x.o.operation_type))}</span>
+               <span class="pa-x">${esc(x.o.description||(jm[x.o.job_id]||{}).title||'')}</span></button>`).join('')}
+    </div>`).join('')
+    :'<p class="empty">Önümüzdeki dört haftada bir şey yok.</p>';
+  modal(`<h3 style="margin:0 0 4px">Ajandam</h3>
+    <p class="muted" style="font-size:12.5px;margin:0 0 14px">
+      Kişisel etkinlikleriniz ve size bağlı şirket tarihleri — önümüzdeki dört hafta.
+      Şirketin tamamı <b>İşler → Takvim</b>'de.</p>
+    <div class="pa-list" style="max-height:52vh;overflow:auto">${govde}</div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+      <button class="btn btn-sm act act-work" onclick="keForm(0)">${ic('plus',15)} Kişisel etkinlik</button>
+      <button class="btn btn-ghost btn-sm" onclick="ui._ajandaAcik=false;closeModal()">Kapat</button></div>`);
+}
+
 /* Panelim kisayollari - ayni kayda Isler ekranindaki filtreyle gider,
    ayri bir liste kopyasi uretmez (BR-V01). Hedef ekranda filtrenin AKTIF
    oldugu acikca gorunur (§8/§20). */
@@ -3909,11 +4283,12 @@ async function workspaceHome(c){
    `Aktif filtre` seridinde acikca gorunur. Acil isler ayni satirdaki
    mevcut `⚡ Acil` anahtariyla tek tikla eklenir. */
 function dikkatGoruntule(){
-  isGo('liste',{q:'',org:'',phase:'',ilgili:'',acil:false,gec:true,life:['acik','bekliyor']});
+  isGo('liste',{q:'',org:'',phase:'',ilgili:'',acil:false,gec:false,dikkat:true,
+                life:['acik','bekliyor']});
 }
 function wsTakipTumu(){
   isGo('liste',{q:'',org:'',phase:'',ilgili:String((ui._me&&ui._me.id)||''),
-                acil:false,gec:false,life:['acik','bekliyor']});
+                acil:false,gec:false,dikkat:false,life:['acik','bekliyor']});
 }
 
 /* ---------- Workspace Mecralar hub (parity audit S1 §2/§9) ----------
@@ -4406,7 +4781,7 @@ async function ftrReset(){ if(!await mpConfirm('Footer menüsü varsayılana dö
    ========================================================== */
 /* Canonical Work phase etiketleri (D-206). Legacy anahtarlar geçiş
    süresince okunabilir kalsın diye korunur. */
-const JOBLBL={temas_takip:'Temas / Takip',teklif:'Teklif',baski:'Baskı',montaj:'Montaj',yayinda_aktif:'Yayında / Aktif',
+const JOBLBL={...FAZ_ETIKET,
   tasarim:'Tasarım (eski)',yayin:'Yayın (eski)',arsiv:'Arşiv (eski)'};
 function haftaAraligi(off){
   const d=new Date(); const g=(d.getDay()+6)%7;           /* pazartesi = 0 */
