@@ -9,6 +9,12 @@
   --c-accent:#e11d48; --c-accent-d:#be123c; --c-accent-soft:#fde8ec;
   --c-brand:#e11d48; --c-brand-d:#be123c; --c-brand-dk:#881337; --c-brand-soft:#fdeaee;
   --c-violet:#7c5cff; --c-amber:#d99100; --c-amber-soft:#fdf3dd;
+  /* S4.2 §14 — global olustur eylemleri icin semantik renk kumesi.
+     Yeni bir tasarim sistemi DEGIL: mevcut paletin uzerine dort taninabilir
+     ton. Ayni eylem uygulamanin her yerinde AYNI rengi kullanir. */
+  --c-violet-soft:#efeaff;
+  --c-blue:#2563eb; --c-blue-soft:#e7effd;
+  --c-orange:#d9670f; --c-orange-soft:#fdeee1;
   --c-green:#1f9d55; --c-green-soft:#e4f5ea; --c-cyan:#0ea5b7;
   --c-red:#d64545; --c-red-soft:#fdeaea; --c-slate:#8b93a7;
   --c-warn:#f0a828;
@@ -40,6 +46,25 @@ h1,h2,h3,h4{margin:0;font-weight:600;letter-spacing:-.022em;}
 .btn-ghost{background:var(--c-line2);color:var(--c-ink2);} .btn-ghost:hover{background:var(--c-line);color:var(--c-ink);}
 .btn-danger{background:var(--c-red-soft);color:var(--c-red);} .btn-danger:hover{background:#fbdcdc;}
 .btn-sm{padding:6px 11px;font-size:12.5px;}
+
+/* ---------- semantik olustur eylemleri (S4.2 §14-§15) ----------
+   Dort ayri dolu renk "gokkusagi" yaratirdi (§15). Bu yuzden yalniz
+   BIRINCIL eylem (Guncelleme) dolu kirmizi kalir; digerleri kendi
+   semantik tonunun HAFIF zeminini tasir. Renk sus degil, TANIMA
+   yardimcisidir: ayni eylem hangi ekranda olursa olsun ayni tonu
+   kullanir - Isler'deki `Yeni İş` de mavidir, Hafiza'daki
+   `Hafızaya Ekle` de mordur, Operasyon'daki kayit ekleme de turuncudur.
+   Sayfaya ozel inline renk YAZILMAZ; hep bu siniflar kullanilir. */
+.act{border:1px solid transparent;font-weight:600;}
+.act .ic{opacity:.9;}
+.act-upd{background:var(--c-accent);color:#fff;}
+.act-upd:hover{background:var(--c-accent-d);}
+.act-work{background:var(--c-blue-soft);color:var(--c-blue);border-color:#cfe0fb;}
+.act-work:hover{background:#d8e6fd;border-color:var(--c-blue);}
+.act-mem{background:var(--c-violet-soft);color:var(--c-violet);border-color:#ddd4fb;}
+.act-mem:hover{background:#e6dfff;border-color:var(--c-violet);}
+.act-ops{background:var(--c-orange-soft);color:var(--c-orange);border-color:#f8dcc4;}
+.act-ops:hover{background:#fbe3d0;border-color:var(--c-orange);}
 
 /* ---------- form ---------- */
 .inp,textarea.inp,select.inp{width:100%;padding:9px 12px;border:1px solid #dfe5f0;border-radius:9px;
@@ -447,7 +472,7 @@ details.grp>summary:hover .chev{color:var(--c-accent);}
 .grp-all span{color:var(--c-ink3);}
 
 /* ================= DASHBOARD (referans stil) ================= */
-.tb-r{display:flex;align-items:center;gap:14px;}
+.tb-r{display:flex;align-items:center;gap:14px;min-width:0;}
 .uchip{display:flex;align-items:center;gap:9px;padding-left:14px;border-left:1px solid var(--c-hair);
   background:none;border-top:0;border-right:0;border-bottom:0;font:inherit;color:inherit;cursor:pointer;}
 .uchip img{width:34px;height:34px;border-radius:50%;object-fit:cover;}
@@ -470,6 +495,14 @@ details.grp>summary:hover .chev{color:var(--c-accent);}
 .dash-l,.dash-r{display:flex;flex-direction:column;gap:14px;min-width:0;}
 .btn-link{color:var(--c-ink3);font-size:12.5px;font-weight:500;padding:7px 11px;min-height:32px;display:inline-flex;align-items:center;border-radius:8px;}
 .btn-link:hover{color:var(--c-accent);background:var(--c-accent-soft);}
+/* S4.2 §16/§17/§19 — kart basligindaki eylem baglantilari (Takvime git,
+   Görüntüle, Tümü) soluk gri metindi ve tiklanabilir oldugu anlasilmiyordu.
+   Buyuk birincil dugme YAPILMAZ (§16); kucuk ama acikca eylem: aksan
+   rengi, cerceve ve bir yon oku. */
+.card-h .btn-link{color:var(--c-accent);font-weight:600;
+  border:1px solid transparent;padding:5px 10px;gap:5px;}
+.card-h .btn-link::after{content:"›";font-weight:700;font-size:14px;line-height:1;opacity:.75;}
+.card-h .btn-link:hover{background:var(--c-accent-soft);border-color:#f6ccd6;}
 
 /* alan grafiği */
 .areachart{position:relative;}
@@ -1047,8 +1080,26 @@ details.grp>summary:hover .chev{color:var(--c-accent);}
 .coord-sc .ic{width:15px;height:15px;}
 
 /* --- global hizli kayit (kabuk) --- */
-.qc-top{display:flex;gap:6px;margin-right:4px;}
-@media(max-width:760px){ .qc-top .btn-outline{display:none;} }
+.qc-top{display:flex;gap:7px;margin-right:4px;}
+.act-l{white-space:nowrap;}
+/* S4.2 §15 — ust cubuk gezinmeyi EZMEMELI.
+   ONCE: Sprint 4.1'de dorduncu eylem (`+ Baskı/Montaj`) eklendiginde
+   `.tb-r` 670px'e cikti ve ~1200px altindaki her genislikte yatay
+   tasma yaratiyordu (olculdu: 902px viewport -> scrollWidth 1010).
+   Ayrica buradaki eski kural `.btn-outline`i hedefliyordu; eylemler
+   semantik siniflara gecince o kural bosa dustu.
+   SONRA: orta genislikte ikincil eylemler ikon-only'ye duser (title
+   ipuclari zaten var, eylem kaybolmaz); yalnizca cok dar ekranda
+   gizlenir ve birincil `Güncelleme` her zaman kalir. */
+@media(max-width:1200px){
+  .qc-top .act:not(.act-upd) .act-l{display:none;}
+  .qc-top .act:not(.act-upd){padding-left:9px;padding-right:9px;}
+}
+@media(max-width:860px){
+  .qc-top .act-upd .act-l{display:none;}
+  .qc-top .act-upd{padding-left:9px;padding-right:9px;}
+}
+@media(max-width:760px){ .qc-top .act:not(.act-upd){display:none;} }
 
 /* --- hizli kayit baglam kutusu --- */
 .qc-ctx{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;background:var(--c-alt);
@@ -1122,16 +1173,44 @@ i.tk-p{min-width:10px;height:10px;padding:0;border-radius:3px;}
    ===================================================================== */
 
 /* --- iki sutunlu gunluk duzen (§4) --------------------------------- */
-.pnl-grid{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(0,1fr);gap:16px;align-items:start;}
-.pnl-a{min-width:0;} .pnl-b{min-width:0;display:flex;flex-direction:column;gap:16px;}
+/* §4 — olculerek ayarlandi. 1442px viewport'ta onceki 1.35fr/1fr orani
+   %56.6/%41.9 veriyordu; gunluk panellerin satirlarinin 6'si kirpiliyordu.
+   55/45 hem istenen araligin net bir noktasi hem de sag sutuna gercek
+   genislik veriyor. Akis BIRINCIL yuzey olarak kaliyor. */
+.pnl-grid{display:grid;grid-template-columns:minmax(0,55fr) minmax(0,45fr);
+  gap:18px;align-items:start;}
+.pnl-a{min-width:0;} .pnl-b{min-width:0;display:flex;flex-direction:column;gap:18px;}
+/* §20: sag sutundaki uc modul "serbest akan icerik" degil, sinirlari
+   belli parcalar gibi okunmali. Mevcut kart dili KORUNUR (ayni kenarlik,
+   ayni yaricap); yalniz ic ritim netlestirilir. Yeni tasarim sistemi YOK. */
+.pnl-b .card{margin-bottom:0;}
+.pnl-b .card-h{padding:13px 16px;}
+.pnl-b .card-h h3{display:flex;align-items:center;gap:7px;}
+.pnl-b .card-b{padding:12px 16px 14px;}
 @media(max-width:1100px){ .pnl-grid{grid-template-columns:1fr;} }
 
-/* --- filtre cubugu (§7) -------------------------------------------- */
-.pf{display:flex;flex-wrap:wrap;gap:6px;align-items:center;
-  padding:10px 16px;border-bottom:1px solid var(--c-line2);background:var(--c-alt);}
+/* --- filtre cubugu (S4.2 §12) ---------------------------------------
+   ONCE olculdu: acilir kutular 34px, anahtar haplari 32px yuksekligindeydi
+   ve ayni gorsel satirdaki ust kenarlari 1px kayikti - "hafifce hizasiz"
+   sikayetinin somut kaynagi buydu. Ayrica 3 kutu x 210px, 610px'lik cubuga
+   sigmiyor ve ucuncu kutu haplarin yanina dusuyordu.
+
+   SONRA: tek bir bilesen, iki acik grup. Butun kontroller AYNI yukseklikte
+   (34px) ve ayni taban hizasinda. Yeni filtre yok, filtre cekmecesi yok. */
+.pf{display:flex;flex-wrap:wrap;gap:9px 14px;align-items:center;
+  padding:12px 16px;border-bottom:1px solid var(--c-line2);background:var(--c-alt);}
+.pf-sel{display:flex;gap:8px;flex:1 1 430px;min-width:0;}
+.pf-sel .inp-sm{flex:1 1 0;min-width:112px;max-width:none;}
+.pf-tog{display:flex;gap:6px;align-items:center;flex-wrap:wrap;}
 .inp-sm{height:34px;padding:4px 10px;font-size:13px;max-width:210px;}
-.pf-t{border:1px solid var(--c-line);background:#fff;color:var(--c-ink2);border-radius:999px;
-  padding:7px 13px;font:600 13px/1.25 var(--f);cursor:pointer;transition:.13s;white-space:nowrap;}
+.pf-t{display:inline-flex;align-items:center;height:34px;
+  border:1px solid var(--c-line);background:#fff;color:var(--c-ink2);border-radius:999px;
+  padding:0 14px;font:600 13px/1 var(--f);cursor:pointer;transition:.13s;white-space:nowrap;}
+/* Temizle: filtre grubunun kendi icinde, ayri bir serit gerektirmeden. */
+.pf-x{display:inline-flex;align-items:center;height:34px;padding:0 13px;
+  border:1px solid var(--c-accent);background:#fff;color:var(--c-accent);
+  border-radius:999px;font:600 12.5px/1 var(--f);cursor:pointer;white-space:nowrap;}
+.pf-x:hover{background:var(--c-accent);color:#fff;}
 .pf-t:hover{border-color:var(--c-ink3);color:var(--c-ink);background:var(--c-alt);}
 /* §9: seçili filtre seçilmemişten AÇIKÇA farklı görünmeli. Sadece koyu zemin
    değil; kalınlık, gölge ve bir onay işareti birlikte. */
@@ -1167,14 +1246,27 @@ i.tk-p{min-width:10px;height:10px;padding:0;border-radius:3px;}
 .pu-list{display:flex;flex-direction:column;padding-top:4px;}
 /* §7: satır biraz daha yer kaplayabilir ama KART OLMAZ. Hedef normal bir
    güncelleme için 2-3 görsel satır ve ekranda rahat 10-15 kayıt. */
-.pu{padding:8px 6px 9px 12px;border-left:2px solid transparent;border-radius:0 var(--r) var(--r) 0;}
+/* §6: metnin nefes alacak yeri var ama satir KART DEGIL - ekranda hala
+   rahat 10+ kayit goruluyor. */
+.pu{padding:13px 14px 14px 13px;border-left:2px solid transparent;border-radius:0 var(--r) var(--r) 0;}
 .pu+.pu{border-top:1px solid var(--c-line2);}
 .pu:hover{background:var(--c-alt);}
 .pu.mine{border-left-color:var(--c-accent);}
 .pu.sys{opacity:.78;}
-.pu-h{display:flex;align-items:baseline;gap:9px;flex-wrap:wrap;margin-bottom:1px;}
+/* §5/§10: baslik iki bolgeli - solda kim/ne zaman, sagda Is·Kurum baglami.
+   Baglam artik metnin ALTINDA degil, ustte ve sagda; guncelleme metniyle
+   yarismiyor. */
+.pu-h{display:flex;align-items:flex-start;justify-content:space-between;
+  gap:10px;flex-wrap:wrap;margin-bottom:5px;}
+.pu-hl{display:flex;align-items:baseline;gap:9px;flex-wrap:wrap;min-width:0;}
+/* §11: chip'lerin ikinci satira tasmasi basligi iki kat yukseltiyor ve
+   "rastgele sarmis metadata" gibi gorunuyordu. Baglam TEK SATIRDA kalir;
+   sigmayan ad uc noktayla kirpilir, tam metin `title`da erisilebilir. */
+.pu-hr{display:flex;align-items:center;gap:5px;flex-wrap:nowrap;
+  justify-content:flex-end;min-width:0;max-width:58%;}
+.pu-hr .pu-chip{flex:0 1 auto;min-width:0;}
 .pu-h b{font:650 13px/1.5 var(--f);color:var(--c-ink);}
-/* §6: oluşturma zamanı ZORUNLU ve okunaklı - hover'da gizlenmez, chip
+/* §5: oluşturma zamanı ZORUNLU ve okunaklı - hover'da gizlenmez, chip
    kalabalığında kaybolmaz. Tabular rakam hizalı okuma sağlar. */
 .pu-h time{font:500 12.5px/1.5 var(--f);color:var(--c-ink3);font-variant-numeric:tabular-nums;}
 .pu-b{border-radius:var(--r-sm);padding:1px 7px;font:700 11px/1.5 var(--f);white-space:nowrap;}
@@ -1182,21 +1274,59 @@ i.tk-p{min-width:10px;height:10px;padding:0;border-radius:3px;}
 .pu-b.mine{background:var(--c-accent-soft);color:var(--c-accent);}
 .pu-b.due{background:var(--c-line2);color:var(--c-ink2);}
 .pu-b.gec{background:var(--c-red-soft);color:var(--c-red);}
-/* §5: güncelleme metni satırın EN GÜÇLÜ öğesidir. */
-.pu-t{margin:0;font-size:14.5px;line-height:1.5;color:var(--c-ink);overflow-wrap:anywhere;cursor:pointer;
+/* §6: güncelleme metni satırın EN GÜÇLÜ öğesidir ve nefes alir.
+   §11: cok genis ekranda satir uzunlugu 106 karaktere cikiyordu; okuma
+   olcusu ust sinirla tutuluyor. `ch` birimi RAKAM genisligine gore
+   cozulur ve Plus Jakarta'da rakamlar ortalama harften belirgin genistir
+   - 76ch olcusu 106 gercek karaktere denk geliyordu, bu yuzden 60ch.
+   Satirin kendisi tam genislikte kalir (baslik chip'leri ve alt
+   metadata sag kenari kullanir), yalniz PARAGRAF sinirlanir. */
+.pu-t{margin:5px 0 1px;font-size:14.5px;line-height:1.62;color:var(--c-ink);
+  overflow-wrap:anywhere;cursor:pointer;max-width:60ch;
   display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;}
 .pu-t.acik{-webkit-line-clamp:unset;display:block;}
+/* §10: dar ekranda baslik DOGAL olarak yiginlanir - baglam chip'leri
+   kendi satirini alir, yoksa 430px'te kurum adi tek harfe kadar
+   kirpiliyordu. Bilgi sirasi aynidir, yalniz dikey dizilir. */
+@media(max-width:760px){
+  .pu-h{flex-direction:column;align-items:flex-start;gap:4px;}
+  .pu-hr{max-width:100%;justify-content:flex-start;flex-wrap:wrap;}
+  .pu-f{gap:6px;}
+  .pu-fr{justify-content:flex-start;}
+}
 .pu-c{display:flex;flex-wrap:wrap;gap:5px;margin-top:4px;align-items:center;}
 .pu-chip{display:inline-flex;align-items:center;gap:4px;border:1px solid var(--c-line);background:#fff;
   color:var(--c-ink2);border-radius:var(--r-sm);padding:1px 7px;font:500 12px/1.5 var(--f);
   max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 /* §8: uzun resmi unvanlar satırı ele geçirmesin - görsel olarak kırpılır,
    tam metin title ile erişilebilir kalır. Kimlik verisi DEĞİŞMEZ. */
-.pu-chip.org{max-width:min(260px,42%);}
-/* §5: son tarih oluşturma zamanından AYRI bir satırda. */
-.pu-due{display:flex;gap:8px;align-items:center;margin-top:3px;font:600 12.5px/1.5 var(--f);}
-.pu-due .g{color:var(--c-red);}
-.pu-due .n{color:var(--c-ink2);}
+/* Daralma sirasi bilinclidir: yer yetmezse ONCE kurum chip'i kirpilir,
+   Is basligi mumkun oldugunca tam kalir. */
+.pu-chip.org{max-width:min(210px,100%);flex-shrink:3;}
+.pu-chip.is{max-width:min(300px,100%);font-weight:600;color:var(--c-ink);flex-shrink:1;}
+/* §7/§8: alt bolge. SOLDA son tarih (ayri bir bilgi sinifi, siradan bir
+   etiket gibi gorunmez), SAGDA ikincil ilgi metadatasi. Ikisi ayni
+   kumede DURMAZ - onceki satir duzeninde son tarih kurum chip'inin
+   yanina dusuyordu. */
+.pu-f{display:flex;align-items:center;justify-content:space-between;
+  gap:10px;flex-wrap:wrap;margin-top:9px;}
+.pu-fl{min-width:0;display:flex;align-items:center;}
+.pu-fr{min-width:0;display:flex;align-items:center;gap:5px;flex-wrap:wrap;justify-content:flex-end;}
+/* Son tarih normal metadatadan GUCLU, guncelleme metninden ZAYIF. */
+.pu-son{display:inline-flex;align-items:baseline;gap:5px;white-space:nowrap;
+  border-radius:999px;padding:3px 11px;font:600 12.5px/1.5 var(--f);
+  background:var(--c-line2);color:var(--c-ink2);}
+.pu-son b{font-weight:700;color:var(--c-ink);}
+.pu-son i{font-style:normal;font-weight:500;opacity:.85;}
+.pu-son.gec{background:var(--c-red-soft);color:var(--c-red);font-weight:700;}
+.pu-son.gec i{color:var(--c-red);opacity:.9;}
+/* Etiketlenen kisiler: gorunur ama KISIK (§8). */
+.pu-who{font:600 12px/1.5 var(--f);color:var(--c-ink3);
+  background:var(--c-line2);border-radius:999px;padding:2px 9px;white-space:nowrap;}
+/* "Sana özel" gorunur kalir ama DOLU KIRMIZI hap degil (§8: kisik). */
+.pu-who.ozel{background:var(--c-accent-soft);color:var(--c-accent-d);font-weight:700;}
+.pu-sys{font:500 11.5px/1.5 var(--f);color:var(--c-ink3);
+  border:1px dashed var(--c-line);border-radius:999px;padding:1px 8px;}
 button.pu-chip{cursor:pointer;transition:.13s;}
 button.pu-chip:hover{border-color:var(--c-ink);color:var(--c-ink);}
 .pu-chip.org{color:var(--c-ink2);}
@@ -1217,11 +1347,30 @@ button.pu-chip:hover{border-color:var(--c-ink);color:var(--c-ink);}
 .pgr .btn[disabled]{opacity:.45;cursor:default;}
 
 /* --- dikkat / takip satirlari (§12, §17) ---------------------------- */
-.pd-row{display:grid;grid-template-columns:auto minmax(0,1fr) minmax(0,auto);gap:10px;align-items:center;
-  width:100%;text-align:left;background:none;border:0;padding:9px 5px;border-radius:var(--r);
+/* §18/§19: satirlar arasi ritim ve ayrac netlestirildi; sebep (gecikme
+   gun sayisi / Acil) sagda kendi bolgesinde durur. Semantik DEGISMEDI. */
+/* Son sutun `minmax(0,auto)` idi ve sifira kadar ezilebiliyordu: uzun bir
+   kurum+ozet ortadaki sutunu sisirince sagdaki faz etiketi tek harfe
+   ("T…") duserek okunamaz hale geliyordu. `auto` da yetmedi: alan
+   yetmeyince auto sutunlar da orantili daraliyor. `max-content` etiketin
+   dogal genisligini GARANTI eder; daralma ortadaki metinde olur - o zaten
+   uc noktayla kirpilmak uzere tasarlanmis. */
+.pd-row{display:grid;grid-template-columns:auto minmax(0,1fr) max-content;gap:0;align-items:center;
+  width:100%;text-align:left;background:none;border:0;padding:10px 6px;border-radius:var(--r);
   cursor:pointer;font:inherit;color:var(--c-ink);}
+/* Sutunlar SIRAYA gore degil SINIFA gore yerlesir. `.pd-row` iki farkli
+   sekilde kullaniliyor: Dikkat Gerekenler'de ikon+govde+sag, Takip
+   Ettigim Isler ve kurum/kisi detayinda yalniz govde+sag. Sira temelli
+   yerlesimde ikinci sekilde `.pd-r` ORTADAKI esnek sutuna dusuyor ve
+   faz etiketi tek harfe ("T…") eziliyordu. Bosluk `gap` yerine kenar
+   boslugu ile verilir; boylece ikonsuz satirlar hayalet bir bosluk
+   kadar icerlek baslamaz. */
+.pd-row>.pd-i{grid-column:1;margin-right:11px;}
+.pd-row>.pd-b{grid-column:2;}
+.pd-row>.pd-r{grid-column:3;margin-left:11px;}
 .pd-row:hover{background:var(--c-alt);}
 .pd-row+.pd-row{border-top:1px solid var(--c-line2);}
+.pd-r{align-items:center;gap:6px;}
 .pd-i{width:25px;height:25px;border-radius:50%;display:grid;place-items:center;font-size:12.5px;flex:0 0 auto;}
 .pd-i.gec{background:var(--c-red-soft);color:var(--c-red);}
 .pd-i.acil{background:var(--c-accent-soft);color:var(--c-accent);}
@@ -1233,17 +1382,25 @@ button.pu-chip:hover{border-color:var(--c-ink);color:var(--c-ink);}
 .chip.clay{background:var(--c-red-soft);color:var(--c-red);}
 
 /* --- bugun & yaklasan ajandasi (§13) -------------------------------- */
-.pa-list{display:flex;flex-direction:column;gap:9px;}
-.pa-d{border-left:2px solid var(--c-line);padding-left:9px;}
-.pa-dh{font:700 12px/1.7 var(--f);color:var(--c-ink2);letter-spacing:.02em;}
+/* §16: gun basliklari artik gruplari acikca ayiriyor; olaylar gun
+   bloklarinin icinde nefes aliyor. */
+.pa-list{display:flex;flex-direction:column;gap:14px;}
+.pa-d{border-left:2px solid var(--c-line2);padding-left:11px;}
+.pa-d:first-child{border-left-color:var(--c-accent);}
+.pa-dh{font:700 11.5px/1.6 var(--f);color:var(--c-ink3);letter-spacing:.07em;
+  text-transform:uppercase;margin-bottom:3px;}
 .pa-dh.now{color:var(--c-accent);}
-.pa-e{display:flex;align-items:center;gap:8px;width:100%;text-align:left;background:none;border:0;
-  padding:5px 6px;border-radius:var(--r-sm);cursor:pointer;font:inherit;}
+.pa-e{display:flex;align-items:center;gap:9px;width:100%;text-align:left;background:none;border:0;
+  padding:6px 7px;border-radius:var(--r-sm);cursor:pointer;font:inherit;}
 .pa-e:hover{background:var(--c-alt);}
-.pa-k{flex:0 0 auto;border-radius:var(--r-sm);padding:2px 7px;font:700 11px/1.6 var(--f);
-  text-transform:uppercase;letter-spacing:.03em;}
-.pa-k.takip{background:var(--c-accent-soft);color:var(--c-accent);}
-.pa-k.op{background:var(--c-green-soft);color:var(--c-green);}
+/* §16: rozetler okunakli - sabit genislik hizali bir sutun olusturur. */
+.pa-k{flex:0 0 auto;min-width:62px;text-align:center;border-radius:999px;padding:3px 8px;
+  font:700 10.5px/1.5 var(--f);text-transform:uppercase;letter-spacing:.05em;}
+.pa-k.takip{background:var(--c-accent-soft);color:var(--c-accent-d);}
+.pa-k.op{background:var(--c-line2);color:var(--c-ink2);}
+.pa-k.op-baski{background:var(--c-orange-soft);color:var(--c-orange);}
+.pa-k.op-montaj{background:var(--c-green-soft);color:var(--c-green);}
+.pa-k.op-sokum{background:var(--c-blue-soft);color:var(--c-blue);}
 .pa-x{flex:1;min-width:0;font-size:13.5px;color:var(--c-ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .pa-e em{font-style:normal;font:700 11.5px/1.6 var(--f);color:var(--c-red);white-space:nowrap;}
 .pa-e.gec .pa-k{background:var(--c-red-soft);color:var(--c-red);}
@@ -1340,6 +1497,10 @@ button.pu-chip:hover{border-color:var(--c-ink);color:var(--c-ink);}
 
 /* ===== PS3: Hafıza ===================================================
    Arama ekranin hakimi; liste yogun ve taranabilir. Dev kart yok (§13). */
+/* §21: genis ekranda satirlar tam genislige yayilinca ad ile telefon
+   arasinda genis bir bosluk kaliyor ve goz uzun bir mesafe kat ediyordu.
+   Okuma genisligi sinirlanir - liste sakin ve taranabilir kalir. */
+.haf-search,#hafBody{max-width:1180px;}
 .haf-search{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px;}
 .haf-q{flex:1 1 340px;min-width:240px;height:42px;font-size:14.5px;}
 .haf-hint{margin:0 0 12px;font-size:13px;color:var(--c-ink3);}
@@ -1353,7 +1514,11 @@ button.pu-chip:hover{border-color:var(--c-ink);color:var(--c-ink);}
   border:1px solid var(--c-line2);border-radius:var(--r);padding:10px 13px;
   margin-bottom:5px;cursor:pointer;font:inherit;color:var(--c-ink);transition:.12s;}
 .haf-row:hover{border-color:var(--c-ink3);background:var(--c-alt);}
-.haf-k{flex:0 0 auto;border-radius:var(--r-sm);padding:2px 8px;
+/* S4.2 §21: "KURUM" ve "KİŞİ" farkli genislikteydi, bu yuzden sonuc
+   basliklari tek bir sutunda hizalanmiyor ve goz her satirda yeniden
+   yer ariyordu. Sabit minimum genislik ikisini de ayni kolona oturtur.
+   Etiketin KENDISI degismedi - yalniz hizalanir. */
+.haf-k{flex:0 0 auto;min-width:52px;text-align:center;border-radius:var(--r-sm);padding:2px 8px;
   font:700 11px/1.7 var(--f);text-transform:uppercase;letter-spacing:.04em;}
 .haf-k.kisi{background:var(--c-accent-soft);color:var(--c-accent);}
 .haf-k.kurum{background:var(--c-line2);color:var(--c-ink2);}

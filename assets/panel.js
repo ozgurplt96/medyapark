@@ -919,13 +919,15 @@ function showApp(){
                ekranlarindaki baglamsal butonlar ayni formu onceden
                doldurulmus halde acar. -->
           <div class="qc-top">
-            <button class="btn btn-primary btn-sm" onclick="qcAc({})" title="Bir güncelleme paylaş">${ic('plus',15)} Güncelleme</button>
-            <button class="btn btn-outline btn-sm" onclick="jobForm()" title="Yeni iş aç">${ic('plus',15)} Yeni İş</button>
-            <button class="btn btn-outline btn-sm" onclick="hafEkle()" title="Hafızaya kişi veya kurum ekle">${ic('plus',15)} Hafızaya Ekle</button>
+            ${/* Etiketler <span> icinde: dar ekranda metin gizlenip dugme
+                 ikon-only'ye duser, eylem KAYBOLMAZ (§15). */''}
+            <button class="btn btn-sm act act-upd" onclick="qcAc({})" title="Bir güncelleme paylaş">${ic('plus',15)}<span class="act-l">Güncelleme</span></button>
+            <button class="btn btn-sm act act-work" onclick="jobForm()" title="Yeni iş aç">${ic('plus',15)}<span class="act-l">Yeni İş</span></button>
+            <button class="btn btn-sm act act-mem" onclick="hafEkle()" title="Hafızaya kişi veya kurum ekle">${ic('plus',15)}<span class="act-l">Hafızaya Ekle</span></button>
             ${/* §14: AYNI operasyon formu, ikinci bir modal YOK. Global
                  baglamda Is secimi zorunludur cunku operasyon bir Work'un
                  child'idir; Work Detail'den acildiginda Is on-secilidir. */''}
-            <button class="btn btn-outline btn-sm" onclick="opForm(0)" title="Baskı veya montaj kaydı ekle">${ic('plus',15)} Baskı/Montaj</button>
+            <button class="btn btn-sm act act-ops" onclick="opForm(0)" title="Baskı veya montaj kaydı ekle">${ic('plus',15)}<span class="act-l">Baskı/Montaj</span></button>
           </div>
           <a class="btn btn-outline btn-sm" href="index.html" target="_blank">${ic('ext',15)} Siteyi Aç</a>
           ${userChip()}
@@ -1423,7 +1425,10 @@ function dashIsTakibiCard(s){
   return `<section class="card">
     <div class="card-h"><h3>İş Takibi</h3>
       <div style="display:flex;gap:8px;align-items:center">
-        <button class="btn btn-yes btn-sm" onclick="go('is-takibi').then(()=>setTimeout(()=>jobForm(),200))">+ Yeni İş</button>
+        ${/* §14: bu dugme `btn-yes` (yesil) ile tek seferlik bir renk
+             kullaniyordu; ayni eylem uygulamanin her yerinde AYNI semantik
+             tonu tasimali. */''}
+        <button class="btn btn-sm act act-work" onclick="go('is-takibi').then(()=>setTimeout(()=>jobForm(),200))">${ic('plus',15)} Yeni İş</button>
         <button class="btn-link" onclick="go('is-takibi')">Tümü</button></div></div>
     <div class="card-b">${jobsBoard(s.jobList||[],s.jobFaz)}</div>
   </section>`;
@@ -1839,7 +1844,7 @@ async function isTakibi(c){
         <p class="sub" id="coordSub">${esc(ust[1])}</p></div>
       <div style="display:flex;gap:8px">
         ${tab==='liste'?`<button class="btn btn-outline btn-sm" onclick="isListeExport()">${ic('download',15)} Excel'e Aktar</button>`:''}
-        <button class="btn btn-primary btn-sm" onclick="jobForm()">${ic('plus',15)} Yeni İş</button></div></div>
+        <button class="btn btn-sm act act-work" onclick="jobForm()">${ic('plus',15)} Yeni İş</button></div></div>
     ${coordKisayol('is-takibi')}
     ${coordTabBar(tab,D)}
     ${tab==='takvim'?'':coordFiltreKart(tab,D,f)}
@@ -2589,7 +2594,7 @@ async function workAc(id){
     <div class="sec-card">
       <div class="sec-head" style="margin-bottom:10px">
         <h4 style="font-size:14px;margin:0">Baskı &amp; Montaj <span class="chip" id="wOpSayi">0</span></h4>
-        <button class="btn btn-outline btn-sm" onclick="opForm(0,${j.id})">${ic('plus',15)} Kayıt Ekle</button></div>
+        <button class="btn btn-sm act act-ops" onclick="opForm(0,${j.id})">${ic('plus',15)} Kayıt Ekle</button></div>
       <div id="wOps"></div></div>
 
     <div class="sec-card">
@@ -3141,7 +3146,7 @@ async function operasyon(c){
       <div style="display:flex;gap:8px">
         <button class="btn btn-outline btn-sm" onclick="opExport()">${ic('download',15)} Excel'e Aktar</button>
         ${ui._role==='admin'?`<button class="btn btn-outline btn-sm" onclick="opImport()">${ic('upload',15)} Excel'den Al</button>`:''}
-        <button class="btn btn-primary btn-sm" onclick="opForm(0)">${ic('plus',15)} Yeni Kayıt</button></div></div>
+        <button class="btn btn-sm act act-ops" onclick="opForm(0)">${ic('plus',15)} Yeni Kayıt</button></div></div>
 
     ${coordKisayol('operasyon')}
     ${/* S2 §8: dönem artık bir formun içine gömülü select değil, doğrudan
@@ -3517,6 +3522,27 @@ function orgKisa(ad,max){
   return k;
 }
 /* "3 gün gecikti" / "Son tarih: 18 Eyl" (§5). */
+/* S4.2 §5 — "uzun kurum adlari baglam alanini ele gecirmesin".
+   Medyapark is basliklari cogunlukla `Kurum · Kampanya` bicimindedir
+   (`ADN Lezzet · Ürün lansmanı`), yaninda bir de `ADN LEZZET GIDA`
+   chip'i koymak ayni bilgiyi iki kez yazip Is basliginin %30'unu
+   kirptiriyordu. Baslik kurumu ZATEN tasiyorsa kurum chip'i dusulur.
+   Muhafazakar kural: kurumun ilk anlamli kelimesi (>=4 harf) is
+   basliginin BASINDA geciyorsa. Kurum baglami kaybolmaz - is
+   basliginda okunur ve kurum detayina Work uzerinden ulasilir. */
+function orgBaslikTekrari(baslik,org){
+  if(!baslik||!org) return false;
+  const nrm=v=>String(v).toLocaleLowerCase('tr').replace(/[^\p{L}\p{N}\s]/gu,' ').replace(/\s+/g,' ').trim();
+  /* Onek, >=4 harfe ulasana kadar kelime ekler (en fazla 2 kelime):
+     "ADN LEZZET GIDA" -> "adn lezzet" (tek basina "adn" cok kisa ve
+     yanlis eslesme riski tasir), "ACIBADEM SAGLIK..." -> "acibadem". */
+  const kel=nrm(org).split(' ').filter(Boolean);
+  if(!kel.length) return false;
+  let onek=kel[0];
+  if(onek.length<4 && kel[1]) onek+=' '+kel[1];
+  if(onek.replace(/\s/g,'').length<4) return false;
+  return nrm(baslik).startsWith(onek);
+}
 function psGecikme(due){
   const d=new Date(String(due).slice(0,10)+'T00:00:00');
   const b=new Date(); b.setHours(0,0,0,0);
@@ -3635,6 +3661,17 @@ async function workspaceHome(c){
      Başlık satırı kim+ne zaman (+Acil, +kişisel ilgi), sonra EN GÜÇLÜ öğe
      olan metin, sonra bağlam chip'leri, en sonda AYRI bir son tarih satırı.
      Son tarih hiçbir zaman oluşturma zamanıyla aynı yerde durmaz (§5/§6). */
+  /* ---- Guncelleme satiri (S4.2 §5-§10) -------------------------------
+     Bilgi SINIFLARI artik ayri gorsel bolgelerde yasiyor. Once hepsi
+     metnin altinda tek bir chip kalabaligiydi; son tarih, kurum,
+     etiketlenen kisi ve "sistem" ayni siraya diziliyordu ve hicbiri
+     otekinden ayirt edilemiyordu.
+
+       BASLIK  sol: kim + ne zaman (+ACIL)   sag: Is · Kurum · Kisi
+       GOVDE   guncelleme metni - satirin en guclu ogesi
+       ALT     sol: SON TARIH                sag: etiketlenen kisiler
+
+     Entry semantigi ve depolama DEGISMEDI (§5). */
   const feedSatir=e=>{
     const j=jm[e.job_id]||null;
     const orgId=j?j.customer_id:e.customer_id;
@@ -3642,28 +3679,46 @@ async function workspaceHome(c){
     const kisi=(ui._contactMap&&ui._contactMap[e.contact_id])||null;
     const sys=e.source==='system';
     const kim=sys?'Sistem':(tm[e.created_by_team_id]||'—');
-    const etiket=(ilgiMap[e.id]||[]).map(t=>tm[t]).filter(Boolean);
+    const banaOzel=e._benim&&ilgiSet.has(e.id);
+    /* §8: ayni kisi bir satirda IKI KEZ gorunmesin. Oturum sahibi
+       etiketliyse "Sana özel" rozetiyle temsil edilir; kendi @adi
+       etiket listesinden dusurulur. */
+    const etiket=(ilgiMap[e.id]||[])
+      .filter(t=>!(banaOzel&&t===benim)).map(t=>tm[t]).filter(Boolean);
     const acikAks=e.action_status==='open';
     const gecGun=e.due_at?psGecikme(e.due_at):null;
     const gecikti=acikAks&&gecGun>0;
+    const orgTekrar=!!(j&&org&&orgBaslikTekrari(j.title,org));
+    const orgGoster=org&&!orgTekrar;
+    const baglam=(j||orgGoster||kisi)?`<div class="pu-hr">
+        ${j?`<button type="button" class="pu-chip is" onclick="workAc(${j.id})" title="${esc(j.title)}">${esc(orgKisa(j.title,40))}</button>`:''}
+        ${orgGoster?`<button type="button" class="pu-chip org" onclick="orgAc(${orgId})" title="${esc(org)}">${esc(orgKisa(org,26))}</button>`:''}
+        ${kisi?`<button type="button" class="pu-chip" onclick="personAc(${kisi.id})" title="${esc(kisi.name)}">${esc(kisi.name)}</button>`:''}
+      </div>`:'';
+    /* §7: son tarih KENDI yerinde (alt-sol) ve siradan bir etiket gibi
+       gorunmuyor. §9: ACIL bagimsiz bir kavram, basliktadir. */
+    const sonTarih=e.due_at?`<span class="pu-son ${gecikti?'gec':''}">${gecikti
+        ? `⚠ ${gecGun} gün gecikti <i>· Son tarih ${esc(psGun(e.due_at))}</i>`
+        : `Son tarih: <b>${esc(psGun(e.due_at))}</b>`}</span>`:'';
+    const ikincil=[
+      ...etiket.map(nm=>`<span class="pu-who">@${esc(nm)}</span>`),
+      banaOzel?'<span class="pu-who ozel">Sana özel</span>':'',
+      sys?'<span class="pu-sys">sistem</span>':''
+    ].filter(Boolean).join('');
     return `<article class="pu ${sys?'sys':''} ${e._benim?'mine':''}">
       <div class="pu-h">
-        <b>${esc(kim)}</b>
-        <time datetime="${esc(String(e.occurred_at||''))}">${esc(psZaman(e.occurred_at))}</time>
-        ${e.is_urgent?'<span class="pu-b acil">ACİL</span>':''}
-        ${e._benim&&ilgiSet.has(e.id)?'<span class="pu-b mine">Sana özel</span>':''}
+        <div class="pu-hl">
+          <b>${esc(kim)}</b>
+          <time datetime="${esc(String(e.occurred_at||''))}">${esc(psZaman(e.occurred_at))}</time>
+          ${e.is_urgent?'<span class="pu-b acil">ACİL</span>':''}
+        </div>
+        ${baglam}
       </div>
       <p class="pu-t" onclick="psAc(this)">${esc(e.body)}</p>
-      ${(j||org||kisi||etiket.length||sys)?`<div class="pu-c">
-        ${j?`<button type="button" class="pu-chip" onclick="workAc(${j.id})" title="${esc(j.title)}">${esc(orgKisa(j.title,38))}</button>`:''}
-        ${org?`<button type="button" class="pu-chip org" onclick="orgAc(${orgId})" title="${esc(org)}">${esc(orgKisa(org))}</button>`:''}
-        ${kisi?`<button type="button" class="pu-chip" onclick="personAc(${kisi.id})" title="${esc(kisi.name)}">${esc(kisi.name)}</button>`:''}
-        ${etiket.map(nm=>`<span class="pu-chip who">@${esc(nm)}</span>`).join('')}
-        ${sys?'<span class="pu-chip dim">sistem</span>':''}
+      ${(sonTarih||ikincil)?`<div class="pu-f">
+        <div class="pu-fl">${sonTarih}</div>
+        <div class="pu-fr">${ikincil}</div>
       </div>`:''}
-      ${e.due_at?`<div class="pu-due">${gecikti
-        ? `<span class="g">⚠ ${gecGun} gün gecikti</span><span class="n">son tarih ${esc(psGun(e.due_at))}</span>`
-        : `<span class="n">Son tarih: <b>${esc(psGun(e.due_at))}</b></span>`}</div>`:''}
     </article>`;};
 
   const feedHtml=gosterilen.length?gosterilen.map(feedSatir).join('')
@@ -3735,7 +3790,9 @@ async function workspaceHome(c){
              <span class="pa-x">${esc(String(x.e.body).slice(0,64))}</span>
              ${x.gec?`<em>${psGecikme(x.d)} gün gecikti</em>`:''}</button>`
         : `<button type="button" class="pa-e" onclick="workAc(${x.o.job_id})">
-             <span class="pa-k op">${esc(opTypeLbl(x.o.operation_type))}</span>
+             ${/* §16: Baski/Montaj/Sokum ayni yesili paylasiyordu ve ayirt
+                  edilemiyordu. Her operasyon turu kendi tonunu alir. */''}
+             <span class="pa-k op op-${esc(x.o.operation_type)}">${esc(opTypeLbl(x.o.operation_type))}</span>
              <span class="pa-x">${esc(x.o.description||(jm[x.o.job_id]||{}).title||'')}</span></button>`).join('')}
       ${tasma>0?`<button type="button" class="pa-more" onclick="${d===bugun?'dikkatGoruntule()':`isGo('takvim',{})`}">
         +${tasma} kayıt daha →</button>`:''}
@@ -3781,21 +3838,31 @@ async function workspaceHome(c){
         <section class="card">
           <div class="card-h">
             <h3>Güncellemeler</h3>
-            <button class="btn btn-primary btn-sm" onclick="qcAc({})">${ic('plus',15)} Güncelleme</button>
+            <button class="btn btn-sm act act-upd" onclick="qcAc({})">${ic('plus',15)} Güncelleme</button>
           </div>
+          ${/* §12: kontroller artik "yan yana konmus alakasiz ogeler" degil,
+               iki acik gruptan olusan TEK bir bilesen: once "neye gore
+               daralt" (acilir kutular), sonra hizli anahtarlar. Yeni
+               filtre EKLENMEDI, kavramlar aynen korundu. */''}
           <div class="pf">
-            <select class="inp inp-sm" id="psJob" aria-label="İşe göre süz" onchange="psFiltreDegis()">
-              <option value="">Tüm işler</option>${jobOpt}</select>
-            <select class="inp inp-sm" id="psOrg" aria-label="Kuruma göre süz" onchange="psFiltreDegis()">
-              <option value="">Tüm kurumlar</option>${orgOpt}</select>
-            <select class="inp inp-sm" id="psKisi" aria-label="İlgili kişiye göre süz" onchange="psFiltreDegis()">
-              <option value="">Tüm ilgililer</option>${kisiOpt}</select>
-            <button type="button" class="pf-t ${st.acil?'on':''}" aria-pressed="${st.acil}"
-              onclick="psFiltre({acil:${!st.acil}})">⚡ Acil</button>
-            <button type="button" class="pf-t ${st.gec?'on':''}" aria-pressed="${st.gec}"
-              onclick="psFiltre({gec:${!st.gec}})">⚠ Geciken</button>
-            <button type="button" class="pf-t ${st.benim?'on':''}" aria-pressed="${st.benim}"
-              onclick="psFiltre({benim:${!st.benim}})">Benimle ilgili</button>
+            <div class="pf-sel">
+              <select class="inp inp-sm ${st.job?'inp-on':''}" id="psJob" aria-label="İşe göre süz" onchange="psFiltreDegis()">
+                <option value="">Tüm işler</option>${jobOpt}</select>
+              <select class="inp inp-sm ${st.org?'inp-on':''}" id="psOrg" aria-label="Kuruma göre süz" onchange="psFiltreDegis()">
+                <option value="">Tüm kurumlar</option>${orgOpt}</select>
+              <select class="inp inp-sm ${st.kisi?'inp-on':''}" id="psKisi" aria-label="İlgili kişiye göre süz" onchange="psFiltreDegis()">
+                <option value="">Tüm ilgililer</option>${kisiOpt}</select>
+            </div>
+            <div class="pf-tog">
+              <button type="button" class="pf-t ${st.acil?'on':''}" aria-pressed="${st.acil}"
+                onclick="psFiltre({acil:${!st.acil}})">⚡ Acil</button>
+              <button type="button" class="pf-t ${st.gec?'on':''}" aria-pressed="${st.gec}"
+                onclick="psFiltre({gec:${!st.gec}})">⚠ Geciken</button>
+              <button type="button" class="pf-t ${st.benim?'on':''}" aria-pressed="${st.benim}"
+                onclick="psFiltre({benim:${!st.benim}})">Benimle ilgili</button>
+              ${filtreAktif?`<button type="button" class="pf-x" onclick="psTemizle()"
+                title="Tüm filtreleri temizle">Temizle ✕</button>`:''}
+            </div>
           </div>
           ${filtreAktif?`<div class="afilt">
             <span class="afilt-l">Aktif filtre</span>
@@ -6143,7 +6210,7 @@ async function kurumlar(c){
 
   c.innerHTML=`<div class="sec-head">
       <div><h3>Hafıza</h3><p class="sub">Kurumlar, kişiler ve aralarındaki ilişkiler — kurumsal bellek</p></div>
-      <button class="btn btn-primary btn-sm" onclick="hafEkle()">${ic('plus',15)} Hafızaya Ekle</button></div>
+      <button class="btn btn-sm act act-mem" onclick="hafEkle()">${ic('plus',15)} Hafızaya Ekle</button></div>
 
     <div class="haf-search">
       <input class="inp haf-q" id="hafQ" value="${esc(st.q)}" autocomplete="off"
@@ -6304,7 +6371,7 @@ async function orgAc(id){
           acik.length?` · <b>${acik.length} açık iş</b>`:''}${d.contacts.length?` · ${d.contacts.length} kişi`:''}</p></div>
       <div style="display:flex;gap:8px">
         <button class="btn btn-primary btn-sm" onclick="qcAc({custId:${o.id}})">${ic('plus',15)} Güncelleme</button>
-        <button class="btn btn-outline btn-sm" onclick="jobForm(null,null,{custId:${o.id}})">${ic('plus',15)} Yeni İş</button>
+        <button class="btn btn-sm act act-work" onclick="jobForm(null,null,{custId:${o.id}})">${ic('plus',15)} Yeni İş</button>
         <button class="btn btn-outline btn-sm" onclick="custForm(${o.id})">Düzenle</button></div></div>
 
     ${kimlik||o.relationship_evidence?`<div class="sec-card">
@@ -6513,7 +6580,7 @@ async function personAc(id){
           affs.length>1?` · <span class="chip">${affs.length} kurum</span>`:''}${k.active===false?' · <span class="pill">pasif</span>':''}</p></div>
       <div style="display:flex;gap:8px">
         <button class="btn btn-primary btn-sm" onclick="qcAc({contactId:${k.id}${pr?`,custId:${pr.customer_id}`:''}})">${ic('plus',15)} Güncelleme</button>
-        <button class="btn btn-outline btn-sm" onclick="personYeniIs(${k.id})">${ic('plus',15)} Yeni İş</button>
+        <button class="btn btn-sm act act-work" onclick="personYeniIs(${k.id})">${ic('plus',15)} Yeni İş</button>
         <button class="btn btn-outline btn-sm" onclick="contactForm(${k.id},${pr?pr.customer_id:0})">Düzenle</button></div></div>
 
     ${(k.phone||k.email||k.notes)?`<div class="sec-card">
