@@ -184,18 +184,17 @@ const LOG_AD={
 /* Sistem tarafından bilinen olay ayrıca kullanıcıya yazdırılmaz; system
    Entry olarak timeline'a düşer (BR-E03, 08 §8). Başarısızlığı ana işlemi
    bozmaz fakat sessizce yutulmaz — konsola raporlanır. */
-async function sysEntry(jobId, body, extra){
-  if(!jobId||!body) return;
-  const row={job_id:jobId, body, source:'system',
-    created_by_team_id:(ui._me&&ui._me.id)||null, ...(extra||{})};
-  /* await edilebilir: çağıran timeline'ı yeniden çizmeden önce bekler,
-     yoksa kayıt DB'ye yazılsa bile ekranda bir tur geç görünür.
-     Hata ana işlemi bozmaz fakat sessizce yutulmaz (08 §8). */
-  try{
-    const {error}=await sb.from('entries').insert(row);
-    if(error) console.warn('system entry yazılamadı:', error.message, row);
-  }catch(e){ console.warn('system entry yazılamadı:', e); }
-}
+/* S4.4 — `sysEntry()` KALDIRILDI.
+   Tarayicida oturum sahibi olarak calisiyordu; RLS gercek bir faz
+   degisikligini, elle yazilmis sahte bir "Aşama değişti" satirindan
+   ayiramiyordu, yani `source='system'` GUVENILMEZDI. Sistem hareketleri
+   artik gercek mutasyonun kendisinden, veritabani tetikleyicileriyle
+   uretilir (20260917120000_ps44_trusted_system_activity.sql):
+     jobs            -> work_created / work_phase / work_lifecycle /
+                        work_contract / work_accounting
+     work_operations -> operation_created / operation_status
+     quotes          -> quote_revised
+   Istemciden gelen `source='system'` INSERT'u RLS ile reddedilir. */
 function logYaz(act, body, q){
   const m=LOG_AD[act]; if(!m)return;
   let detay='';
@@ -510,6 +509,10 @@ async function api(action, body){
       if(q.job_id)        sel=sel.eq('job_id',q.job_id);
       if(q.assignee_id)   sel=sel.eq('assignee_id',q.assignee_id);
       if(q.action_status) sel=sel.eq('action_status',q.action_status);
+      /* S4.4 §19: Güncellemeler INSAN yazimi iletisimdir. Sistem hareketleri
+         (faz/durum/muhasebe/operasyon) Hareketler'de ve Work zaman
+         cizelgesinde yasar; akisa karismaz. */
+      if(q.insan) sel=sel.neq('source','system');
       /* S4.3.1: kisisel takvim bir AYIN terminlerini okur. Olusturma
          zamanina gore son N kayit penceresi eski ya da ileri tarihli
          terminleri kacirabilirdi. Gun sonu dahil (lt ertesi gun). */
@@ -525,6 +528,26 @@ async function api(action, body){
         .order('id',{ascending:false})
         .limit(q.limit?+q.limit:200);
       if(error)throw error; return ok(data); }
+    /* ---- Hareketler (S4.4 §13-§17) ----
+       Kaynak TEK: `entries source='system'` - Work zaman cizelgesinin zaten
+       okudugu kayitlar. Ikinci bir event tablosu, bildirimler kopyasi YOK.
+       SUNUCU TARAFI sayfalama: sayfa 1 icin tum gecmis cekilmez. Is/kurum
+       baglami tek sorguda gomulu (FK entries.job_id -> jobs). Esit zaman
+       damgalarinda kararli sira icin id kirici (S4.1 §27 ile ayni). */
+    case 'hareketler_list':{
+      const sayfa=Math.max(1,+q.sayfa||1), adet=Math.min(50,+q.adet||20);
+      let sel=sb.from('entries')
+        .select('id,job_id,body,system_kind,created_by_team_id,occurred_at,jobs(title,customer_id)',{count:'exact'})
+        .eq('source','system');
+      const GRUP={isler:['work_created','work_phase','work_lifecycle','work_contract','quote_revised','quote_approved'],
+                  operasyon:['operation_created','operation_status'],
+                  muhasebe:['work_accounting']};
+      if(q.tur&&GRUP[q.tur]) sel=sel.in('system_kind',GRUP[q.tur]);
+      const bas=(sayfa-1)*adet;
+      const {data,error,count}=await sel.order('occurred_at',{ascending:false})
+        .order('id',{ascending:false}).range(bas,bas+adet-1);
+      if(error)throw error;
+      return ok({satirlar:data||[], toplam:count||0, sayfa, adet}); }
     case 'entry_save':{
       const row={...body};
       /* `_ilgili` bir entries kolonu DEĞİLDİR: composer'ın "kime özellikle
@@ -1355,7 +1378,28 @@ function bildirimAlicilar(){
   return [...new Set((ui._team||[]).filter(x=>x.eposta&&x.active!==false&&(x.app_role==='admin'||/sat[ıi]ş|pazarlama/i.test(x.unvan||x.role||'')))
     .map(x=>String(x.eposta).trim()))];
 }
-async function bildirimKontrol(){
+/* ============ BILDIRIM URETIMI + E-POSTA (S4.4 §10-§11) ==============
+   ONCE: `bildirimKontrol()` Admin Dashboard CIZILIRKEN (render) setTimeout ile
+   cagriliyordu ve (1) bildirimler'e yaziyor, (2) formsubmit.co uzerinden
+   GERCEK e-posta gonderiyordu. Yani bir sayfayi ACMAK e-posta tetikliyordu.
+   Yerel QA bile ay sonuna 7 gun kala Dashboard'u acsaydi gercek bir adrese
+   (ozgur@medyaparkadana.com, admin) posta giderdi.
+
+   SONRA uc ayri yol:
+     OKUMA   bildirimCiz()              - saf okuma, yan etkisi YOK
+     URETIM  bildirimUret()             - kosulu hesaplar, satir yazar
+     E-POSTA bildirimEpostaGonder()     - bekleyenleri gonderir
+   Uretim ve e-posta YALNIZ acik bir admin eylemiyle calisir
+   (bildirimKontrolCalistir), e-posta ayrica onay ister. Arka plan isci /
+   kuyruk EKLENMEDI (§10); otomatik gunluk gonderim bir zamanlayici
+   gerektirir ve bu sprintin kapsami disinda.
+
+   Siniflandirma (§11): "7 gun icinde biten rezervasyon" e-postasi
+   OPERASYONEL OLARAK YARARLI (satis ekibi yenileme/yeniden satis icin
+   bilmeli) - korundu, kapsami GENISLETILMEDI. `anahtar` UNIQUE ve
+   `eposta_gonderildi` ile ayni bitis iki kez postalanmaz. Sorunu spam
+   degil, TETIKLEYICISIYDI. */
+async function bildirimUret(){
   try{
     const bugun=new Date(); bugun.setHours(0,0,0,0);
     const yakin=new Date(bugun.getTime()+7*864e5);
@@ -1382,29 +1426,49 @@ async function bildirimKontrol(){
       return {tur:'rezervasyon_bitis',anahtar:'rezbitis:'+b.unit_id+':'+b.ym,
         baslik:`${mm[u.mecra_id]||''} · ${u.name||'#'+b.unit_id} — ${AY_KISA[m-1]} ${y} sonunda bitiyor`,
         detay:`${cm[b.customer_id]||'Müşteri atanmamış'} · ${b.status==='dolu'?'Dolu':'Rezerve'}`}; });
-    await sb.from('bildirimler').upsert(rows,{onConflict:'anahtar',ignoreDuplicates:true});
-    /* e-posta: gönderilmemişleri tek özet mesajla alıcılara yolla */
-    const gr=await sb.from('bildirimler').select('id,baslik,detay').eq('tur','rezervasyon_bitis').eq('eposta_gonderildi',false);
-    const bekleyen=gr.data||[]; const alici=bildirimAlicilar();
-    if(bekleyen.length && alici.length){
-      const metin=bekleyen.map(x=>'• '+x.baslik+' ('+x.detay+')').join('\n');
-      let tamam=true;
-      for(const a of alici){
-        try{ const r=await fetch('https://formsubmit.co/ajax/'+encodeURIComponent(a),{method:'POST',
-          headers:{'Content-Type':'application/json','Accept':'application/json'},
-          body:JSON.stringify({_subject:'Medyapark — '+bekleyen.length+' rezervasyon 7 gün içinde bitiyor',
-            'Bitiş yaklaşan rezervasyonlar':metin,'Panel':location.origin+location.pathname})});
-          if(!r.ok) tamam=false; }catch(e){ tamam=false; }
-      }
-      if(tamam) await sb.from('bildirimler').update({eposta_gonderildi:true}).in('id',bekleyen.map(x=>x.id));
-    }
-  }catch(e){ console.warn('bildirimKontrol',e); }
+    const {error}=await sb.from('bildirimler').upsert(rows,{onConflict:'anahtar',ignoreDuplicates:true});
+    if(error) throw error;
+    return rows.length;
+  }catch(e){ console.warn('bildirimUret',e); throw e; }
+}
+/* E-posta: gonderilmemisleri tek ozet mesajla alicilara yollar. */
+async function bildirimEpostaGonder(bekleyen,alici){
+  const metin=bekleyen.map(x=>'• '+x.baslik+' ('+x.detay+')').join('\n');
+  let tamam=true;
+  for(const a of alici){
+    try{ const r=await fetch('https://formsubmit.co/ajax/'+encodeURIComponent(a),{method:'POST',
+      headers:{'Content-Type':'application/json','Accept':'application/json'},
+      body:JSON.stringify({_subject:'Medyapark — '+bekleyen.length+' rezervasyon 7 gün içinde bitiyor',
+        'Bitiş yaklaşan rezervasyonlar':metin,'Panel':location.origin+location.pathname})});
+      if(!r.ok) tamam=false; }catch(e){ tamam=false; }
+  }
+  if(tamam) await sb.from('bildirimler').update({eposta_gonderildi:true}).in('id',bekleyen.map(x=>x.id));
+  return tamam;
+}
+/* ACIK admin eylemi. Okuma yolunun HICBIR yerinden cagrilmaz. */
+async function bildirimKontrolCalistir(){
+  if(!isAdmin()){ toast('Bu işlem yönetici yetkisi ister.'); return; }
+  let yeni=0;
+  try{ yeni=await bildirimUret(); }
+  catch(e){ mpAlert('Bitişler kontrol edilemedi: '+(e.message||e)); return; }
+  if(!(ui._team&&ui._team.length)) ui._team=await api('team_list').catch(()=>[]);
+  const gr=await sb.from('bildirimler').select('id,baslik,detay')
+    .eq('tur','rezervasyon_bitis').eq('eposta_gonderildi',false);
+  const bekleyen=gr.data||[]; const alici=bildirimAlicilar();
+  await bildirimCiz();
+  if(!bekleyen.length){ toast(yeni?`${yeni} bitiş kontrol edildi, gönderilecek e-posta yok.`:'Yaklaşan bitiş yok.'); return; }
+  if(!alici.length){ toast(`${bekleyen.length} bildirim var, e-posta alıcısı tanımlı değil.`); return; }
+  if(!await mpConfirm(`${bekleyen.length} yaklaşan rezervasyon bitişi için ${alici.length} alıcıya e-posta gönderilsin mi?\n\n${alici.join(', ')}`,
+      'E-posta gönder',{danger:false,ok:'Gönder'})) return;
+  const ok=await bildirimEpostaGonder(bekleyen,alici);
+  toast(ok?'E-posta gönderildi.':'Bazı e-postalar gönderilemedi; tekrar denenebilir.');
+  await bildirimCiz();
 }
 async function bildirimCiz(){
   const box=document.getElementById('bildirimBox'), say=document.getElementById('bldSay'); if(!box)return;
   const r=await sb.from('bildirimler').select('*').eq('okundu',false).order('created_at',{ascending:false}).limit(20);
   const list=r.data||[];
-  if(say) say.textContent=list.length?list.length+' yeni':'';
+  if(say){ say.textContent=list.length?list.length+' yeni':''; say.hidden=!list.length; }
   /* Satır Doluluk'a gider — yüzeye göre doğru rota (Correction Sprint 2 §8).
      "Okundu" paylaşılan durumu değiştirir: Yönetim tarafında kalır. */
   box.innerHTML=list.length?list.map(b=>`<div class="bld">
@@ -1564,13 +1628,13 @@ function dashMecraDagilimCard(s){
     <div class="card-b" style="cursor:pointer" onclick="dashGo('mecralar')">${s.mecraDagilim.length?chartRows(s.mecraDagilim.map(m=>({l:m.name,v:m.adet,c:m.color}))):'<p class="empty">Mecra yok.</p>'}</div>
   </section>`;
 }
-/* Bildirimler — kabuk; içeriği bildirimCiz() doldurur.
-   ÜRETİM (bildirimKontrol: upsert + e-posta) Yönetim tarafında kalır;
-   Team yüzeyi yalnız okur, yoksa her Ana Sayfa açılışı mükerrer
-   bildirim/e-posta üretirdi. */
+/* Bildirimler — kabuk; içeriği bildirimCiz() doldurur (SAF OKUMA).
+   Üretim + e-posta yalnız admin'in açık eylemiyle çalışır (S4.4 §10). */
 function dashBildirimCard(){
-  return `<section class="card"><div class="card-h"><h3>Bildirimler</h3><span class="chip" id="bldSay">…</span></div>
-    <div class="card-b" id="bildirimBox"><p class="muted" style="font-size:12.5px;margin:0">Rezervasyonlar kontrol ediliyor…</p></div></section>`;
+  return `<section class="card"><div class="card-h"><h3>Bildirimler <span class="chip" id="bldSay">…</span></h3>
+      ${isAdmin()?`<button class="btn-link ekle" onclick="bildirimKontrolCalistir()"
+        title="Önümüzdeki 7 günde biten rezervasyonları kontrol et; e-posta göndermeden önce sorar">Bitişleri kontrol et</button>`:''}</div>
+    <div class="card-b" id="bildirimBox"><p class="muted" style="font-size:12.5px;margin:0">Yükleniyor…</p></div></section>`;
 }
 /* Takvim — mevcut calWidget() */
 function dashTakvimCard(){
@@ -1581,9 +1645,11 @@ function dashTakvimCard(){
 async function dashboard(c){
   const s=await api('dashboard_stats');
   ui._dashEvents=s.takvim||[];
-  /* Bildirim ÜRETİMİ (upsert + e-posta) Yönetim tarafındadır; Team Ana
-     Sayfa yalnız okur (bkz. dashBildirimCard / workspaceHome). */
-  setTimeout(()=>bildirimKontrol().then(bildirimCiz),50);
+  /* S4.4 §10: cizim YAN ETKISIZ. Onceden burada bildirimKontrol() cagrilir
+     ve Dashboard'u acmak bildirim yazip e-posta gonderebilirdi. Artik
+     yalnizca okunur; uretim acik "Bitişleri kontrol et" eylemindedir. */
+  /* Kart DOM'a yazildiktan SONRA cizilir (asagida); 50ms zamanlayici
+     team_list beklenirken kutu henuz yokken ateslenirdi. */
 
   const tm=await api('team_list').catch(()=>[]); ui._team=tm||[];
   const kpi=[
@@ -1625,6 +1691,7 @@ async function dashboard(c){
     </div>
   </div>
 `;
+  bildirimCiz();
 }
 
 /* ---------- İŞ TAKİBİ — canonical Work board (Sprint 03) ----------
@@ -2674,13 +2741,12 @@ function accAksiyon(j){
 }
 async function accDurum(id,yeni){
   const j=(ui._jobs||[]).find(x=>x.id===id)||{};
-  const eski=j.accounting_status||'yok';
   /* Zaman damgaları tutarlı yazılır; kullanıcıdan tekrar istenmez (BR-E03).
      Yazar TEK: `accZaman` - modal yolu da aynısını kullanır. */
   const body={id, accounting_status:yeni, ...accZaman(j,yeni,'')};
   const r=await guard(()=>api('job_save',body),'Muhasebe durumu güncellenemedi');
   if(r===null)return;
-  if(eski!==yeni) await sysEntry(id,`Muhasebe durumu: ${accLbl(eski)} → ${accLbl(yeni)}`);
+  /* S4.4: sistem hareketi artik VERITABANI tetikleyicisinden gelir (trg_jobs_hareket). */
   toast('Güncellendi.'); renderSection();
 }
 async function accExport(){
@@ -2711,9 +2777,8 @@ function coordKisayol(aktif){
 
 async function jobMove(id,status){
   const j=(ui._jobs||[]).find(x=>x.id===id)||{};
-  const eski=j.status;
   await api('job_move',{id,status});
-  if(eski&&eski!==status) await sysEntry(id,`Aşama değişti: ${JOBLBL[eski]||eski} → ${JOBLBL[status]||status}`);
+  /* S4.4: sistem hareketi artik VERITABANI tetikleyicisinden gelir (trg_jobs_hareket). */
   renderSection();
 }
 async function jobDelete(id){ if(await mpConfirm('Bu iş kaydı silinsin mi? Bağlı güncellemeler de silinir.','İşi Sil')){ await api('job_delete&id='+id); renderSection(); } }
@@ -2889,9 +2954,8 @@ async function workTakip(id,takipEt){
 }
 async function workLifeDegis(id){
   const ls=gv('wLife'), cr=gv('wClose');
-  const eski=(ui._work||{}).lifecycle_status||'acik';
   await guard(()=>api('job_lifecycle',{id,lifecycle_status:ls,closed_reason:cr}),'Durum değiştirilemedi');
-  if(eski!==ls) await sysEntry(id,`Durum değişti: ${LIFELBL[eski]||eski} → ${LIFELBL[ls]||ls}${ls==='kapandi'?' ('+(CLOSELBL[cr]||cr)+')':''}`);
+  /* S4.4: sistem hareketi artik VERITABANI tetikleyicisinden gelir (trg_jobs_hareket). */
   toast('Durum güncellendi.'); workAc(id);
 }
 function entryForm(id,jobId,aksiyon){
@@ -2951,7 +3015,7 @@ async function entryDel(id){
 async function quoteRevise(id){
   if(!await mpConfirm('Bu teklifin yeni bir revizyonu oluşturulsun mu? Mevcut teklif korunur.','Teklifi Revize Et'))return;
   const r=await guard(()=>api('quote_revise',{id}),'Revizyon oluşturulamadı'); if(r===null)return;
-  await sysEntry((ui._work||{}).id,`Teklif #${id} revize edildi → #${r.id} (rev ${r.revision_no})`);
+  /* S4.4: revizyon hareketi trg_quotes_hareket'ten gelir. */
   toast(`Revizyon oluşturuldu: Teklif #${r.id}`); workAc((ui._work||{}).id);
 }
 function partyForm(jobId){
@@ -3050,8 +3114,7 @@ async function workMetaSave(){
     ...accZaman(j,as,gv('wasd'))}),'Kaydedilemedi');
   modalBusy(false);
   if(r===null)return;
-  if(j.contract_status!==cs) await sysEntry(id,`Sözleşme durumu: ${({missing:'Eksik',pending:'Bekleniyor',signed:'İmzalı'})[cs]}`);
-  if((j.accounting_status||'yok')!==as) await sysEntry(id,`Muhasebe durumu: ${accLbl(j.accounting_status||'yok')} → ${accLbl(as)}`);
+  /* S4.4: sistem hareketi artik VERITABANI tetikleyicisinden gelir (trg_jobs_hareket). */
   closeModal(); toast('Kaydedildi.');
   /* Nereden acildiysa oraya don - kuyruktan acilip Work Detail'e
      firlatilmak kullanicinin yerini kaybettirirdi (§9). */
@@ -3245,13 +3308,10 @@ async function jobSave(){
      buradan yapilan asama degisikligi timeline'a hic dusmuyordu. Ayni
      mevcut mekanizmayla kapatildi; yeni bir workflow-history altsistemi
      KURULMADI (§26 - yeni sema yok). */
-  const eskiFaz=yeni?null:((ui._jobs||[]).find(x=>x.id===+gv('jid'))||{}).status;
   const r=await guard(()=>api('job_save',row),'İş kaydedilemedi');
   modalBusy(false);
   if(r===null) return;
-  if(!yeni && eskiFaz && eskiFaz!==row.status){
-    await sysEntry(+gv('jid'),`Aşama değişti: ${JOBLBL[eskiFaz]||eskiFaz} → ${JOBLBL[row.status]||row.status}`);
-  }
+  /* S4.4: sistem hareketi artik VERITABANI tetikleyicisinden gelir (trg_jobs_hareket). */
   /* Yeni Work: seçilen kurum compatibility alanına ve canonical
      work_parties account rolüne birlikte yazılır (06 §8). Seçilen
      "İlgili" kişiler work_followers'a yazılır — kimseye İŞ ATANMAZ. */
@@ -3259,7 +3319,7 @@ async function jobSave(){
     if(cid) await api('work_party_save',{id:0,job_id:r.id,customer_id:cid,role:'account'}).catch(()=>{});
     const fol=Array.from(document.querySelectorAll('.jFol:checked')).map(x=>+x.value);
     if(fol.length) await api('work_follow_many',{id:r.id,team_ids:fol}).catch(()=>{});
-    await sysEntry(r.id,'İş oluşturuldu.');
+    /* S4.4: sistem hareketi artik VERITABANI tetikleyicisinden gelir (trg_jobs_hareket). */
   }
   closeModal(); renderSection(); toast('İş kaydedildi.');
 }
@@ -3281,13 +3341,24 @@ function opDonem(kind){
   const n=new Date(); const g=n.getDay(); const pzt=new Date(n); pzt.setDate(n.getDate()-((g+6)%7));
   /* Gunluk operasyonel kontrol yuzeyinin en sik sorusu (C4 §13). */
   if(kind==='bugun'){ return [_cIso(n),_cIso(n)]; }
-  if(kind==='hafta'){ const son=new Date(pzt); son.setDate(pzt.getDate()+6); return [_iso(pzt),_iso(son)]; }
+  /* S4.4 §24 — BUG DUZELTMESI. Asagidaki araliklar `_iso` (UTC) ile
+     hesaplaniyordu. Ay/yil sinirlari YEREL gece yarisinda kurulup UTC'ye
+     cevrilince TR (UTC+3) icin bir gun GERI kayiyordu - ve bu gece yarisina
+     OZGU degildi, gun boyu gecerliydi. 17 Eyl 14:00'te olculdu:
+       Bu ay    2026-08-31 .. 2026-09-29  (30 Eylul operasyonlari DISARIDA)
+       Geçen ay 2026-07-31 .. 2026-08-30
+       Bu yıl   2025-12-31 .. 2026-12-30
+     Hafta araligi yalniz gece 00:00-03:00 arasi kayiyordu (Pzt 01:00'de
+     hafta bir onceki haftaya dusuyordu). Tumu S4.3.1'deki yerel `_cIso`ya
+     baglandi. `_iso`nun kendisi DEGISMEDI: Excel ice aktarimi (SheetJS
+     tarihleri) da onu kullaniyor ve o yol ayri dogrulama ister. */
+  if(kind==='hafta'){ const son=new Date(pzt); son.setDate(pzt.getDate()+6); return [_cIso(pzt),_cIso(son)]; }
   /* "Sırada ne var?" — gerçek tablonun cevapladığı ama ekranda karşılığı
      olmayan soruydu (S2 §8). Bugünden ileri 30 gün. */
-  if(kind==='yaklasan'){ const son=new Date(n); son.setDate(n.getDate()+30); return [_cIso(n),_iso(son)]; }
-  if(kind==='ay')   { return [_iso(new Date(n.getFullYear(),n.getMonth(),1)), _iso(new Date(n.getFullYear(),n.getMonth()+1,0))]; }
-  if(kind==='gecen'){ return [_iso(new Date(n.getFullYear(),n.getMonth()-1,1)), _iso(new Date(n.getFullYear(),n.getMonth(),0))]; }
-  if(kind==='yil')  { return [_iso(new Date(n.getFullYear(),0,1)), _iso(new Date(n.getFullYear(),11,31))]; }
+  if(kind==='yaklasan'){ const son=new Date(n); son.setDate(n.getDate()+30); return [_cIso(n),_cIso(son)]; }
+  if(kind==='ay')   { return [_cIso(new Date(n.getFullYear(),n.getMonth(),1)), _cIso(new Date(n.getFullYear(),n.getMonth()+1,0))]; }
+  if(kind==='gecen'){ return [_cIso(new Date(n.getFullYear(),n.getMonth()-1,1)), _cIso(new Date(n.getFullYear(),n.getMonth(),0))]; }
+  if(kind==='yil')  { return [_cIso(new Date(n.getFullYear(),0,1)), _cIso(new Date(n.getFullYear(),11,31))]; }
   return ['',''];
 }
 /* §11/§12 - gunluk kullanim sadelesti.
@@ -3347,7 +3418,9 @@ async function operasyon(c){
   ui._opFiltered=list;
   const rows=list.map(o=>{
     const j=jm[o.job_id]||{};
-    const gec=o.planned_date&&o.planned_date<_iso(new Date())&&['planned','waiting','in_progress'].includes(o.status);
+    /* S4.4 §24: "gecikti" isareti de yerel gun ile (gece yarisindan sonra
+       bugunku operasyon dun gibi gecikmis gorunmesin). */
+    const gec=o.planned_date&&o.planned_date<_cIso(new Date())&&['planned','waiting','in_progress'].includes(o.status);
     return `<tr onclick="opForm(${o.id})" style="cursor:pointer">
       <td class="mono dim">${o.planned_date?esc(trTarih(o.planned_date)):'<span class="muted">tarihsiz</span>'}${gec?' <span style="color:#b3261e" title="Gecikti">⚠</span>':''}</td>
       ${/* §15: operasyon satirindan ISE gecis. Hucre kaydin duzenleme
@@ -3522,27 +3595,16 @@ async function opForm(id,jobId){
       <button class="btn btn-ghost btn-sm" onclick="closeModal()">Vazgeç</button>
       <button class="btn btn-primary btn-sm" onclick="opSave()">Kaydet</button></div>`);
 }
-/* Bir operasyonun ONCEKI halini iki ayri onbellekte de ara.
-   Eski kod `ui._ops||ui._workOps` yaziyordu: kullanici bir kez Baski &
-   Montaj ekranini actiysa `ui._ops` kalici olarak truthy kaliyor ve Work
-   Detail'den yapilan duzenleme BAYAT operasyon listesinde araniyordu.
-   Kayit o listenin donem filtresi disindaysa bulunamiyor, `eski.status`
-   undefined oluyor ve her kaydetmede "durumu: undefined -> X" diye sahte
-   bir sistem Entry'si yaziliyordu (C4 §16: idempotent kayitta mukerrer
-   sistem Entry'si uretilmemeli). */
-function opOncekiBul(id){
-  if(!id) return null;
-  const a=(ui._ops||[]).find(x=>x.id===id);
-  if(a) return a;
-  return (ui._workOps||[]).find(x=>x.id===id)||null;
-}
+/* S4.4: `opOncekiBul()` kaldirildi. Yalnizca istemci tarafi sysEntry'ye
+   "onceki durum" saglamak icin vardi (C4 §16'daki sahte "undefined -> X"
+   hatasinin duzeltmesi). Gecis artik tetikleyicide OLD/NEW'den okunuyor;
+   bayat bir istemci onbellegine bagli kalmak da ortadan kalkti. */
 async function opSave(){
   const jid=+gv('opJob');
   if(!jid){ mpAlert('İş seçimi zorunlu.'); return; }
   const ev=(gv('opEv')||'').split('\n').map(x=>x.trim()).filter(Boolean);
   const num=v=>v!==''&&v!=null?+v:null;
   const id=+gv('opid');
-  const eski=opOncekiBul(id);
   const st=gv('opSt')||'planned';
   modalBusy(true);
   const r=await guard(()=>api('operation_save',{id,job_id:jid,operation_type:gv('opT'),
@@ -3556,15 +3618,8 @@ async function opSave(){
      Yalniz GERCEKTEN anlamli gecisler yazilir: kayit acilisi, fiilen
      baslama, tamamlanma ve iptal. Onceki durum bilinmiyorsa (kayit hicbir
      onbellekte yok) sahte bir gecis uydurulmaz - sessiz kalinir. */
-  const OP_IZLENEN={done:1,cancelled:1,in_progress:1};
-  if(!id){
-    await sysEntry(jid,`${opTypeLbl(gv('opT'))} kaydı eklendi${gv('opDate')?' · '+trTarih(gv('opDate')):''}`);
-  } else if(eski && eski.status!==st && OP_IZLENEN[st]){
-    const ad=opTypeLbl(gv('opT'));
-    await sysEntry(jid, st==='done'      ? `${ad} tamamlandı.`
-                      : st==='cancelled' ? `${ad} iptal edildi.`
-                      : `${ad} başladı (${opStatLbl(eski.status)} → ${opStatLbl(st)}).`);
-  }
+  /* S4.4: operasyon hareketleri (olusturma, baslama, tamamlanma, iptal)
+     artik trg_ops_hareket'ten gelir. Ayni anlamli-gecis kurali orada. */
   closeModal(); toast('Kaydedildi.');
   if(ui.section==='operasyon') renderSection(); else workAc(jid);
 }
@@ -3820,6 +3875,77 @@ function psFiltreDegis(){
   psFiltre({ job:gv('psJob')||'', org:gv('psOrg')||'', kisi:gv('psKisi')||'' });
 }
 
+/* ============ HAREKETLER (S4.4) ======================================
+   Insan yazimi Güncellemeler'den AYRI, makine uretimi durum degisiklikleri.
+   Salt-okunur. Okundu/okunmadi, rozet sayaci, abonelik YOK (§18) - bu bir
+   onaylanmasi gereken gelen kutusu degil, farkindalik akisi. */
+const HR_DEF={gor:'guncelleme',p:1,tur:''};
+function hrDurum(){
+  let d; try{ d=JSON.parse(sessionStorage.getItem('mp_hareket')||'null'); }catch(e){ d=null; }
+  d={...HR_DEF,...(d||{})};
+  d.p=Math.max(1,+d.p||1);
+  if(!['','isler','operasyon','muhasebe'].includes(d.tur)) d.tur='';
+  return d;
+}
+function hrYaz(d){ try{ sessionStorage.setItem('mp_hareket',JSON.stringify(d)); }catch(e){} }
+function hrGor(g){ hrYaz({...hrDurum(),gor:g}); renderSection(); }
+function hrTur(t){ hrYaz({...hrDurum(),tur:t,p:1}); renderSection(); }   /* filtre -> 1. sayfa */
+function hrSayfa(p){ hrYaz({...hrDurum(),p:Math.max(1,p)}); renderSection();
+  const b=document.querySelector('.pnl-a .card'); if(b) b.scrollIntoView({block:'start'}); }
+const HR_TUR=[['','Tümü'],['isler','İşler'],['operasyon','Operasyon'],['muhasebe','Muhasebe']];
+const HR_ROZET={work_created:'Yeni iş',work_phase:'Aşama',work_lifecycle:'Durum',work_contract:'Sözleşme',
+  work_accounting:'Muhasebe',operation_created:'Operasyon',operation_status:'Operasyon',
+  quote_revised:'Teklif',quote_approved:'Teklif'};
+
+function hareketGovde(veri,hg,jm,cm,tm){
+  const filtre=`<div class="pf hr-f">
+    <div class="ws-switch inline" role="group" aria-label="Hareket türü">
+      ${HR_TUR.map(([k,l])=>`<button type="button" class="${hg.tur===k?'on':''}" aria-pressed="${hg.tur===k}" onclick="hrTur('${k}')">${esc(l)}</button>`).join('')}
+    </div>
+    <span class="fhint" style="margin:0 0 0 auto">Sistemin kaydettiği durum değişiklikleri — elle yazılmaz.</span>
+  </div>`;
+  if(!veri||veri.hata) return filtre+`<div class="card-b"><p class="empty">Hareketler okunamadı${veri&&veri.hata?': '+esc(veri.hata):''}.</p></div>`;
+  const {satirlar,toplam,adet}=veri;
+  const sayfaAdet=Math.max(1,Math.ceil(toplam/adet));
+  const sayfa=Math.min(hg.p,sayfaAdet);
+  const bas=(sayfa-1)*adet;
+  /* §14: aktor GERCEK kimliktir - tetikleyici `current_team_id()` ile JWT'den
+     damgalar. Oturumsuz (otomatik/tohum) kayitlarda insan UYDURULMAZ. */
+  const satir=h=>{
+    const j=h.jobs||(h.job_id?jm[h.job_id]:null);
+    const orgId=j?j.customer_id:null;
+    const org=orgId?(cm[orgId]||''):'';
+    const orgGoster=org&&!(j&&orgBaslikTekrari(j.title,org));
+    const aktor=h.created_by_team_id&&tm[h.created_by_team_id]?tm[h.created_by_team_id]:null;
+    return `<article class="pu hr">
+      <div class="pu-h">
+        <div class="pu-hl">
+          <b class="${aktor?'':'hr-oto'}">${aktor?esc(aktor):'Sistem'}</b>
+          <time datetime="${esc(String(h.occurred_at||''))}">${esc(psZaman(h.occurred_at))}</time>
+          <span class="hr-k">${esc(HR_ROZET[h.system_kind]||'Hareket')}</span>
+        </div>
+        ${(j||orgGoster)?`<div class="pu-hr">
+          ${j&&h.job_id?`<button type="button" class="pu-chip is" onclick="workAc(${h.job_id})" title="${esc(j.title)}">${esc(orgKisa(j.title,40))}</button>`:''}
+          ${orgGoster?`<button type="button" class="pu-chip org" onclick="orgAc(${orgId})" title="${esc(org)}">${esc(orgKisa(org,26))}</button>`:''}
+        </div>`:''}
+      </div>
+      <p class="hr-t">${esc(h.body)}</p>
+    </article>`;
+  };
+  /* Saklanan sayfa, veri azaldigi icin artik yoksa bos ekran "hareket yok"
+     gibi okunmasin: 1. sayfaya donus sunulur. */
+  const liste=satirlar.length?satirlar.map(satir).join('')
+    : toplam?`<p class="empty">Bu sayfa artık boş. <button type="button" class="btn-link" onclick="hrSayfa(1)">İlk sayfaya dön</button></p>`
+    :`<p class="empty">${hg.tur?'Bu türde hareket yok.':'Henüz sistem hareketi yok.'}</p>`;
+  return filtre+`<div class="card-b pu-list">${liste}</div>
+    ${toplam?`<div class="pgr">
+      <button class="btn btn-outline btn-sm" ${sayfa<=1?'disabled':''} onclick="hrSayfa(${sayfa-1})" aria-label="Önceki sayfa">‹ Önceki</button>
+      <span class="pgr-n" aria-live="polite"><b>${sayfa}</b> / ${sayfaAdet}
+        <em>${bas+1}–${bas+satirlar.length} · ${toplam} hareket</em></span>
+      <button class="btn btn-outline btn-sm" ${sayfa>=sayfaAdet?'disabled':''} onclick="hrSayfa(${sayfa+1})" aria-label="Sonraki sayfa">Sonraki ›</button>
+    </div>`:''}`;
+}
+
 /* Kisisel ilgi: feed SIRASINI degistirmez (§6), yalnizca vurgular. */
 function psBenimMi(e,benim,ilgiSet,takipJobs){
   if(!benim) return false;
@@ -3841,9 +3967,16 @@ async function workspaceHome(c){
   /* Tek turda paralel cekim; kart/gun/Work basina sorgu YOK (07 §20).
      entry_relevance TUM satirlariyla cekilir cunku feed etiketlenen
      kisileri chip olarak gosterir (§5) - Entry basina sorgu N+1 olurdu. */
+  /* S4.4 §12/§22: Güncellemeler | Hareketler gorunum durumu. Diger Panelim
+     filtreleri gibi sessionStorage'da (S4.1 konvansiyonu). Hareketler
+     yalnizca o gorunum acikken okunur. */
+  const hg=hrDurum();
+  const hareketP=hg.gor==='hareket'
+    ? api(`hareketler_list&sayfa=${hg.p}&tur=${hg.tur}`).catch(e=>({hata:e.message||String(e)}))
+    : Promise.resolve(null);
   const [jobs,ents,ops,custs,team,ilgi,takip,kisiler,kisisel]=await Promise.all([
     api('jobs_list'),
-    api('entries_list&limit=400'),
+    api('entries_list&limit=400&insan=1'),
     api(`operations_list&from=${opBas}&to=${ufukIso}`),
     api('customers_list'),
     api('team_list'),
@@ -4125,9 +4258,15 @@ async function workspaceHome(c){
       <div class="pnl-a">
         <section class="card">
           <div class="card-h">
-            <h3>Güncellemeler</h3>
+            ${/* §12: iki AKIS, tek kart. Varsayilan Güncellemeler. Ikisi tek bir
+                 ayirt edilemez feed'de BIRLESTIRILMEZ. */''}
+            <div class="ws-switch inline hr-sw" role="group" aria-label="Akış">
+              <button type="button" class="${hg.gor!=='hareket'?'on':''}" aria-pressed="${hg.gor!=='hareket'}" onclick="hrGor('guncelleme')">Güncellemeler</button>
+              <button type="button" class="${hg.gor==='hareket'?'on':''}" aria-pressed="${hg.gor==='hareket'}" onclick="hrGor('hareket')">Hareketler</button>
+            </div>
             <button class="btn btn-sm act act-upd" onclick="qcAc({})">${ic('plus',15)} Güncelleme</button>
           </div>
+          ${hg.gor==='hareket' ? hareketGovde(await hareketP, hg, jm, cm, tm) : `
           ${/* §12: kontroller artik "yan yana konmus alakasiz ogeler" degil,
                iki acik gruptan olusan TEK bir bilesen: once "neye gore
                daralt" (acilir kutular), sonra hizli anahtarlar. Yeni
@@ -4166,7 +4305,7 @@ async function workspaceHome(c){
               <em>${bas+1}–${bas+gosterilen.length} · ${suz.length} güncelleme</em></span>
             <button class="btn btn-outline btn-sm" ${sayfa>=sayfaAdet?'disabled':''}
               onclick="psSayfa(${sayfa+1})" aria-label="Sonraki sayfa">Sonraki ›</button>
-          </div>`:''}</section>
+          </div>`:''}`}</section>
       </div>
 
       <div class="pnl-b">
@@ -6860,7 +6999,9 @@ async function orgAc(id){
   ui._org=d.org; ui._orgContacts=d.contacts; ui._orgDetay=d;
   navKayit('org',ui.section,d.org.id,orgKisa(d.org.firma,30));
   const o=d.org, roles=Array.isArray(o.relationship_roles)?o.relationship_roles:[];
-  const jobs=d.jobs||[], ents=d.entries||[], quotes=d.quotes||[];
+  /* S4.4 §19: "Son Güncellemeler" insan yazimidir; sistem hareketleri
+     Work zaman cizelgesinde ve Panelim > Hareketler'de kalir. */
+  const jobs=d.jobs||[], ents=(d.entries||[]).filter(e=>e.source!=='system'), quotes=d.quotes||[];
   const acik=jobs.filter(j=>(j.lifecycle_status||'acik')!=='kapandi');
   const kapali=jobs.filter(j=>(j.lifecycle_status||'acik')==='kapandi');
   const tm={}; (ui._team||[]).forEach(t=>tm[t.id]=t.name);
