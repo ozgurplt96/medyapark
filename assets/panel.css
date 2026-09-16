@@ -1611,3 +1611,19 @@ i.tk-p.tk-ozel{border-radius:3px;}
 .rz-next-i.dolu{background:var(--c-red-soft);border-color:transparent;}
 .rz-next-i.rezerve{background:var(--c-amber-soft);border-color:transparent;}
 .pill.ok{background:var(--c-green-soft);color:var(--c-green);}
+
+/* ============ S4.4 — Güncellemeler | Hareketler ======================
+   Iki akis tek kartta. Anahtar kart basliginin kendisidir (h3 yerine);
+   Ajandam'in `aj-sw` kompakt olcusuyla ayni dil. Hareket satiri insan
+   guncellemesinden GORSEL olarak ayrilir: daha sakin metin, rozet tipi
+   etiket, satir ici acma/kapama yok (metin kisa ve sistem uretimi). */
+.ws-switch.hr-sw{margin:0;padding:2px;}
+.ws-switch.hr-sw button{flex:0 0 auto;padding:5px 12px;font-size:13px;font-weight:650;}
+.pf.hr-f .ws-switch.inline{margin:0;}
+.pu.hr{padding-block:10px 11px;}
+.pu.hr .pu-h{margin-bottom:3px;}
+.pu-h b.hr-oto{color:var(--c-ink3);font-weight:600;}
+.hr-k{border-radius:var(--r-sm);padding:1px 7px;font:650 11.5px/1.5 var(--f);
+  background:var(--c-line2);color:var(--c-ink2);white-space:nowrap;}
+.hr-t{margin:0;font-size:13.5px;line-height:1.55;color:var(--c-ink2);overflow-wrap:anywhere;}
+@media(max-width:760px){ .pf.hr-f .fhint{margin:0 !important;} }
