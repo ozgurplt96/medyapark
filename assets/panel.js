@@ -595,10 +595,16 @@ async function api(action, body){
        calismis olmak veya bir guncellemede etiketlenmis olmak DEGILDIR.
        Gorunurluk kapisi da degildir - `jobs` RLS'i bu tabloyu okumaz. */
     case 'work_followers_all':{
-      let self=sb.from('work_followers').select('job_id,team_id');
-      if(q.team_id) self=self.eq('team_id',q.team_id);
-      const {data,error}=await self.limit(q.limit?+q.limit:5000);
-      if(error)throw error; return ok(data); }
+      /* S5.1 §9-§12: eskiden `.limit(5000)` istiyordu ama PostgREST
+         `max_rows=1000`de SESSIZCE kesiyordu. Artik birincil anahtar
+         sirasiyla (job_id, team_id) sayfa sayfa sonuna kadar okunur.
+         `job_id` verilirse (Work Detail) yalniz o isin satirlari gelir. */
+      const data=await rapHepsi(()=>{
+        let sel=sb.from('work_followers').select('job_id,team_id');
+        if(q.team_id) sel=sel.eq('team_id',q.team_id);
+        if(q.job_id)  sel=sel.eq('job_id',q.job_id);
+        return sel.order('job_id').order('team_id'); });
+      return ok(data); }
     case 'work_follow':{
       /* team_id sunucuda RLS ile zorlanir (with check team_id =
          current_team_id()); buradaki deger yalnizca istegin govdesidir. */
@@ -648,10 +654,13 @@ async function api(action, body){
       const {error}=await sb.from('personal_events').delete().eq('id',delId);
       if(error)throw error; return ok(); }
     case 'entry_relevance_all':{
-      let sel=sb.from('entry_relevance').select('entry_id,team_id');
-      if(q.team_id) sel=sel.eq('team_id',q.team_id);
-      const {data,error}=await sel.limit(q.limit?+q.limit:5000);
-      if(error)throw error; return ok(data); }
+      /* S5.1 §9-§12: ayni sessiz 1000 kesilmesi. Birincil anahtar
+         sirasiyla (entry_id, team_id) sayfali tam okuma. */
+      const data=await rapHepsi(()=>{
+        let sel=sb.from('entry_relevance').select('entry_id,team_id');
+        if(q.team_id) sel=sel.eq('team_id',q.team_id);
+        return sel.order('entry_id').order('team_id'); });
+      return ok(data); }
     case 'job_lifecycle':{
       const patch={lifecycle_status:body.lifecycle_status};
       patch.closed_reason=(body.lifecycle_status==='kapandi')?(body.closed_reason||'tamamlandi'):null;
@@ -1753,14 +1762,12 @@ const ISTABS=[['pano','Pano'],['liste','Liste'],['takvim','Takvim']];
    hedefi olsun diye eklendi. YENI BIR MODUL DEGIL - mevcut `acil`
    anahtarinin kardesi olan bir Liste filtresi. Tanim S1.1 ile ayni:
    TERMINI GECMIS ACIK AKSIYONU olan isler. Yastan aciliyet cikarilmaz. */
-/* S4.3 §14 — `dikkat` TURETILMIS bir gorunum ifadesidir: Acil VEYA
-   Geciken. Yeni bir Work DURUMU DEGILDIR, sema degismez.
-   ONCE: Panelim'deki "Görüntüle" yalniz `gec:true` aciyordu ve acil ama
-   henuz gecikmemis isleri DISARIDA birakiyordu; kullanici elle `Acil`i
-   de isaretleyince iki filtre VE'leniyor ve kume daha da daraliyordu -
-   dikkat gorunumu icin tam ters sonuc. */
+/* S5.1 §3-§4: ayri `Dikkat` filtresi KALDIRILDI. `Acil` ve `Geciken`
+   ilgili bir dikkat IKILISIDIR: ikisi birlikte secilince VEYA ile
+   birlesir (`acil VEYA geciken`), diger filtreler bu grubun etrafinda VE
+   kalir. Yalniz bu ikili icin gecerlidir - diger hizli filtreler VE. */
 const ISF_DEF={life:['acik','bekliyor'],q:'',org:'',phase:'',ilgili:'',
-               acil:false,gec:false,dikkat:false};
+               acil:false,gec:false};
 /* Work görünümü filtresi oturum içinde korunur (07 §18/2). */
 function isFiltre(){
   let f={};
@@ -1771,7 +1778,11 @@ function isFiltre(){
   if(f.mine===true && !f.asg && !o.ilgili) o.asg='me';
   if(f.asg && !o.ilgili) o.ilgili=f.asg;
   delete o.mine; delete o.asg;
-  o.acil=!!o.acil; o.gec=!!o.gec; o.dikkat=!!o.dikkat;
+  /* Geriye uyumluluk: S4.3 oturumundan kalan `dikkat:true` ayni kumeyi
+     anlatan iki gercek kontrole cevrilir. */
+  if(o.dikkat===true){ o.acil=true; o.gec=true; }
+  delete o.dikkat;
+  o.acil=!!o.acil; o.gec=!!o.gec;
   return o;
 }
 function isFiltreYaz(f){ try{ sessionStorage.setItem('mp_is_filtre',JSON.stringify(f)); }catch(e){} }
@@ -1890,10 +1901,10 @@ function coordSuz(D,f,opt){
   const bugunIso=_cIso(new Date());
   const geciken=j=>{ const nx=D.sonraki[j.id];
     return !!(nx&&nx.due_at&&String(nx.due_at).slice(0,10)<bugunIso); };
-  /* §14: VEYA - tek bir kontrol, iki ayri filtrenin kesisimi DEGIL. */
-  if(f.dikkat) list=list.filter(j=>!!j.is_urgent||geciken(j));
-  if(f.acil) list=list.filter(j=>!!j.is_urgent);
-  if(f.gec)  list=list.filter(geciken);
+  /* S5.1 §4: dikkat ikilisi TEK grup. Yalniz Acil -> acil; yalniz
+     Geciken -> geciken; ikisi -> acil VEYA geciken. Grup, diger
+     filtrelerle VE'lenir. */
+  if(f.acil||f.gec) list=list.filter(j=>(f.acil&&!!j.is_urgent)||(f.gec&&geciken(j)));
   /* `Ilgili` (PS1.1 §20) = bu kisiyi gercekten baglayan her sey:
      Work'u TAKIP EDIYOR (acik niyet, work_followers), Work'un sahibi,
      ya da uzerinde acik bir aksiyonu var. "Sorumlu" degil - kimseye is
@@ -1959,17 +1970,12 @@ function coordFiltreKart(tab,D,f){
         <button type="button" class="${!arsiv?'on':''}" aria-pressed="${!arsiv}" onclick="isKapsam('aktif')">Aktif</button>
         <button type="button" class="${arsiv?'on':''}" aria-pressed="${arsiv}" onclick="isKapsam('arsiv')">Arşiv</button>
       </div>
-      ${/* §15: `Dikkat` birlesik gorunum; `Acil` ve `Geciken` tekil
-           incelemeler icin KORUNUR. Dikkat acilinca tekiller kapanir ki
-           kullanici farkinda olmadan VE'lenmis bir kume gormesin. */''}
-      <button type="button" class="pf-t ${f.dikkat?'on':''}" aria-pressed="${f.dikkat}"
-        title="Acil VEYA termini geçmiş işler"
-        onclick="isFiltre2({dikkat:${!f.dikkat},acil:false,gec:false})">◎ Dikkat</button>
       <button type="button" class="pf-t ${f.acil?'on':''}" aria-pressed="${f.acil}"
-        onclick="isFiltre2({acil:${!f.acil},dikkat:false})">⚡ Acil</button>
+        title="Acil işaretli işler (Geciken ile birlikte: acil veya geciken)"
+        onclick="isFiltre2({acil:${!f.acil}})">⚡ Acil</button>
       <button type="button" class="pf-t ${f.gec?'on':''}" aria-pressed="${f.gec}"
-        title="Termini geçmiş açık aksiyonu olan işler"
-        onclick="isFiltre2({gec:${!f.gec},dikkat:false})">⚠ Geciken</button>
+        title="Termini geçmiş açık aksiyonu olan işler (Acil ile birlikte: acil veya geciken)"
+        onclick="isFiltre2({gec:${!f.gec}})">⚠ Geciken</button>
       <span class="fhint" style="margin-left:auto">Aktif = açık + bekliyor</span>
     </div>`:''}
   </div>
@@ -1986,9 +1992,11 @@ function isFiltreBanner(tab,D,f){
   if(f.phase)  p.push('Aşama: '+esc((JOBST.find(x=>x[0]===f.phase)||[,f.phase])[1]));
   if(f.ilgili){ const id=coordAsgId(D,f);
     p.push('İlgili: '+esc((D.tm&&D.tm[id])||(f.ilgili==='me'?'Ben':'#'+f.ilgili))); }
-  if(f.dikkat) p.push('Dikkat <em>(Acil veya Geciken)</em>');
-  if(f.acil)   p.push('Acil');
-  if(f.gec)    p.push('Geciken');
+  /* Seritteki ` · ` VE demektir; ikili birlikteyse VEYA oldugu acik
+     yazilir - sentetik bir "Dikkat" etiketi uretilmez. */
+  if(f.acil&&f.gec) p.push('Acil veya Geciken');
+  else if(f.acil)   p.push('Acil');
+  else if(f.gec)    p.push('Geciken');
   if(arsiv)    p.push('Arşiv');
   if(!p.length) return '';
   return `<div class="afilt">
@@ -2632,9 +2640,10 @@ async function qcKaydet(){
    burada yalnız "hangi iş muhasebeye gitmeye hazır" sorusu cevaplanır. */
 /* Kanonik `jobs.accounting_status` sozlugu AYNEN korunur - CHECK
    kisiti tam olarak bunlari kabul eder (yok|hazir|gonderildi|islendi).
-   Paralel bir durum kumesi UYDURULMAZ (§7). `Henuz yok` yalniz daha
-   iyi okunan bir ETIKETTIR; depolanan deger hala 'yok'. */
-const ACCST=[['hazir','Hazır'],['gonderildi','Gönderildi'],['islendi','İşlendi'],['yok','Henüz yok']];
+   Paralel bir durum kumesi UYDURULMAZ (§7). S5.1 §15: uygulama genelinde
+   TEK etiket `Yok` (Raporlar, Work Detail, disa aktarim ile ayni);
+   depolanan deger hala 'yok'. */
+const ACCST=[['hazir','Hazır'],['gonderildi','Gönderildi'],['islendi','İşlendi'],['yok','Yok']];
 const accLbl=v=>(ACCST.find(x=>x[0]===v)||[null,v])[1];
 const ACC_CLS={hazir:'sand',gonderildi:'teal',islendi:'',yok:''};
 
@@ -2671,9 +2680,9 @@ async function muhasebe(c){
   if(f.q){ const t=f.q.toLocaleLowerCase('tr');
     list=list.filter(j=>[j.title,cm[j.customer_id],j.accounting_note]
       .some(v=>String(v||'').toLocaleLowerCase('tr').includes(t))); }
-  /* Tumu gorunumunde duz tarih siralamasi 'Henuz yok' yigininin altina
+  /* Tumu gorunumunde duz tarih siralamasi 'Yok' yigininin altina
      dikkat gerektirenleri gomerdi. Devir sirasi: Hazır -> Gönderildi ->
-     Henüz yok -> İşlendi (biten en sonda), icinde tarihe gore. */
+     Yok -> İşlendi (biten en sonda), icinde tarihe gore. */
   const ACC_SIRA={hazir:0,gonderildi:1,yok:2,islendi:3};
   list.sort((a,b)=>
     (f.st==='tumu'
@@ -2787,7 +2796,7 @@ async function jobDelete(id){ if(await mpConfirm('Bu iş kaydı silinsin mi? Ba�
 async function workAc(id){
   const veri=await guard(()=>Promise.all([api('work_detail&id='+id),api('team_list'),
     api('customers_list'),api('contacts_list'),
-    api('work_followers_all&limit=5000').catch(()=>[])]),'İş açılamadı');
+    api('work_followers_all&job_id='+id).catch(()=>[])]),'İş açılamadı');
   if(!veri)return;
   const [d,tm,cu,ct,fol]=veri; ui._team=tm||[]; ui._cust=cu||[]; ui._contacts=ct||[];
   const benim=(ui._me&&ui._me.id)||0;
@@ -4020,8 +4029,10 @@ async function workspaceHome(c){
   if(st.org)   suz=suz.filter(e=>{ const j=jm[e.job_id];
                  return String(j?j.customer_id:e.customer_id)===String(st.org); });
   if(st.kisi)  suz=suz.filter(e=>(ilgiMap[e.id]||[]).some(t=>String(t)===String(st.kisi)));
-  if(st.acil)  suz=suz.filter(e=>e.is_urgent);
-  if(st.gec)   suz=suz.filter(e=>e.action_status==='open'&&gecmis(e.due_at));
+  /* S5.1 §4: Isler/Liste ile AYNI kural - dikkat ikilisi birlikte
+     secilince VEYA; diger akis filtreleriyle VE. */
+  if(st.acil||st.gec) suz=suz.filter(e=>(st.acil&&!!e.is_urgent)||
+    (st.gec&&e.action_status==='open'&&gecmis(e.due_at)));
   if(st.benim) suz=suz.filter(e=>e._benim);
   const filtreAktif=!!(st.job||st.org||st.kisi||st.acil||st.gec||st.benim);
   /* Suzme SAYFALAMADAN ONCE biter (§4): sayfa sayisi filtrelenmis
@@ -4249,8 +4260,9 @@ async function workspaceHome(c){
   if(st.job)   ozet.push('İş: '+esc((jm[st.job]||{}).title||('#'+st.job)));
   if(st.org)   ozet.push('Kurum: '+esc(cm[st.org]||('#'+st.org)));
   if(st.kisi)  ozet.push('İlgili: '+esc(tm[st.kisi]||('#'+st.kisi)));
-  if(st.acil)  ozet.push('Acil');
-  if(st.gec)   ozet.push('Geciken');
+  if(st.acil&&st.gec) ozet.push('Acil veya Geciken');
+  else if(st.acil)    ozet.push('Acil');
+  else if(st.gec)     ozet.push('Geciken');
   if(st.benim) ozet.push('Benimle ilgili');
 
   c.innerHTML=`
@@ -4327,7 +4339,7 @@ async function workspaceHome(c){
         <section class="card">
           <div class="card-h"><h3>Dikkat Gerekenler ${dikkatN?`<span class="chip clay">${dikkatN}</span>`:''}</h3>
             ${dikkatN?`<button class="btn-link" onclick="dikkatGoruntule()"
-              title="Termini geçmiş açık aksiyonu olan işleri İşler / Liste'de aç">Görüntüle</button>`:''}</div>
+              title="Acil veya termini geçmiş işleri İşler / Liste'de aç">Görüntüle</button>`:''}</div>
           <div class="card-b">${dikkatHtml}</div></section>
 
         <section class="card">
@@ -4549,17 +4561,15 @@ async function keSil(id){
    ayri bir liste kopyasi uretmez (BR-V01). Hedef ekranda filtrenin AKTIF
    oldugu acikca gorunur (§8/§20). */
 /* "Dikkat Gerekenler" -> tek ve HER ZAMAN AYNI hedef: Isler / Liste,
-   `Geciken` filtresi acik. Yeni bir dikkat modulu YOK (§5); kart zaten
-   BR-V01 geregi ayni kayitlarin bir goruntusu. Filtre hedef ekranda
-   `Aktif filtre` seridinde acikca gorunur. Acil isler ayni satirdaki
-   mevcut `⚡ Acil` anahtariyla tek tikla eklenir. */
+   `Acil` VE `Geciken` kontrolleri birlikte acik (S5.1 §6). Ikili VEYA ile
+   birlestigi icin sonuc tum dikkat kumesidir; ayri bir filtre YOK. */
 function dikkatGoruntule(){
-  isGo('liste',{q:'',org:'',phase:'',ilgili:'',acil:false,gec:false,dikkat:true,
+  isGo('liste',{q:'',org:'',phase:'',ilgili:'',acil:true,gec:true,
                 life:['acik','bekliyor']});
 }
 function wsTakipTumu(){
   isGo('liste',{q:'',org:'',phase:'',ilgili:String((ui._me&&ui._me.id)||''),
-                acil:false,gec:false,dikkat:false,life:['acik','bekliyor']});
+                acil:false,gec:false,life:['acik','bekliyor']});
 }
 
 /* ---------- Workspace Mecralar hub (parity audit S1 §2/§9) ----------
@@ -5104,7 +5114,12 @@ function rapSinir(b,e){
   return [bas.toISOString(), son.toISOString()];
 }
 /* PostgREST yaniti `max_rows` (1000) ile SESSIZCE kesilir. Rapor eksik
-   veriyle "tamam" gorunmemeli: sayfa sayfa sonuna kadar okunur. */
+   veriyle "tamam" gorunmemeli: sayfa sayfa sonuna kadar okunur.
+   S5.1: Panelim'in toplu okumalari (entry_relevance_all,
+   work_followers_all) da bunu kullanir. `kur()` KARARLI bir siralama
+   (benzersiz anahtarla biten) vermelidir, yoksa sayfa sinirinda satir
+   kayar. Sayfa boyu sunucu tavanina esittir: daha buyuk secilirse
+   ilk sayfa kisa gelir ve dongu erken biterdi. */
 async function rapHepsi(kur){
   const out=[]; const N=1000;
   for(let i=0;i<200;i++){
