@@ -1627,3 +1627,19 @@ i.tk-p.tk-ozel{border-radius:3px;}
   background:var(--c-line2);color:var(--c-ink2);white-space:nowrap;}
 .hr-t{margin:0;font-size:13.5px;line-height:1.55;color:var(--c-ink2);overflow-wrap:anywhere;}
 @media(max-width:760px){ .pf.hr-f .fhint{margin:0 !important;} }
+
+/* ============ S5 — Raporlar önizleme ================================
+   Önizleme, Excel'e giden AYNI satırları gösterir (ilk 10). Dönem her
+   zaman yazılı; kullanıcı yalnız tarih kutularından çıkarım yapmaz. */
+.rp-donem{margin:12px 0 0;font-size:13.5px;color:var(--c-ink2);}
+.rp-donem b{color:var(--c-ink);font-weight:650;}
+.rp-prev-h{display:flex;justify-content:space-between;align-items:baseline;gap:8px 16px;flex-wrap:wrap;
+  padding:10px 12px;border-radius:var(--r);background:var(--c-alt);font-size:13.5px;}
+.rp-prev-h span{font-size:12.5px;color:var(--c-ink3);}
+.rp-sec{margin-top:16px;}
+.rp-sec .rp-line{padding:6px 2px;border-bottom:1px solid var(--c-hair);}
+.rp-kapsam{margin:6px 2px 0;font-size:12.5px;line-height:1.5;color:var(--c-ink3);}
+.rp-kapsam b{color:var(--c-ink2);font-weight:650;}
+.rp-tbl{margin-top:8px;border:1px solid var(--c-hair);border-radius:var(--r);}
+.rp-tbl .tbl{font-size:12.5px;}
+.rp-tbl .tbl th,.rp-tbl .tbl td{white-space:nowrap;max-width:320px;overflow:hidden;text-overflow:ellipsis;}
