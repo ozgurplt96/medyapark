@@ -74,6 +74,371 @@ function pickUpload(accept, cb, opt){ const inp=document.createElement('input');
     catch(e){ mpAlert('Yükleme hatası: '+(e.message||e),'Yükleme'); } };
   inp.click(); }
 
+/* ================= BELGELER & EKLER (S6) =================================
+   Fiziksel dosya: Supabase Storage `documents` bucket'i (PRIVATE).
+   Halil'in `media` bucket'i ve `uploadFile()` AYNEN duruyor: o public site
+   gorselleri icindir (anon okur/listeler). Sozlesme/teklif/saha kaniti oraya
+   YAZILMAZ; ayni Storage altyapisinda ayri, kapali bir bucket kullanilir.
+
+   DB yalniz metadata + baglam tasir (`documents`, `document_links`).
+   Kalici kimlik = nesne yolu. Imzali URL GECICIDIR ve asla yazilmaz;
+   her acilista (kisa bellek onbellegiyle) yeniden uretilir.
+
+   Tek ek bileseni (`ekAlan`) composer, Yeni Is, Belge Ekle, operasyon ve
+   kurum ekranlarinda ORTAK kullanilir - ekran basina yukleyici yok.
+   ======================================================================== */
+const BELGE_TUR=[['teklif','Teklif'],['sozlesme','Sözleşme'],['tasarim','Tasarım'],
+  ['baski_dosyasi','Baskı Dosyası'],['montaj_fotografi','Montaj Fotoğrafı'],
+  ['sokum_fotografi','Söküm Fotoğrafı'],['mecra_belgesi','Mecra Belgesi'],
+  ['muhasebe','Muhasebe'],['diger','Diğer']];
+const belgeTurLbl=v=>(BELGE_TUR.find(x=>x[0]===v)||[null,'Diğer'])[1];
+/* 25 MB: proje Storage tavani 50 MiB (config.toml / FILE_SIZE_LIMIT).
+   Bucket ayni siniri SUNUCUDA da uygular. Daha buyuk uretim dosyalari
+   "Mevcut dosya baglantisi" olarak eklenir. */
+const BELGE_MAX=25*1024*1024;
+const BELGE_ADET=10;                       /* islem basina; RPC de 10'da keser */
+const BELGE_URL_SN=600;                    /* imzali URL omru (sn) */
+const BELGE_MIME={jpg:'image/jpeg',jpeg:'image/jpeg',png:'image/png',webp:'image/webp',
+  pdf:'application/pdf',doc:'application/msword',
+  docx:'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  xls:'application/vnd.ms-excel',
+  xlsx:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  csv:'text/csv',txt:'text/plain'};
+const BELGE_ACCEPT='image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp,.pdf,.doc,.docx,.xls,.xlsx,.csv,.txt';
+/* `documents` altinda belgenin TUM baglantilari da gelir: "kurumda da var
+   mi?" ve "son baglanti mi?" sorulari ek istek acmadan cevaplanir. */
+const BELGE_SEL='document_links(id,document_id,created_by_team_id,documents(id,original_name,title,doc_type,mime_type,size_bytes,provider,storage_path,external_url,uploaded_by_team_id,created_at,note,document_links(id,job_id,entry_id,operation_id,customer_id,quote_id,created_by_team_id)))';
+
+const _belgeler=new Map();                 /* id -> doc (acma/menu icin) */
+const _belgeUrl=new Map();                 /* yol|indir -> {url,son} */
+function belgeKaydet(d){ if(d&&d.id) _belgeler.set(d.id,d); return d; }
+const belgeAd=d=>(d&&(String(d.title||'').trim()||d.original_name))||'Belge';
+const belgeResimMi=d=>!!d&&d.provider==='supabase'&&/^image\//.test(d.mime_type||'');
+function belgeBoyut(n){ if(n==null)return''; if(n<1024)return n+' B';
+  if(n<1048576)return Math.round(n/1024)+' KB'; return (n/1048576).toFixed(n<10485760?1:0)+' MB'; }
+function belgeUzanti(d){
+  if(d.provider==='external') return 'LİNK';
+  const e=(String(d.original_name||'').split('.').pop()||'').toUpperCase();
+  return e.length&&e.length<=4?e:'DOSYA';
+}
+
+/* Uzanti VE tarayici MIME birlikte degerlendirilir. Bu bir antivirus
+   taramasi DEGILDIR; yalniz acikca desteklenmeyen turleri reddeder. Asil
+   kapi bucket'in sunucu tarafi MIME listesidir. */
+function belgeDogrula(f){
+  const ext=(String(f.name||'').split('.').pop()||'').toLowerCase();
+  const mime=BELGE_MIME[ext];
+  if(!mime) return {hata:'Bu dosya türü desteklenmiyor (JPG, PNG, WEBP, PDF, Word, Excel, CSV, TXT).'};
+  const t=String(f.type||'');
+  const uyumlu=!t||t===mime||t==='application/octet-stream'
+    ||(ext==='csv'&&/csv|excel|plain/.test(t));
+  if(!uyumlu) return {hata:'Dosya uzantısı içeriğiyle uyuşmuyor.'};
+  if(!f.size) return {hata:'Dosya boş.'};
+  if(f.size>BELGE_MAX) return {hata:`Dosya ${belgeBoyut(f.size)} — sınır 25 MB. Büyük dosyayı “Bağlantı ekle” ile ekleyin.`,buyuk:true};
+  return {mime};
+}
+/* Kalici nesne kimligi uretilir; Is/kurum adi ya da ham dosya adi
+   kimlik OLMAZ. Orijinal ad metadata'da Turkce karakterleriyle kalir. */
+function belgeYolUret(ad){
+  const tr={'ı':'i','İ':'I','ş':'s','Ş':'S','ğ':'g','Ğ':'G','ç':'c','Ç':'C','ö':'o','Ö':'O','ü':'u','Ü':'U'};
+  let s=String(ad||'dosya').replace(/[ıİşŞğĞçÇöÖüÜ]/g,c=>tr[c]).normalize('NFD').replace(/[̀-ͯ]/g,'');
+  const nokta=s.lastIndexOf('.');
+  const ext=nokta>0?s.slice(nokta+1).toLowerCase().replace(/[^a-z0-9]/g,''):'';
+  let gov=(nokta>0?s.slice(0,nokta):s).replace(/[^A-Za-z0-9._-]+/g,'-').replace(/-+/g,'-').replace(/^[-.]+|[-.]+$/g,'');
+  gov=(gov||'dosya').slice(0,100);
+  return crypto.randomUUID()+'/'+gov+(ext?'.'+ext:'');
+}
+async function belgeImzali(yol,indirAd){
+  const k=yol+'|'+(indirAd||'');
+  const c=_belgeUrl.get(k);
+  if(c&&c.son>Date.now()+30000) return c.url;
+  const {data,error}=await sb.storage.from('documents')
+    .createSignedUrl(yol,BELGE_URL_SN,indirAd?{download:indirAd}:undefined);
+  if(error) throw error;
+  _belgeUrl.set(k,{url:data.signedUrl,son:Date.now()+BELGE_URL_SN*1000});
+  return data.signedUrl;
+}
+/* Kucuk resimler: ekranda gorunen TUM eksik resimler icin TEK istek. */
+let _belgeKucukT=null;
+function belgeKucukPlanla(){ clearTimeout(_belgeKucukT); _belgeKucukT=setTimeout(()=>belgeKucukDoldur().catch(()=>{}),30); }
+async function belgeKucukDoldur(){
+  const imgs=[...document.querySelectorAll('img[data-belge-yol]:not([src])')];
+  if(!imgs.length) return;
+  const taze=y=>{ const c=_belgeUrl.get(y+'|'); return c&&c.son>Date.now()+30000; };
+  const eksik=[...new Set(imgs.map(i=>i.dataset.belgeYol))].filter(y=>!taze(y));
+  if(eksik.length){
+    const {data,error}=await sb.storage.from('documents').createSignedUrls(eksik,BELGE_URL_SN);
+    if(!error)(data||[]).forEach(r=>{ if(r&&r.signedUrl&&r.path)
+      _belgeUrl.set(r.path+'|',{url:r.signedUrl,son:Date.now()+BELGE_URL_SN*1000}); });
+  }
+  imgs.forEach(i=>{ const c=_belgeUrl.get(i.dataset.belgeYol+'|');
+    if(c) i.src=c.url; else { const b=i.closest('.bl-th'); if(b) b.classList.add('hata'); } });
+}
+(function(){ try{ new MutationObserver(belgeKucukPlanla)
+  .observe(document.documentElement,{childList:true,subtree:true}); }catch(e){} })();
+
+async function belgeAc(id,indir){
+  const d=_belgeler.get(id); if(!d) return;
+  if(d.provider==='external'){ window.open(d.external_url,'_blank','noopener'); return; }
+  if(belgeResimMi(d)&&!indir){
+    try{ belgeOnizle(d,await belgeImzali(d.storage_path)); }
+    catch(e){ mpAlert('Dosya açılamadı: '+(e.message||e),'Belge'); }
+    return;
+  }
+  /* Pencere SENKRON acilir; imzali URL gelince yonlendirilir. Aksi halde
+     `await` sonrasi window.open acilir-pencere engelleyicisine takilir. */
+  const w=window.open('','_blank');
+  try{
+    const url=await belgeImzali(d.storage_path,indir?d.original_name:null);
+    if(w){ try{ w.opener=null; }catch(e){} w.location.href=url; } else location.assign(url);
+  }catch(e){ if(w) w.close(); mpAlert('Dosya açılamadı: '+(e.message||e),'Belge'); }
+}
+/* Resim onizleme: modal() KULLANILMAZ - acik bir formun ustune acilabilmeli. */
+function belgeOnizle(d,url){
+  belgeOnizleKapat();
+  const bg=document.createElement('div');
+  bg.id='blLb'; bg.className='bl-lb'; bg.setAttribute('role','dialog'); bg.setAttribute('aria-modal','true');
+  bg.setAttribute('aria-label',belgeAd(d));
+  bg.innerHTML=`<div class="bl-lb-b">
+      <div class="bl-lb-h"><b>${esc(belgeAd(d))}</b><span>${esc(belgeTurLbl(d.doc_type))}</span>
+        <button type="button" class="btn btn-outline btn-sm" onclick="belgeAc(${d.id},true)">İndir</button>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="belgeOnizleKapat()" aria-label="Kapat">✕</button></div>
+      <img src="${esc(url)}" alt="${esc(belgeAd(d))}"></div>`;
+  bg.addEventListener('mousedown',e=>{ if(e.target===bg) belgeOnizleKapat(); });
+  document.addEventListener('keydown',belgeOnizleEsc,true);
+  document.body.appendChild(bg);
+  const k=bg.querySelector('.btn-ghost'); if(k) k.focus();
+}
+function belgeOnizleEsc(e){ if(e.key==='Escape'){ e.stopPropagation(); belgeOnizleKapat(); } }
+function belgeOnizleKapat(){ const b=document.getElementById('blLb'); if(b) b.remove();
+  document.removeEventListener('keydown',belgeOnizleEsc,true); }
+
+/* ---- Kompakt ek seridi (guncelleme satiri, zaman cizelgesi, operasyon) --
+   Akista galeri YOK: en fazla 4 kucuk resim + "+N", belgeler tek satir cip. */
+function ekSeridi(links,opt){
+  opt=opt||{};
+  const docs=(links||[]).map(l=>l&&l.documents).filter(Boolean).map(belgeKaydet);
+  if(!docs.length) return '';
+  const res=docs.filter(belgeResimMi), dig=docs.filter(d=>!belgeResimMi(d));
+  const max=opt.max||4;
+  return `<div class="bl-strip">${res.slice(0,max).map(d=>
+      `<button type="button" class="bl-th" onclick="event.stopPropagation();belgeAc(${d.id})"
+         title="${esc(belgeAd(d))}" aria-label="${esc(belgeAd(d))} — önizle">
+         <img data-belge-yol="${esc(d.storage_path)}" alt="" loading="lazy"></button>`).join('')}${
+    res.length>max?`<span class="bl-more">+${res.length-max}</span>`:''}${
+    dig.map(belgeCip).join('')}</div>`;
+}
+function belgeCip(d){
+  const ext=d.provider==='external';
+  return `<button type="button" class="bl-doc" onclick="event.stopPropagation();belgeAc(${d.id})"
+      title="${esc(belgeAd(d))}${ext?' — harici bağlantı':''}">
+      <span class="bl-ext ${ext?'dis':''}">${esc(belgeUzanti(d))}</span>
+      <span class="bl-nm">${esc(belgeAd(d))}</span>${ext?'<span class="bl-dis" aria-hidden="true">↗</span>':''}</button>`;
+}
+
+/* ============ TEK EK BILESENI (S6 §27) ================================
+   Durum ekranda degil burada yasar: modal yeniden cizilse de secilen
+   dosyalar kaybolmaz. Ogeler:
+     {k, tip:'dosya'|'link', file, ad, mime, boyut, tur, durum, yol, hata, url}
+   durum: hazir -> yukleniyor -> yuklendi | hata
+   `mevcut` = daha once kaydedilmis ekler (duzenleme), `kaldir` = kaldirilacak
+   baglanti id'leri. */
+const EK={};
+let _ekSay=0;
+function ekYeni(kid,opt){
+  EK[kid]={items:[],mevcut:(opt&&opt.mevcut)||[],kaldir:new Set(),
+           turZorunlu:!!(opt&&opt.turZorunlu),varsayilan:(opt&&opt.varsayilan)||null,
+           varsayilanResim:(opt&&opt.varsayilanResim)||null};
+  return EK[kid];
+}
+function ekAlan(kid,opt){
+  if(!EK[kid]) ekYeni(kid,opt);
+  return `<div class="ek" id="ek_${kid}">
+    <div class="ek-bar">
+      <label class="btn btn-outline btn-sm ek-sec">📎 Dosya ekle
+        <input type="file" multiple accept="${BELGE_ACCEPT}" onchange="ekSec('${kid}',this)" hidden></label>
+      <button type="button" class="btn btn-ghost btn-sm" onclick="ekLinkAc('${kid}')">🔗 Bağlantı ekle</button>
+      <span class="fhint ek-hint">En fazla ${BELGE_ADET} dosya · dosya başına 25 MB</span>
+    </div>
+    <div class="ek-link" id="ekl_${kid}" hidden>
+      <input class="inp inp-sm" id="eklu_${kid}" type="url" aria-label="Bağlantı adresi" placeholder="https://… (OneDrive, SharePoint, Drive)">
+      <input class="inp inp-sm" id="ekla_${kid}" aria-label="Dosya adı" placeholder="Dosya adı (ör. Severnik sözleşme.pdf)">
+      <button type="button" class="btn btn-outline btn-sm" onclick="ekLinkEkle('${kid}')">Ekle</button>
+    </div>
+    <div class="ek-list" id="ekv_${kid}">${ekListeHtml(kid)}</div></div>`;
+}
+function ekVarsayilanTur(e,resim){
+  if(e.turZorunlu) return '';
+  return (resim&&e.varsayilanResim)||e.varsayilan||'diger';
+}
+function ekTurSec(kid,it){
+  const e=EK[kid];
+  return `<select class="inp inp-sm ek-tur" aria-label="Belge türü" onchange="ekTurDegis('${kid}','${it.k}',this.value)">
+    ${e.turZorunlu&&!it.tur?'<option value="">Tür seçin…</option>':''}
+    ${BELGE_TUR.map(t=>`<option value="${t[0]}" ${it.tur===t[0]?'selected':''}>${t[1]}</option>`).join('')}</select>`;
+}
+function ekListeHtml(kid){
+  const e=EK[kid]; if(!e) return '';
+  const mev=e.mevcut.map(m=>{ const d=belgeKaydet(m.doc); const sil=e.kaldir.has(m.link_id);
+    return `<div class="ek-it ${sil?'sil':''}">
+      <span class="bl-ext ${d.provider==='external'?'dis':''}">${esc(belgeUzanti(d))}</span>
+      <button type="button" class="ek-ad btn-link" onclick="belgeAc(${d.id})">${esc(belgeAd(d))}</button>
+      <span class="ek-m">${esc(belgeTurLbl(d.doc_type))}${sil?' · kaldırılacak':''}</span>
+      ${m.kaldirilabilir===false?'':`<button type="button" class="ek-x" onclick="ekMevcutKaldir('${kid}',${m.link_id})"
+        aria-label="${sil?'Geri al':'Kaldır'}">${sil?'Geri al':'✕'}</button>`}</div>`; }).join('');
+  const yeni=e.items.map(it=>{
+    const dur=it.durum==='yukleniyor'?'<span class="ek-d yuk">Yükleniyor…</span>'
+      :it.durum==='yuklendi'?'<span class="ek-d ok">Yüklendi</span>'
+      :it.durum==='hata'?`<span class="ek-d hata" role="alert">${esc(it.hata||'Hata')}</span>`:'';
+    const tekrar=it.durum==='hata'&&!it.gecersiz;
+    const uz=it.tip==='link'?'LİNK':((it.ad.split('.').pop()||'').toUpperCase().slice(0,4));
+    return `<div class="ek-it ${it.durum==='hata'?'hata':''}">
+      <span class="bl-ext ${it.tip==='link'?'dis':''}">${esc(uz)}</span>
+      <span class="ek-ad" title="${esc(it.ad)}">${esc(it.ad)}</span>
+      <span class="ek-m">${it.tip==='link'?'harici bağlantı':esc(belgeBoyut(it.boyut))}</span>
+      ${it.gecersiz?'':ekTurSec(kid,it)}
+      ${dur}
+      ${tekrar?`<button type="button" class="btn-link" onclick="ekTekrar('${kid}','${it.k}')">Tekrar dene</button>`:''}
+      ${it.durum==='yukleniyor'?'':`<button type="button" class="ek-x" onclick="ekCikar('${kid}','${it.k}')" aria-label="Çıkar">✕</button>`}
+    </div>`; }).join('');
+  return mev+yeni;
+}
+function ekCiz(kid){ const el=document.getElementById('ekv_'+kid); if(el) el.innerHTML=ekListeHtml(kid); }
+function ekToplam(kid){ const e=EK[kid]; if(!e) return 0;
+  return e.items.filter(i=>!i.gecersiz).length+e.mevcut.filter(m=>!e.kaldir.has(m.link_id)).length; }
+function ekSec(kid,inp){
+  const e=EK[kid]; if(!e) return;
+  const dosyalar=[...(inp.files||[])]; inp.value='';
+  let yer=BELGE_ADET-e.items.filter(i=>!i.gecersiz).length;
+  let asan=0;
+  dosyalar.forEach(f=>{
+    if(yer<=0){ asan++; return; }
+    const v=belgeDogrula(f);
+    const it={k:'e'+(++_ekSay),tip:'dosya',file:f,ad:f.name,boyut:f.size,mime:v.mime||f.type,
+              tur:ekVarsayilanTur(e,/^image\//.test(v.mime||'')),durum:v.hata?'hata':'hazir',hata:v.hata||null,gecersiz:!!v.hata};
+    e.items.push(it); if(!v.hata) yer--;
+  });
+  if(asan) toast(`En fazla ${BELGE_ADET} dosya eklenebilir; ${asan} dosya alınmadı.`);
+  ekCiz(kid);
+}
+function ekLinkAc(kid){ const b=document.getElementById('ekl_'+kid); if(!b) return;
+  b.hidden=!b.hidden; if(!b.hidden){ const u=document.getElementById('eklu_'+kid); if(u) u.focus(); } }
+/* Yalniz https. javascript:, data:, file: vb. REDDEDILIR (DB CHECK ayrica). */
+function ekLinkEkle(kid){
+  const e=EK[kid]; if(!e) return;
+  const url=(gv('eklu_'+kid)||'').trim();
+  let u=null; try{ u=new URL(url); }catch(x){}
+  if(!u||u.protocol!=='https:'||/\s/.test(url)){ mpAlert('Geçerli bir https:// bağlantısı girin.','Bağlantı'); return; }
+  if(e.items.filter(i=>!i.gecersiz).length>=BELGE_ADET){ toast(`En fazla ${BELGE_ADET} belge.`); return; }
+  let ad=(gv('ekla_'+kid)||'').trim();
+  if(!ad){ try{ ad=decodeURIComponent(u.pathname.split('/').filter(Boolean).pop()||'')||u.hostname; }catch(x){ ad=u.hostname; } }
+  e.items.push({k:'e'+(++_ekSay),tip:'link',url,ad:ad.slice(0,255),tur:ekVarsayilanTur(e,false),durum:'hazir'});
+  document.getElementById('eklu_'+kid).value=''; document.getElementById('ekla_'+kid).value='';
+  ekCiz(kid);
+}
+function ekTurDegis(kid,k,v){ const it=(EK[kid]||{items:[]}).items.find(i=>i.k===k); if(it) it.tur=v; }
+function ekMevcutKaldir(kid,linkId){ const e=EK[kid]; if(!e) return;
+  if(e.kaldir.has(linkId)) e.kaldir.delete(linkId); else e.kaldir.add(linkId); ekCiz(kid); }
+async function ekCikar(kid,k){
+  const e=EK[kid]; if(!e) return;
+  const it=e.items.find(i=>i.k===k); if(!it) return;
+  e.items=e.items.filter(i=>i.k!==k);
+  ekCiz(kid);
+  if(it.yol&&!it.kaydedildi) await belgeNesneSil([it.yol]);   /* kaydedilmemis yukleme */
+}
+function ekTekrar(kid,k){ const it=(EK[kid]||{items:[]}).items.find(i=>i.k===k);
+  if(it){ it.durum='hazir'; it.hata=null; ekCiz(kid); } }
+
+/* Kaydedilmemis nesneleri temizle. Basarisizsa yol KAYBOLMAZ: konsola ve
+   kullaniciya yazilir (S6 §18 - kuyruk yok, gorunur hata). */
+async function belgeNesneSil(yollar){
+  yollar=(yollar||[]).filter(Boolean); if(!yollar.length) return true;
+  try{ const {error}=await sb.storage.from('documents').remove(yollar); if(error) throw error; return true; }
+  catch(err){ console.error('[belge] kaydedilmemis dosya temizlenemedi:',yollar,err);
+    toast('Yüklenen dosya temizlenemedi: '+yollar.join(', ')); return false; }
+}
+/* Formdan cikarken henuz kaydedilmemis yuklemeler geri alinir. */
+function ekBirak(kid){
+  const e=EK[kid]; if(!e) return;
+  delete EK[kid];
+  const yollar=e.items.filter(i=>i.yol&&!i.kaydedildi).map(i=>i.yol);
+  if(yollar.length) belgeNesneSil(yollar);
+}
+function ekModalKapandi(){
+  Object.keys(EK).forEach(kid=>{ if(!document.getElementById('ek_'+kid)) ekBirak(kid); });
+}
+function ekTurEksik(kid){ const e=EK[kid]; return !!e&&e.turZorunlu&&e.items.some(i=>!i.gecersiz&&!i.kaydedildi&&!i.tur); }
+function ekBekleyen(kid){ const e=EK[kid]; return e?e.items.filter(i=>!i.gecersiz&&!i.kaydedildi):[]; }
+
+/* Yukle: yalniz dosya ogeleri, en fazla 3 paralel. Hepsi basarili ise true. */
+async function ekYukle(kid){
+  const e=EK[kid]; if(!e) return true;
+  const is=e.items.filter(i=>i.tip==='dosya'&&!i.gecersiz&&!i.kaydedildi&&!i.yol);
+  const tek=async it=>{
+    it.durum='yukleniyor'; it.hata=null; ekCiz(kid);
+    const yol=belgeYolUret(it.ad);
+    try{
+      const {error}=await sb.storage.from('documents').upload(yol,it.file,{upsert:false,contentType:it.mime});
+      if(error) throw error;
+      it.yol=yol; it.durum='yuklendi';
+    }catch(err){
+      it.durum='hata';
+      const m=String((err&&err.message)||err);
+      it.hata=/mime/i.test(m)?'Bu dosya türü kabul edilmedi.'
+        :/size|large|exceed/i.test(m)?'Dosya çok büyük.':'Yüklenemedi.';
+      console.error('[belge] yukleme hatasi',it.ad,err);
+    }
+    ekCiz(kid);
+  };
+  for(let i=0;i<is.length;i+=3) await Promise.all(is.slice(i,i+3).map(tek));
+  return !ekBekleyen(kid).some(i=>i.tip==='dosya'&&!i.yol);
+}
+/* RPC govdesi. Kaydedilmemis tum gecerli ogeler; `links` cagirana ait. */
+function ekGovde(kid,links){
+  return ekBekleyen(kid).filter(i=>i.tip==='link'||i.yol).map(i=>({
+    provider:i.tip==='link'?'external':'supabase',
+    storage_path:i.tip==='link'?null:i.yol, external_url:i.tip==='link'?i.url:null,
+    original_name:i.ad, doc_type:i.tur||'diger', mime_type:i.mime||null,
+    size_bytes:i.boyut||null, links}));
+}
+/* DB adimi basarisiz olursa: yuklenen nesneler temizlenir, ogeler yeniden
+   denemeye hazir birakilir. Yarim kalmis "basarili" belge olusmaz. */
+async function ekGeriAl(kid,mesaj){
+  const bek=ekBekleyen(kid);
+  await belgeNesneSil(bek.filter(i=>i.yol).map(i=>i.yol));
+  bek.forEach(i=>{ i.yol=null; if(i.tip==='dosya'||mesaj){ i.durum='hata'; i.hata=mesaj||'Kaydedilemedi.'; } });
+  ekCiz(kid);
+}
+async function ekGonder(kid,links){
+  const e=EK[kid]; if(!e||!ekBekleyen(kid).length) return {ok:true,sayi:0};
+  if(!await ekYukle(kid)) return {ok:false,hata:'bazı dosyalar yüklenemedi'};
+  const govde=ekGovde(kid,links);
+  try{
+    await api('document_create',{docs:govde});
+    ekBekleyen(kid).forEach(i=>{ i.kaydedildi=true; i.durum='yuklendi'; });
+    ekCiz(kid);
+    return {ok:true,sayi:govde.length};
+  }catch(err){
+    await ekGeriAl(kid,'Kaydedilemedi.');
+    return {ok:false,hata:(err&&err.message)||String(err)};
+  }
+}
+/* Baglanti kaldir (+ son baglantiysa dosyayi ve metadata'yi temizle). */
+async function belgeBagKaldir(linkIds){
+  linkIds=(linkIds||[]).filter(Boolean); if(!linkIds.length) return {ok:true,docIds:[]};
+  const r=await api('document_links_remove',{ids:linkIds});
+  if(r.docIds&&r.docIds.length) r.temizlik=await api('documents_cleanup',{ids:r.docIds}).catch(()=>null);
+  return r;
+}
+/* Kayit sonrasi dogru ekrani tazele: Work/Kurum detayindaysak orada kal. */
+function ekranTazele(){
+  const st=(history.state&&history.state.mp)?history.state:null;
+  if(st&&st.v==='work'&&st.id) return workAc(st.id);
+  if(st&&st.v==='org'&&st.id) return orgAc(st.id);
+  if(st&&st.v==='person'&&st.id&&typeof personAc==='function') return personAc(st.id);
+  return renderSection();
+}
+
 
 
 /* ==========================================================
@@ -289,6 +654,34 @@ async function api(action, body){
   parts.slice(1).forEach(kv=>{ const i=kv.indexOf('='); if(i>=0)q[kv.slice(0,i)]=decodeURIComponent(kv.slice(i+1)); });
   const ok=(d)=>d;
 
+  /* S6 §23/§33: belge tasiyabilen bir kayit silinirken once ona bagli
+     belgeler not alinir; kayit silinince (FK cascade baglantiyi dusurur,
+     son baglantiysa belge `detached_at` alir) dosya + metadata temizlenir.
+     Baska bir baglami olan belge KORUNUR. RLS 0 satir dondururse bu artik
+     sessiz basari degil, acik hatadir. */
+  if(act==='entry_delete'||act==='operation_delete'||act==='job_delete'){
+    const delId=(q.id!=null&&q.id!=='')?q.id:(body&&body.id);
+    if(delId==null||delId==='') throw new Error('Silinecek kayıt belirtilmedi.');
+    let bq=sb.from('document_links').select('document_id');
+    if(act==='entry_delete') bq=bq.eq('entry_id',delId);
+    else if(act==='operation_delete') bq=bq.eq('operation_id',delId);
+    else {
+      const {data:ops}=await sb.from('work_operations').select('id').eq('job_id',delId);
+      const oids=(ops||[]).map(o=>o.id);
+      bq=bq.or(`job_id.eq.${delId}${oids.length?`,operation_id.in.(${oids.join(',')})`:''}`);
+    }
+    const {data:bl,error:be}=await bq; if(be)throw be;
+    const {data:sil,error}=await sb.from(DELMAP[act]).delete().eq('id',delId).select('id');
+    if(error)throw error;
+    if(!sil||!sil.length) throw new Error('Bu kaydı silme yetkiniz yok.');
+    const docIds=[...new Set((bl||[]).map(x=>x.document_id))];
+    if(docIds.length){
+      try{ const t=await api('documents_cleanup',{ids:docIds});
+        if(t&&t.kalan) toast(`${t.kalan} ek dosya temizlenemedi; daha sonra yeniden denenecek.`); }
+      catch(e){ console.error('[belge] temizlik hatasi',e); }
+    }
+    logYaz(act,body,q); return ok();
+  }
   if(act.endsWith('_delete') && DELMAP[act]){
     const delId=(q.id!=null&&q.id!=='')?q.id:(body&&body.id);
     if(delId==null||delId==='') throw new Error('Silinecek kayıt belirtilmedi.');
@@ -472,20 +865,25 @@ async function api(action, body){
        primitive'idir: action_status NULL ise sıradan güncelleme, dolu ise
        yapılacak aksiyon (D-204). Ayrı Task/Ticket tablosu yoktur. */
     case 'work_detail':{
-      const [j,wp,en,qs,bk]=await Promise.all([
-        sb.from('jobs').select('*').eq('id',q.id).single(),
+      /* S6 §16: Belgeler TEK turda - is, guncellemeler, operasyonlar ve
+         teklifler ayni Promise.all icinde baglantilarini gomulu getirir.
+         Fiziksel kopya ya da ek baglanti satiri URETILMEZ. */
+      const [j,wp,en,qs,bk,op]=await Promise.all([
+        sb.from('jobs').select('*,'+BELGE_SEL).eq('id',q.id).single(),
         sb.from('work_parties').select('*').eq('job_id',q.id),
-        sb.from('entries').select('*').eq('job_id',q.id).order('occurred_at',{ascending:false}),
+        sb.from('entries').select('*,'+BELGE_SEL).eq('job_id',q.id).order('occurred_at',{ascending:false}),
         /* Offer ve Booking kendi domainlerinde kalır; burada yalnız
            Work bağlamında özet olarak yüzeye çıkar (07 §11/§12). */
-        sb.from('quotes').select('id,status,total,created_at,revision_no,revision_of_id,gecerlilik')
+        sb.from('quotes').select('id,status,total,created_at,revision_no,revision_of_id,gecerlilik,'+BELGE_SEL)
           .eq('work_id',q.id).order('revision_no',{ascending:false}),
         sb.from('bookings').select('id,unit_id,ym,status,source_quote_id')
-          .eq('work_id',q.id).order('ym')]);
+          .eq('work_id',q.id).order('ym'),
+        sb.from('work_operations').select('id,operation_type,description,planned_date,'+BELGE_SEL)
+          .eq('job_id',q.id)]);
       if(j.error)throw j.error; if(wp.error)throw wp.error; if(en.error)throw en.error;
-      if(qs.error)throw qs.error; if(bk.error)throw bk.error;
+      if(qs.error)throw qs.error; if(bk.error)throw bk.error; if(op.error)throw op.error;
       return ok({job:j.data, parties:wp.data||[], entries:en.data||[],
-                 quotes:qs.data||[], bookings:bk.data||[]}); }
+                 quotes:qs.data||[], bookings:bk.data||[], ops:op.data||[]}); }
     case 'quote_revise':{
       /* Gönderilmiş Offer overwrite edilmez: klon + revision_of_id +
          revision_no artışı (06 §10.2). */
@@ -505,7 +903,8 @@ async function api(action, body){
       logYaz('quote_builder_save',{id:ny.id});
       return ok({id:ny.id, revision_no:yeni.revision_no}); }
     case 'entries_list':{
-      let sel=sb.from('entries').select('*');
+      /* S6: `belge=1` ekleri AYNI sorguda gomer (Entry basina istek yok). */
+      let sel=sb.from('entries').select(q.belge?'*,'+BELGE_SEL:'*');
       if(q.job_id)        sel=sel.eq('job_id',q.job_id);
       if(q.assignee_id)   sel=sel.eq('assignee_id',q.assignee_id);
       if(q.action_status) sel=sel.eq('action_status',q.action_status);
@@ -539,7 +938,7 @@ async function api(action, body){
       let sel=sb.from('entries')
         .select('id,job_id,body,system_kind,created_by_team_id,occurred_at,jobs(title,customer_id)',{count:'exact'})
         .eq('source','system');
-      const GRUP={isler:['work_created','work_phase','work_lifecycle','work_contract','quote_revised','quote_approved'],
+      const GRUP={isler:['work_created','work_phase','work_lifecycle','work_contract','quote_revised','quote_approved','document_added'],
                   operasyon:['operation_created','operation_status'],
                   muhasebe:['work_accounting']};
       if(q.tur&&GRUP[q.tur]) sel=sel.in('system_kind',GRUP[q.tur]);
@@ -548,6 +947,67 @@ async function api(action, body){
         .order('id',{ascending:false}).range(bas,bas+adet-1);
       if(error)throw error;
       return ok({satirlar:data||[], toplam:count||0, sayfa, adet}); }
+    /* ---- Belgeler (S6) ----
+       Olusturma TEK islemde (RPC): metadata + en az bir baglanti. Yukleyici
+       kimligi, boyut ve MIME sunucuda belirlenir; buradaki degerler ipucudur. */
+    case 'document_create':{
+      const {data,error}=await sb.rpc('document_create',{p_docs:body.docs||[]});
+      if(error)throw error; logYaz(act,{sayi:(body.docs||[]).length}); return ok(data); }
+    case 'entry_create_docs':{
+      const {data,error}=await sb.rpc('entry_create_with_documents',
+        {p_entry:body.entry, p_ilgili:body.ilgili||[], p_docs:body.docs||[]});
+      if(error)throw error; logYaz('entry_save',{id:data}); return ok({id:data}); }
+    case 'document_update':{
+      const patch={}; ['title','doc_type','note'].forEach(k=>{ if(k in body) patch[k]=body[k]; });
+      const {data,error}=await sb.from('documents').update(patch).eq('id',body.id).select('id');
+      if(error)throw error;
+      if(!data||!data.length) throw new Error('Bu belgeyi değiştirme yetkiniz yok.');
+      logYaz(act,body); return ok(); }
+    case 'document_link_add':{
+      const row={document_id:body.document_id};
+      ['job_id','entry_id','operation_id','customer_id','contact_id','quote_id']
+        .forEach(k=>{ if(body[k]) row[k]=body[k]; });
+      const {data,error}=await sb.from('document_links').insert(row).select('id').single();
+      if(error)throw error; logYaz(act,body); return ok(data); }
+    case 'document_links_remove':{
+      const ids=(body.ids||[]).filter(Boolean);
+      if(!ids.length) return ok({docIds:[],eksik:0});
+      const {data,error}=await sb.from('document_links').delete().in('id',ids).select('id,document_id');
+      if(error)throw error;
+      logYaz(act,body);
+      return ok({docIds:[...new Set((data||[]).map(x=>x.document_id))],eksik:ids.length-(data||[]).length}); }
+    /* Hicbir baglama bagli olmayan (`detached_at`) belgelerin dosyasini ve
+       metadata'sini temizler. Once DOSYA silinir; basarisizsa metadata
+       KORUNUR ve sonraki denemede yeniden ele alinir (S6 §24). */
+    case 'documents_cleanup':{
+      const me=(ui._me&&ui._me.id)||0, adm=isAdmin();
+      const ids=((body&&body.ids)||[]).filter(Boolean);
+      let sel=sb.from('documents').select('id,provider,storage_path,uploaded_by_team_id')
+        .not('detached_at','is',null);
+      if(ids.length) sel=sel.in('id',ids);
+      if(!adm) sel=sel.eq('uploaded_by_team_id',me);
+      const {data,error}=await sel.limit(200); if(error)throw error;
+      const aday=data||[]; if(!aday.length) return ok({silinen:0,kalan:0});
+      const tamam=new Set(aday.filter(d=>d.provider==='external').map(d=>d.id));
+      const dosya=aday.filter(d=>d.provider==='supabase');
+      if(dosya.length){
+        const {data:rm,error:re}=await sb.storage.from('documents').remove(dosya.map(d=>d.storage_path));
+        if(re) console.error('[belge] depo silme hatasi',re);
+        const gitti=new Set((rm||[]).map(o=>o.name));
+        for(const d of dosya){
+          if(gitti.has(d.storage_path)){ tamam.add(d.id); continue; }
+          if(re) continue;
+          /* Yanitta yoksa nesne onceki yarim bir denemede zaten silinmis
+             olabilir; klasor gercekten bossa metadata guvenle silinir. */
+          const {data:ls}=await sb.storage.from('documents').list(d.storage_path.split('/')[0]);
+          if(Array.isArray(ls)&&!ls.length) tamam.add(d.id);
+        }
+      }
+      let silinen=0;
+      if(tamam.size){
+        const {data:dd,error:de}=await sb.from('documents').delete().in('id',[...tamam]).select('id');
+        if(de)throw de; silinen=(dd||[]).length; }
+      return ok({silinen,kalan:aday.length-silinen}); }
     case 'entry_save':{
       const row={...body};
       /* `_ilgili` bir entries kolonu DEĞİLDİR: composer'ın "kime özellikle
@@ -659,6 +1119,7 @@ async function api(action, body){
       const data=await rapHepsi(()=>{
         let sel=sb.from('entry_relevance').select('entry_id,team_id');
         if(q.team_id) sel=sel.eq('team_id',q.team_id);
+        if(q.entry_id) sel=sel.eq('entry_id',q.entry_id);
         return sel.order('entry_id').order('team_id'); });
       return ok(data); }
     case 'job_lifecycle':{
@@ -675,7 +1136,7 @@ async function api(action, body){
     /* ---- Baskı / Montaj operasyonları (Sprint 05) ----
        Work'ün structured child'ı; Booking parent zorunlu değildir. */
     case 'operations_list':{
-      let sel=sb.from('work_operations').select('*');
+      let sel=sb.from('work_operations').select(q.belge?'*,'+BELGE_SEL:'*');
       if(q.job_id)   sel=sel.eq('job_id',q.job_id);
       if(q.from)     sel=sel.gte('planned_date',q.from);
       if(q.to)       sel=sel.lte('planned_date',q.to);
@@ -716,11 +1177,11 @@ async function api(action, body){
          (BAĞLANTILAR üzerinden), açık işler, son güncellemeler, geçmiş.
          Kurum başına ek sorgu YOK; ekran başına sabit sayıda okuma. */
       const [c,af,jb,qt]=await Promise.all([
-        sb.from('customers').select('*').eq('id',q.id).single(),
+        sb.from('customers').select('*,'+BELGE_SEL).eq('id',q.id).single(),
         sb.from('contact_affiliations')
           .select('id,contact_id,customer_id,title,department,is_primary,active')
           .eq('customer_id',q.id),
-        sb.from('jobs').select('id,title,status,lifecycle_status,is_urgent,closed_reason,primary_contact_id,created_at')
+        sb.from('jobs').select('id,title,status,lifecycle_status,is_urgent,closed_reason,primary_contact_id,created_at,'+BELGE_SEL)
           .eq('customer_id',q.id).order('id',{ascending:false}),
         sb.from('quotes').select('id,status,total,created_at,revision_no,work_id')
           .eq('customer_id',q.id).order('id',{ascending:false}).limit(20)]);
@@ -731,7 +1192,7 @@ async function api(action, body){
       /* Kişi kayıtları ve güncellemeler iki toplu okumayla alınır. */
       const [kt,en]=await Promise.all([
         kids.length?sb.from('contacts').select('*').in('id',kids):Promise.resolve({data:[]}),
-        sb.from('entries').select('*')
+        sb.from('entries').select('*,'+BELGE_SEL)
           .or(`customer_id.eq.${q.id}${jids.length?`,job_id.in.(${jids.join(',')})`:''}`)
           .order('occurred_at',{ascending:false}).limit(60)]);
       if(kt.error)throw kt.error; if(en.error)throw en.error;
@@ -1224,6 +1685,9 @@ function modal(html){
 }
 function closeModal(){
   document.getElementById('modalBg').classList.remove('open');
+  /* S6 §17-§18: formdan cikiliyorsa yuklenmis ama kaydedilmemis dosyalar
+     depoda sahipsiz kalmaz. */
+  if(typeof ekBirak==='function') Object.keys(EK).forEach(ekBirak);
   if(_modalOnceki&&document.body.contains(_modalOnceki)){ try{ _modalOnceki.focus(); }catch(e){} }
   _modalOnceki=null;
 }
@@ -2444,6 +2908,10 @@ function qcAc(a,b){
   const kisiAd=kilitliKisi?((ui._contactMap&&ui._contactMap[kilitliKisi]||{}).name
       ||((ui._person&&ui._person.id===kilitliKisi)?ui._person.name:'')||'Kişi'):'';
   const benim=(ui._me&&ui._me.id)||0;
+  /* S6 §29/§32: ekler composer'in parcasi. Duzenlemede mevcut ekler
+     gosterilir; yalniz metin degisirse dosyalara DOKUNULMAZ. */
+  ekYeni('qc',{mevcut:duz?(duz.document_links||[]).filter(l=>l.documents)
+    .map(l=>({link_id:l.id,doc:l.documents})):[]});
 
   const jobSec=(kilitliOrg&&!kilitliJob)
     ? jobs.filter(x=>String(x.customer_id)===String(kilitliOrg)&&(x.lifecycle_status||'acik')!=='kapandi')
@@ -2497,6 +2965,7 @@ function qcAc(a,b){
       <textarea class="inp" id="qcBody" rows="3"
         placeholder="Ne oldu? ör. Müşteri M1'i onayladı, stadyumu almadı."
         onkeydown="qcTus(event)">${duz?esc(duz.body):''}</textarea></div>
+    <div class="field" style="margin-bottom:10px">${ekAlan('qc')}</div>
 
     ${ekip.length?`<div class="qc-tags">
       <span class="qc-mini">İlgili</span>
@@ -2554,9 +3023,16 @@ function puMenu(ev,id){
 }
 function entryDuzenle(id){
   puMenuKapat();
-  const e=(ui._feedEnt||[]).find(x=>x.id===id);
+  const e=(ui._feedEnt||[]).find(x=>x.id===id)||(ui._workEntries||[]).find(x=>x.id===id);
   if(!e){ toast('Kayıt bulunamadı.'); return; }
   qcAc({entry:e});
+}
+/* Work zaman cizelgesinden duzenleme: ayni composer. Etiketler Panelim'in
+   haritasinda olmayabilir; kaydederken silinmesinler diye once okunur. */
+async function entryDuzenleIs(id){
+  const r=await guard(()=>api('entry_relevance_all&entry_id='+id),'Güncelleme açılamadı'); if(r===null) return;
+  ui._ilgiMap={...(ui._ilgiMap||{}),[id]:(r||[]).map(x=>x.team_id)};
+  entryDuzenle(id);
 }
 /* §7: gercek silme. `entry_relevance.entry_id` zaten ON DELETE CASCADE
    oldugu icin etiket satirlari otomatik gider - yetim kalmaz. Soft-delete
@@ -2581,7 +3057,8 @@ function qcJobDegis(){
 }
 async function qcKaydet(){
   const body=(gv('qcBody')||'').trim();
-  if(!body){ mpAlert('Metin zorunlu.'); return; }
+  /* S6 §30: metin YA DA en az bir ek. Ikisi de yoksa gecersiz. */
+  if(!body&&!ekToplam('qc')){ mpAlert('Bir şey yazın ya da dosya ekleyin.'); return; }
   const jid=+gv('qcJob')||null;
   const oel=document.getElementById('qcOrg');
   const oid=(oel? (+oel.value||null) : null);
@@ -2619,18 +3096,46 @@ async function qcKaydet(){
   }
   row._ilgili=Array.from(document.querySelectorAll('.qcRel:checked')).map(x=>+x.value);
   modalBusy(true);
-  const r=await guard(()=>api('entry_save',row),id?'Güncelleme kaydedilemedi':'Kayıt oluşturulamadı');
+  let r=null;
+  if(!id&&ekBekleyen('qc').length){
+    /* S6 §31: once dosyalar yuklenir; Entry + etiketler + belgeler TEK
+       veritabani isleminde yazilir. Yukleme ya da kayit basarisizsa bos
+       ya da yarim bir guncelleme OLUSMAZ; dosyalar temizlenir. */
+    if(!await ekYukle('qc')){ modalBusy(false);
+      mpAlert('Bazı dosyalar yüklenemedi. “Tekrar dene” ile yeniden deneyin ya da çıkarın.','Dosya'); return; }
+    const docs=ekGovde('qc',[]).map(d=>{ const x={...d}; delete x.links; return x; });
+    try{ r=await api('entry_create_docs',{entry:row,ilgili:row._ilgili,docs}); }
+    catch(err){ await ekGeriAl('qc','Kaydedilemedi.'); modalBusy(false);
+      mpAlert((err&&err.message)||String(err),'Kayıt oluşturulamadı'); return; }
+    ekBekleyen('qc').forEach(i=>{ i.kaydedildi=true; });
+  } else {
+    r=await guard(()=>api('entry_save',row),id?'Güncelleme kaydedilemedi':'Kayıt oluşturulamadı');
+    if(r===null){ modalBusy(false); return; }
+    if(id){
+      /* Ayni Entry id: yeni ekler baglanir, kaldirilanlar cozulur. Siralama
+         onemli - ekleme once, kaldirma sonra; boylece "fotografi degistir"
+         hicbir an bos bir guncelleme birakmaz. */
+      const g=await ekGonder('qc',[{entry_id:id}]);
+      if(!g.ok){ modalBusy(false);
+        mpAlert('Metin kaydedildi, ancak dosya eklenemedi: '+g.hata+' — Kaydet ile tekrar deneyin.','Dosya'); return; }
+      const e=EK.qc, kal=e?[...e.kaldir]:[];
+      if(kal.length){
+        try{ const rr=await belgeBagKaldir(kal);
+          e.mevcut=e.mevcut.filter(m=>!e.kaldir.has(m.link_id)); e.kaldir.clear();
+          if(rr.eksik) toast(rr.eksik+' ek kaldırılamadı (yetki).'); }
+        catch(err){ modalBusy(false); mpAlert((err&&err.message)||String(err),'Ek kaldırılamadı'); return; }
+      }
+    }
+  }
   modalBusy(false);
-  if(r===null)return;
   closeModal();
   toast(id?'Güncelleme düzenlendi.'
           :(etkinDue?(due?'Güncelleme paylaşıldı — son tarih eklendi.'
                          :'Güncelleme paylaşıldı — Acil olduğu için bugüne işaretlendi.')
                    :'Güncelleme paylaşıldı.'));
-  /* Ayni Entry; nereden bakildigina gore farkli gorunum (BR-V01). */
-  if(ui.section==='is-takibi'||ui.section==='workspace-home'||ui.section==='kurumlar') renderSection();
-  else if(jid) workAc(jid);
-  else renderSection();
+  /* Ayni Entry; nereden bakildigina gore farkli gorunum (BR-V01).
+     S6: Work/Kurum detayindan acildiysa o detayda kalinir. */
+  ekranTazele();
 }
 
 /* ============ MUHASEBEYE GİDECEKLER (C4 §18-20) ======================
@@ -2804,7 +3309,7 @@ async function workAc(id){
   const takipEdiyorum=folBu.some(r=>r.team_id===benim);
   const folAdlari=folBu.map(r=>((tm||[]).find(t=>t.id===r.team_id)||{}).name).filter(Boolean);
   ui._work=d.job; ui._workParties=d.parties; ui._workEntries=d.entries;
-  ui._workQuotes=d.quotes||[]; ui._workBookings=d.bookings||[];
+  ui._workQuotes=d.quotes||[]; ui._workBookings=d.bookings||[]; ui._workDetay=d;
   const j=d.job, org=(cu||[]).find(x=>x.id===j.customer_id);
   navKayit('work',ui.section,j.id,orgKisa(j.title,34));
   const ls=j.lifecycle_status||'acik';
@@ -2855,6 +3360,12 @@ async function workAc(id){
       </div>
     </div>
 
+    <div class="sec-card" id="wBelgeKart">
+      <div class="sec-head" style="margin-bottom:10px">
+        <h4 style="font-size:14px;margin:0">Belgeler <span class="chip" id="wBelgeSayi">0</span></h4>
+        <button class="btn btn-outline btn-sm" onclick="belgeEkleAc({jobId:${j.id}})">${ic('plus',15)} Belge Ekle</button></div>
+      <div id="wBelgeler"></div></div>
+
     ${/* S2 §27: boş bölüm sessiz kalır. Hiç taraf yoksa koca bir boş kart
          yerine tek satırlık bir ekleme bağlantısı gösterilir. */''}
     ${d.parties.length?`<div class="sec-card">
@@ -2893,12 +3404,12 @@ async function workAc(id){
     <div class="sec-card">
       <div class="sec-head" style="margin-bottom:10px"><h4 style="font-size:14px;margin:0">Zaman Çizelgesi <span class="chip">${d.entries.length}</span></h4></div>
       <div id="wTimeline"></div></div>`;
-  workPartyCiz(); workTimelineCiz(); workOpsCiz(j.id);
+  workPartyCiz(); workTimelineCiz(); workOpsCiz(j.id); workBelgeCiz();
 }
 async function workOpsCiz(jobId){
   const box=document.getElementById('wOps'); if(!box)return;
   const [ops,custs,units]=await Promise.all([
-    api('operations_list&job_id='+jobId), api('customers_list'), api('units_full').catch(()=>[])]);
+    api('operations_list&belge=1&job_id='+jobId), api('customers_list'), api('units_full').catch(()=>[])]);
   ui._workOps=ops||[];
   ui._opCust=ui._opCust||{}; (custs||[]).forEach(x=>ui._opCust[x.id]=x.firma);
   ui._opUnits=ui._opUnits||{}; (units||[]).forEach(u=>ui._opUnits[u.id]=u);
@@ -2909,9 +3420,203 @@ async function workOpsCiz(jobId){
         ${o.quantity!=null?' · '+esc(o.quantity)+' adet':''}${o.dimensions?' · '+esc(o.dimensions):''}
         ${o.unit_id&&ui._opUnits[o.unit_id]?' · '+esc(ui._opUnits[o.unit_id].name):(o.location_text?' · '+esc(o.location_text):'')}
         ${o.supplier_org_id&&ui._opCust[o.supplier_org_id]?' · '+esc(ui._opCust[o.supplier_org_id]):''}
-        · <span class="badge-st st-${esc(o.status)}">${esc(opStatLbl(o.status))}</span></div>
+        · <span class="badge-st st-${esc(o.status)}">${esc(opStatLbl(o.status))}</span>
+        ${(o.document_links||[]).length?` · <span title="Ek dosya">📎 ${(o.document_links||[]).length}</span>`:''}</div>
     </div>`).join('')
     ||'<p class="empty">Bu işe bağlı baskı/montaj kaydı yok.</p>';
+}
+/* ============ BELGELER: Work ve Kurum yuzeyi (S6 §35-§41) ============= */
+const BELGE_GRUP=[
+  ['tumu','Tümü',()=>true],
+  ['teklif','Teklif',d=>d.doc_type==='teklif'],
+  ['sozlesme','Sözleşme',d=>d.doc_type==='sozlesme'],
+  ['tasarim','Tasarım',d=>d.doc_type==='tasarim'],
+  ['baski','Baskı',d=>d.doc_type==='baski_dosyasi'],
+  ['foto','Fotoğraf',d=>d.doc_type==='montaj_fotografi'||d.doc_type==='sokum_fotografi'
+                        ||(d.doc_type==='diger'&&belgeResimMi(d))]];
+const BELGE_ANA_GRUP=BELGE_GRUP.slice(1);        /* Diger = bunlarin hicbiri (kendisi HARIC) */
+BELGE_GRUP.push(['diger','Diğer',d=>!BELGE_ANA_GRUP.some(g=>g[2](d))]);
+
+/* Work'un belgeleri: dogrudan + guncellemeler + operasyonlar + teklifler.
+   Ayni belge birden cok yoldan geliyorsa TEK satir, kaynaklar birlesik. */
+function workBelgeListe(d){
+  const m=new Map();
+  const ekle=(l,kaynak,direkt)=>{ const doc=l&&l.documents; if(!doc) return; belgeKaydet(doc);
+    let x=m.get(doc.id); if(!x){ x={doc,kaynaklar:[],direkt:null}; m.set(doc.id,x); }
+    if(!x.kaynaklar.includes(kaynak)) x.kaynaklar.push(kaynak);
+    if(direkt) x.direkt=l; };
+  ((d.job||{}).document_links||[]).forEach(l=>ekle(l,'Doğrudan iş',true));
+  (d.entries||[]).forEach(e=>(e.document_links||[]).forEach(l=>ekle(l,'Güncelleme')));
+  (d.ops||[]).forEach(o=>(o.document_links||[]).forEach(l=>ekle(l,opTypeLbl(o.operation_type))));
+  (d.quotes||[]).forEach(q=>(q.document_links||[]).forEach(l=>ekle(l,'Teklif #'+q.id)));
+  return [...m.values()].sort((a,b)=>String(b.doc.created_at||'').localeCompare(String(a.doc.created_at||'')));
+}
+function belgeSatirHtml(x,ctx){
+  const d=x.doc, tm={}; (ui._team||[]).forEach(t=>tm[t.id]=t.name);
+  const benim=(ui._me&&ui._me.id)||0;
+  const resim=belgeResimMi(d);
+  const menuVar=(x.direkt&&(isAdmin()||x.direkt.created_by_team_id===benim||d.uploaded_by_team_id===benim))
+    ||isAdmin()||d.uploaded_by_team_id===benim
+    ||(ctx.tip==='is'&&ctx.orgId);
+  return `<div class="bl-row">
+    ${resim?`<button type="button" class="bl-th sm" onclick="belgeAc(${d.id})" aria-label="${esc(belgeAd(d))} — önizle"><img data-belge-yol="${esc(d.storage_path)}" alt="" loading="lazy"></button>`
+      :`<span class="bl-ext ${d.provider==='external'?'dis':''}">${esc(belgeUzanti(d))}</span>`}
+    <div class="bl-rb">
+      <button type="button" class="bl-rt" onclick="belgeAc(${d.id})" title="${esc(d.original_name)}">${esc(belgeAd(d))}${d.provider==='external'?' <span class="bl-dis">↗</span>':''}</button>
+      <div class="bl-rs"><span class="pill">${esc(belgeTurLbl(d.doc_type))}</span>
+        <span>${esc(trTarih(d.created_at))}</span>
+        ${tm[d.uploaded_by_team_id]?`<span>${esc(tm[d.uploaded_by_team_id])}</span>`:''}
+        ${x.kaynaklar&&x.kaynaklar.length?`<span class="bl-kay">${esc(x.kaynaklar.join(' · '))}</span>`:''}
+        ${d.provider==='external'?'<span class="bl-kay">harici bağlantı</span>':(d.size_bytes?`<span>${esc(belgeBoyut(d.size_bytes))}</span>`:'')}
+      </div></div>
+    <div class="bl-ra">
+      <button type="button" class="btn btn-outline btn-sm" onclick="belgeAc(${d.id})">Aç</button>
+      ${menuVar?`<button type="button" class="pu-mb" aria-label="Belge seçenekleri" title="Seçenekler"
+        onclick="belgeMenu(event,${d.id},${x.direkt?x.direkt.id:0},'${ctx.tip}',${ctx.id||0},${ctx.orgId||0})">⋯</button>`:''}
+    </div></div>`;
+}
+function workBelgeCiz(){
+  const box=document.getElementById('wBelgeler'); if(!box) return;
+  const d=ui._workDetay; if(!d) return;
+  const hep=workBelgeListe(d);
+  const say=document.getElementById('wBelgeSayi'); if(say) say.textContent=String(hep.length);
+  if(!hep.length){ box.innerHTML='<p class="empty">Henüz belge yok.</p>'; return; }
+  const aktifGrup=BELGE_GRUP.filter(g=>g[0]==='tumu'||hep.some(x=>g[2](x.doc)));
+  let f=ui._blFiltre||'tumu'; if(!aktifGrup.some(g=>g[0]===f)) f='tumu';
+  const g=BELGE_GRUP.find(x=>x[0]===f);
+  const liste=hep.filter(x=>g[2](x.doc));
+  box.innerHTML=`${aktifGrup.length>2?`<div class="ws-switch inline bl-f" role="group" aria-label="Belge türü">
+      ${aktifGrup.map(x=>`<button type="button" class="${x[0]===f?'on':''}" aria-pressed="${x[0]===f}"
+        onclick="ui._blFiltre='${x[0]}';workBelgeCiz()">${x[1]} <span class="chip">${hep.filter(y=>x[2](y.doc)).length}</span></button>`).join('')}
+    </div>`:''}
+    <div class="bl-list">${liste.map(x=>belgeSatirHtml(x,{tip:'is',id:d.job.id,orgId:d.job.customer_id||0})).join('')}</div>`;
+}
+/* Kurum: once DOGRUDAN kurum belgeleri; is belgelerinden yalniz birkac
+   yeni olan, acikca "İş:" etiketiyle (S6 §40). Her gecmis isin tum
+   dosyalari varsayilan ekrana DOKULMEZ. */
+function orgBelgeKart(d){
+  const o=d.org;
+  const direkt=(o.document_links||[]).filter(l=>l.documents)
+    .map(l=>({doc:belgeKaydet(l.documents),kaynaklar:['Kurum'],direkt:l}))
+    .sort((a,b)=>String(b.doc.created_at||'').localeCompare(String(a.doc.created_at||'')));
+  const gor=new Set(direkt.map(x=>x.doc.id));
+  const isten=[];
+  (d.jobs||[]).forEach(j=>(j.document_links||[]).forEach(l=>{ const doc=l.documents;
+    if(!doc||gor.has(doc.id)) return; gor.add(doc.id);
+    isten.push({doc:belgeKaydet(doc),kaynaklar:['İş: '+orgKisa(j.title,40)],direkt:null,jobId:j.id}); }));
+  isten.sort((a,b)=>String(b.doc.created_at||'').localeCompare(String(a.doc.created_at||'')));
+  const n=direkt.length+isten.length;
+  return `<div class="sec-card">
+    <div class="sec-head" style="margin-bottom:10px">
+      <h4 style="font-size:14px;margin:0">Belgeler <span class="chip">${direkt.length}</span></h4>
+      <button class="btn btn-outline btn-sm" onclick="belgeEkleAc({custId:${o.id}})">${ic('plus',15)} Belge Ekle</button></div>
+    ${n?'':'<p class="empty">Henüz belge yok.</p>'}
+    ${direkt.length?`<div class="bl-list">${direkt.map(x=>belgeSatirHtml(x,{tip:'kurum',id:o.id})).join('')}</div>`:''}
+    ${isten.length?`<div class="meta" style="margin:${direkt.length?'12px':'0'} 0 6px">İşlerden — son eklenenler</div>
+      <div class="bl-list">${isten.slice(0,5).map(x=>belgeSatirHtml(x,{tip:'kurumIs',id:o.id})).join('')}</div>
+      ${isten.length>5?`<p class="fhint">+${isten.length-5} belge daha ilgili işlerin Belgeler bölümünde.</p>`:''}`:''}
+  </div>`;
+}
+/* Tek "Belge Ekle" formu: Work ya da Kurum. Ayni ek bileseni. */
+function belgeEkleAc(ctx){
+  ctx=ctx||{}; ui._blCtx=ctx;
+  ekYeni('bl',{turZorunlu:true});
+  const w=ctx.jobId?ui._work:null;
+  const orgAd=w&&w.customer_id?((ui._cust||[]).find(x=>x.id===w.customer_id)||{}).firma:'';
+  const hedef=ctx.jobId?`İş: <b>${esc((w||{}).title||'#'+ctx.jobId)}</b>`
+    :`Kurum: <b>${esc(((ui._org||{}).firma)||'#'+ctx.custId)}</b>`;
+  modal(`<h3 style="margin:0 0 4px">Belge Ekle</h3>
+    <p class="muted" style="font-size:12.5px;margin:0 0 12px">${hedef}</p>
+    ${ekAlan('bl')}
+    ${ctx.jobId&&w&&w.customer_id?`<label class="qc-who" style="margin-top:10px"><input type="checkbox" id="blOrg">
+      <span>Kurumun belgelerinde de görünsün${orgAd?' ('+esc(orgKisa(orgAd,30))+')':''}</span></label>`:''}
+    <p class="fhint" style="margin-top:10px">Sözleşme ya da teklif eklemek yapısal bir sözleşme/teklif kaydı oluşturmaz; dosya işin belgesi olarak saklanır.</p>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+      <button class="btn btn-ghost btn-sm" onclick="closeModal()">Vazgeç</button>
+      <button class="btn btn-primary btn-sm" onclick="belgeEkleKaydet()">Kaydet</button></div>`);
+}
+async function belgeEkleKaydet(){
+  const ctx=ui._blCtx||{};
+  if(!ekBekleyen('bl').length){ mpAlert('Bir dosya seçin ya da bağlantı ekleyin.','Belge'); return; }
+  if(ekTurEksik('bl')){ mpAlert('Her belge için türünü seçin.','Belge'); return; }
+  const links=[];
+  if(ctx.jobId){ links.push({job_id:ctx.jobId});
+    const w=ui._work; if(w&&w.customer_id&&(document.getElementById('blOrg')||{}).checked) links.push({customer_id:w.customer_id}); }
+  else if(ctx.custId) links.push({customer_id:ctx.custId});
+  if(!links.length){ mpAlert('Belgenin ekleneceği yer bulunamadı.'); return; }
+  modalBusy(true,'Yükleniyor…');
+  const g=await ekGonder('bl',links);
+  modalBusy(false);
+  if(!g.ok){ mpAlert('Belge eklenemedi: '+g.hata+' — Kaydet ile tekrar deneyin.','Belge'); return; }
+  closeModal(); toast(g.sayi>1?g.sayi+' belge eklendi.':'Belge eklendi.');
+  ekranTazele();
+}
+/* Satir menusu: tur duzelt, kuruma bagla, bu baglamdan kaldir. Yetki
+   sunucuda zorlanir; burada yalniz anlamli secenekler gosterilir. */
+function belgeMenu(ev,docId,linkId,tip,ctxId,orgId){
+  ev.stopPropagation();
+  const acikti=!!_puMnu; puMenuKapat(); if(acikti) return;
+  const d=_belgeler.get(docId); if(!d) return;
+  const benim=(ui._me&&ui._me.id)||0;
+  const sahip=isAdmin()||d.uploaded_by_team_id===benim;
+  const tum=d.document_links||[];
+  const bag=tum.find(l=>l.id===linkId)||null;
+  const kaldirabilir=linkId&&(isAdmin()||d.uploaded_by_team_id===benim||(bag&&bag.created_by_team_id===benim));
+  const kurumdaVar=orgId&&tum.some(l=>l.customer_id===orgId);
+  const items=[];
+  if(sahip) items.push(`<button type="button" role="menuitem" onclick="belgeTurForm(${docId})">Adı / türü düzelt</button>`);
+  if(tip==='is'&&orgId&&!kurumdaVar) items.push(`<button type="button" role="menuitem" onclick="belgeKurumaBagla(${docId},${orgId})">Kurumun belgelerine de ekle</button>`);
+  if(kaldirabilir) items.push(`<button type="button" role="menuitem" class="sil" onclick="belgeBaglamdanKaldir(${docId},${linkId},'${tip}')">${tip==='is'?'Bu işten kaldır':'Kurumdan kaldır'}</button>`);
+  if(!items.length){ toast('Bu belge için yapılabilecek bir işlem yok.'); return; }
+  const b=ev.currentTarget.getBoundingClientRect();
+  const m=document.createElement('div'); m.className='pu-pop'; m.setAttribute('role','menu');
+  m.innerHTML=items.join('');
+  document.body.appendChild(m);
+  m.style.top=(window.scrollY+b.bottom+5)+'px';
+  m.style.left=(window.scrollX+Math.max(8,b.right-m.offsetWidth))+'px';
+  _puMnu=m;
+  setTimeout(()=>{ document.addEventListener('mousedown',puMenuDis,true);
+                   document.addEventListener('keydown',puMenuEsc,true); },0);
+}
+function belgeTurForm(docId){
+  puMenuKapat();
+  const d=_belgeler.get(docId); if(!d) return;
+  modal(`<h3 style="margin:0 0 12px">Belgeyi düzelt</h3>
+    <input type="hidden" id="btId" value="${d.id}">
+    <div class="field"><label class="flabel" for="btAd">Görünen ad</label>
+      <input class="inp" id="btAd" value="${esc(d.title||'')}" placeholder="${esc(d.original_name)}"></div>
+    <div class="field"><label class="flabel" for="btTur">Belge türü</label>
+      <select class="inp" id="btTur">${BELGE_TUR.map(t=>`<option value="${t[0]}" ${d.doc_type===t[0]?'selected':''}>${t[1]}</option>`).join('')}</select></div>
+    <p class="fhint">Dosyanın kendisi ve orijinal adı (${esc(d.original_name)}) değişmez.</p>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
+      <button class="btn btn-ghost btn-sm" onclick="closeModal()">Vazgeç</button>
+      <button class="btn btn-primary btn-sm" onclick="belgeTurKaydet()">Kaydet</button></div>`);
+}
+async function belgeTurKaydet(){
+  modalBusy(true);
+  const r=await guard(()=>api('document_update',{id:+gv('btId'),title:(gv('btAd')||'').trim()||null,doc_type:gv('btTur')}),'Belge güncellenemedi');
+  modalBusy(false); if(r===null) return;
+  closeModal(); toast('Belge güncellendi.'); ekranTazele();
+}
+async function belgeKurumaBagla(docId,orgId){
+  puMenuKapat();
+  const r=await guard(()=>api('document_link_add',{document_id:docId,customer_id:orgId}),'Bağlanamadı'); if(r===null) return;
+  toast('Belge kurumun belgelerine de eklendi.'); ekranTazele();
+}
+async function belgeBaglamdanKaldir(docId,linkId,tip){
+  puMenuKapat();
+  const d=_belgeler.get(docId); if(!d) return;
+  const digerleri=(d.document_links||[]).filter(l=>l.id!==linkId).length;
+  const yer=tip==='is'?'bu işten':'bu kurumdan';
+  const msg=digerleri
+    ?`“${belgeAd(d)}” ${yer} kaldırılsın mı? Belge bağlı olduğu diğer ${digerleri} yerde kalır.`
+    :`“${belgeAd(d)}” başka hiçbir yere bağlı değil. Kaldırılırsa dosya da kalıcı olarak silinir.`;
+  if(!await mpConfirm(msg,'Belgeyi Kaldır',{danger:true,ok:digerleri?'Kaldır':'Kaldır ve dosyayı sil'})) return;
+  const r=await guard(()=>belgeBagKaldir([linkId]),'Kaldırılamadı'); if(r===null) return;
+  if(r.eksik){ mpAlert('Bu bağlantıyı kaldırma yetkiniz yok.','Belge'); return; }
+  if(r.temizlik&&r.temizlik.kalan) toast('Bağlantı kaldırıldı; dosya temizliği daha sonra yeniden denenecek.');
+  else toast(digerleri?'Belge bu bağlamdan kaldırıldı.':'Belge silindi.');
+  ekranTazele();
 }
 function workPartyCiz(){
   const box=document.getElementById('wParties'); if(!box)return;
@@ -2931,7 +3636,7 @@ function workTimelineCiz(){
     const sys=e.source==='system';
     const aks=e.action_status;
     return `<div class="list-item" style="${sys?'opacity:.72':''}">
-      <div class="nm">${esc(e.body)}</div>
+      <div class="nm">${String(e.body||'').trim()?esc(e.body):'<span class="muted">Dosya paylaşıldı</span>'}${ekSeridi(e.document_links)}</div>
       <div class="meta">
         ${esc(trAnTarih(e.occurred_at))}${e.created_by_team_id&&tm[e.created_by_team_id]?' · '+esc(tm[e.created_by_team_id]):''}
         ${sys?' · <span class="pill">sistem</span>':''}
@@ -2946,7 +3651,7 @@ function workTimelineCiz(){
            yazarin kendisi - ya da mevcut admin yetkisi. Sistem Entry'sinde
            hicbiri gosterilmez. */''}
       ${(!sys&&(e.created_by_team_id===benimTeam||isAdmin()))
-        ?`<button class="btn btn-outline btn-sm" onclick="entryForm(${e.id},${e.job_id},${!!aks})">Düzenle</button>`:''}
+        ?`<button class="btn btn-outline btn-sm" onclick="${aks?`entryForm(${e.id},${e.job_id},true)`:`entryDuzenleIs(${e.id})`}">Düzenle</button>`:''}
       ${(!sys&&(e.created_by_team_id===benimTeam||isAdmin()))
         ?`<button class="btn btn-danger btn-sm" onclick="entryDel(${e.id})">Sil</button>`:''}
     </div>`;}).join('')
@@ -3165,6 +3870,8 @@ async function jobForm(st,id,ctx){
   const ekip=(tm||[]).filter(t=>t.active!==false);
   if(!id){
     const pc=(ctx&&ctx.custId)||0, pk=(ctx&&ctx.contactId)||0;
+    /* S6 §34: Hafiza formuna gidip donerken secilen dosyalar kaybolmasin. */
+    if(!(ctx&&ctx.ekKoru&&EK.job)) ekYeni('job',{turZorunlu:true});
     if(pk && !ui._contacts.some(k=>k.id===pk)) ui._contacts=ct||[];
     modal(`<h3 style="margin:0 0 14px">Yeni İş</h3>
     <input type="hidden" id="jid" value="0">
@@ -3192,6 +3899,8 @@ async function jobForm(st,id,ctx){
       <label class="qc-acil"><input type="checkbox" id="jAcil"><span>⚡ Acil</span></label>
       <span class="fhint" style="margin:0 0 0 auto">Mecra, tedarikçi ve tarihler işin içinden eklenir.</span>
     </div>
+    <div class="field" style="margin:10px 0 0"><span class="qc-mini">Dosya (isteğe bağlı) — gelen teklif, taslak sözleşme, referans görsel</span>
+      ${ekAlan('job')}</div>
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
       <button class="btn btn-ghost btn-sm" onclick="closeModal()">Vazgeç</button>
       <button class="btn btn-primary btn-sm" onclick="jobSave()">Oluştur</button></div>`);
@@ -3262,7 +3971,7 @@ function jobFormDurum(){
 }
 async function jobFormGeriYukle(st,opt){
   opt=opt||{};
-  await jobForm(st.asama||null, null, {custId:opt.custId||+st.cust||0, contactId:opt.contactId||+st.kisi||0});
+  await jobForm(st.asama||null, null, {custId:opt.custId||+st.cust||0, contactId:opt.contactId||+st.kisi||0, ekKoru:true});
   const set=(id,v)=>{ const e=document.getElementById(id); if(e&&v!=null&&v!=='') e.value=v; };
   set('jt',st.title);
   if(document.getElementById('jAcil')) document.getElementById('jAcil').checked=st.acil;
@@ -3296,6 +4005,7 @@ function jobKisiTazele(){
 }
 async function jobSave(){
   if(!gv('jt').trim()){ mpAlert('Başlık zorunlu.'); return; }
+  if(document.getElementById('ek_job')&&ekTurEksik('job')){ mpAlert('Eklenen her dosya için belge türünü seçin.','Dosya'); return; }
   const num=v=>v?+v:null;
   const yeni=!(+gv('jid'));
   const cid=num(gv('jc'));
@@ -3329,6 +4039,21 @@ async function jobSave(){
     const fol=Array.from(document.querySelectorAll('.jFol:checked')).map(x=>+x.value);
     if(fol.length) await api('work_follow_many',{id:r.id,team_ids:fol}).catch(()=>{});
     /* S4.4: sistem hareketi artik VERITABANI tetikleyicisinden gelir (trg_jobs_hareket). */
+  }
+  /* S6 §34: Is ONCE olusur; dosya sonradan baglanir. Dosya basarisizsa Is
+     GERI ALINMAZ - form acik kalir, ayni dugme artik bu isi gunceller ve
+     dosyayi yeniden dener. Vazgec dosyasiz devam eder. */
+  if(r&&r.id&&document.getElementById('ek_job')&&ekBekleyen('job').length){
+    const jidEl=document.getElementById('jid'); if(jidEl) jidEl.value=String(r.id);
+    modalBusy(true,'Dosyalar yükleniyor…');
+    const g=await ekGonder('job',[{job_id:r.id}]);
+    modalBusy(false);
+    if(!g.ok){
+      renderSection();
+      const btn=document.querySelector('#modal .btn-primary'); if(btn) btn.textContent='Dosyayı tekrar dene';
+      mpAlert('İş oluşturuldu, ancak dosya eklenemedi: '+g.hata
+        +'. “Dosyayı tekrar dene” ile yeniden deneyin ya da Vazgeç ile dosyasız devam edin.','Dosya');
+      return; }
   }
   closeModal(); renderSection(); toast('İş kaydedildi.');
 }
@@ -3404,6 +4129,7 @@ async function operasyon(c){
   const qs=['operations_list'];
   if(from) qs.push('from='+from); if(to) qs.push('to='+to);
   if(f.type) qs.push('type='+f.type);
+  qs.push('belge=1');
   /* Kapsam birden cok DB durumuna denk geldigi icin sunucuya tekil
      `status` gonderilmez; sayaclar da tum kumeden hesaplanmali. */
   const [ops,jobs,custs,units]=await Promise.all([
@@ -3544,12 +4270,28 @@ function opFiltreDegis(){
 }
 
 /* ---------- Operation formu (hem shared view hem Work detail) ---------- */
+/* Operasyon turune gore makul varsayilan belge turu (kullanici degistirir). */
+function opEkVarsayilan(t){
+  return t==='montaj'?{varsayilan:'diger',varsayilanResim:'montaj_fotografi'}
+    :t==='sokum'?{varsayilan:'diger',varsayilanResim:'sokum_fotografi'}
+    :t==='baski'?{varsayilan:'baski_dosyasi',varsayilanResim:'baski_dosyasi'}
+    :{varsayilan:'diger',varsayilanResim:'diger'};
+}
+function opEkTurGuncelle(){ if(EK.op) Object.assign(EK.op,opEkVarsayilan(gv('opT'))); }
 async function opForm(id,jobId){
-  const o=(ui._ops||ui._workOps||[]).find(x=>x.id===id)||{};
+  /* S6: Work detayindan aciliyorsa ONCE o isin taze listesi okunur; aksi
+     halde daha once acilmis Baski & Montaj ekraninin bayat listesi (ekleri
+     eksik) kullanilabilirdi. */
+  const isteyiz=(history.state&&history.state.mp&&history.state.v==='work');
+  const o=((isteyiz?ui._workOps:ui._ops)||[]).find(x=>x.id===id)
+        ||(ui._workOps||[]).find(x=>x.id===id)||(ui._ops||[]).find(x=>x.id===id)||{};
   const veri=await guard(()=>Promise.all([api('jobs_list'),api('customers_list'),api('units_full').catch(()=>[])]),'Form açılamadı');
   if(!veri)return;
   const [jobs,custs,units]=veri;
   const jid=jobId||o.job_id||((ui._work||{}).id)||0;
+  ekYeni('op',{mevcut:(o.document_links||[]).filter(l=>l.documents).map(l=>({link_id:l.id,doc:l.documents})),
+               ...opEkVarsayilan(o.operation_type||'baski')});
+  const eskiKanit=(Array.isArray(o.evidence_urls)?o.evidence_urls:[]).filter(Boolean);
   modal(`<h3 style="margin:0 0 6px">${id?'Kaydı Düzenle':'Yeni Baskı / Montaj Kaydı'}</h3>
     ${/* §15: Work ve Work Operation AYRI kayitlar olarak kalir. Burada
          yalniz gecis guclendirilir: ise gec, ya da insan diliyle bir
@@ -3573,7 +4315,7 @@ async function opForm(id,jobId){
            bozardi. Backend degeri KALDIRILMADI - eski bir kayit onu
            tasiyorsa secenek gorunur ve kaydedilebilir. */''}
       <div class="field"><label class="flabel" for="opT">Tür *</label>
-        <select class="inp" id="opT">${OPTYPE.filter(t=>t[0]!=='diger'||o.operation_type==='diger')
+        <select class="inp" id="opT" onchange="opEkTurGuncelle()">${OPTYPE.filter(t=>t[0]!=='diger'||o.operation_type==='diger')
           .map(t=>`<option value="${t[0]}" ${o.operation_type===t[0]?'selected':''}>${t[1]}</option>`).join('')}</select></div>
     </div>
     <div class="field"><label class="flabel" for="opDesc">Açıklama</label><input class="inp" id="opDesc" value="${esc(o.description)}" placeholder="ör. M1 AVM megalight baskı"></div>
@@ -3597,8 +4339,15 @@ async function opForm(id,jobId){
       <div class="field"><label class="flabel" for="opCost">Maliyet (₺)</label><input class="inp" type="number" step="0.01" id="opCost" value="${esc(o.cost)}"></div>
     </div>
     <div class="field"><label class="flabel" for="opNote">Not</label><textarea class="inp" id="opNote">${esc(o.note)}</textarea></div>
+    <div class="field"><span class="flabel">Dosyalar — montaj fotoğrafı, baskı provası, ölçü belgesi</span>
+      ${ekAlan('op')}</div>
+    ${/* S6 §39: eski kanit URL'leri KORUNUR ve acilabilir kalir. Yeni ekler
+         Belgeler sistemine gider; eski alan geriye donuk uyumluluk icindir. */''}
+    ${eskiKanit.length?`<div class="op-eski">Eski kanıt bağlantıları: ${eskiKanit.map((u,i)=>/^https?:\/\//i.test(u)
+      ?`<a href="${esc(u)}" target="_blank" rel="noopener">Bağlantı ${i+1} ↗</a>`:`<span>${esc(u)}</span>`).join(' · ')}</div>`:''}
+    <details class="op-eski-d" ${eskiKanit.length?'':''}><summary>Eski kanıt bağlantı alanı</summary>
     <div class="field"><label class="flabel" for="opEv">Kanıt görseli / belge bağlantıları (her satıra bir URL)</label>
-      <textarea class="inp" id="opEv" rows="2" placeholder="https://drive.google.com/...">${esc((Array.isArray(o.evidence_urls)?o.evidence_urls:[]).join('\n'))}</textarea></div>
+      <textarea class="inp" id="opEv" rows="2" placeholder="https://drive.google.com/...">${esc(eskiKanit.join('\n'))}</textarea></div></details>
     <div style="display:flex;gap:8px;justify-content:flex-end">
       ${(id&&isAdmin())?`<button class="btn btn-danger btn-sm" style="margin-right:auto" onclick="opDel(${id})">Sil</button>`:''}
       <button class="btn btn-ghost btn-sm" onclick="closeModal()">Vazgeç</button>
@@ -3621,8 +4370,22 @@ async function opSave(){
     supplier_org_id:+gv('opSup')||null,unit_id:+gv('opUnit')||null,location_text:gv('opLoc')||null,
     planned_date:gv('opDate')||null,cost:num(gv('opCost')),note:gv('opNote')||null,
     evidence_urls:ev}),'Kayıt kaydedilemedi');
+  if(r===null){ modalBusy(false); return; }
+  /* S6 §38: operasyon kaydi once yazilir, ekler sonra baglanir. Ek
+     basarisizsa kayit korunur; form acik kalir ve Kaydet yeniden dener. */
+  const opId=id||(r&&r.id);
+  if(opId){ const el=document.getElementById('opid'); if(el) el.value=String(opId); }
+  if(opId&&EK.op){
+    const g=await ekGonder('op',[{operation_id:opId}]);
+    if(!g.ok){ modalBusy(false);
+      mpAlert('Kayıt kaydedildi, ancak dosya eklenemedi: '+g.hata+' — Kaydet ile tekrar deneyin.','Dosya'); return; }
+    const kal=[...EK.op.kaldir];
+    if(kal.length){
+      try{ await belgeBagKaldir(kal); EK.op.mevcut=EK.op.mevcut.filter(m=>!EK.op.kaldir.has(m.link_id)); EK.op.kaldir.clear(); }
+      catch(err){ modalBusy(false); mpAlert((err&&err.message)||String(err),'Ek kaldırılamadı'); return; }
+    }
+  }
   modalBusy(false);
-  if(r===null)return;
   /* Operasyon structured source of truth'tur; Entry yalniz tarihsel izdir.
      Yalniz GERCEKTEN anlamli gecisler yazilir: kayit acilisi, fiilen
      baslama, tamamlanma ve iptal. Onceki durum bilinmiyorsa (kayit hicbir
@@ -3904,7 +4667,7 @@ function hrSayfa(p){ hrYaz({...hrDurum(),p:Math.max(1,p)}); renderSection();
 const HR_TUR=[['','Tümü'],['isler','İşler'],['operasyon','Operasyon'],['muhasebe','Muhasebe']];
 const HR_ROZET={work_created:'Yeni iş',work_phase:'Aşama',work_lifecycle:'Durum',work_contract:'Sözleşme',
   work_accounting:'Muhasebe',operation_created:'Operasyon',operation_status:'Operasyon',
-  quote_revised:'Teklif',quote_approved:'Teklif'};
+  quote_revised:'Teklif',quote_approved:'Teklif',document_added:'Belge'};
 
 function hareketGovde(veri,hg,jm,cm,tm){
   const filtre=`<div class="pf hr-f">
@@ -3983,9 +4746,9 @@ async function workspaceHome(c){
   const hareketP=hg.gor==='hareket'
     ? api(`hareketler_list&sayfa=${hg.p}&tur=${hg.tur}`).catch(e=>({hata:e.message||String(e)}))
     : Promise.resolve(null);
-  const [jobs,ents,ops,custs,team,ilgi,takip,kisiler,kisisel]=await Promise.all([
+  const [jobs,ents,ops,custs,team,ilgi,takip,kisiler,kisisel,acikTerminli]=await Promise.all([
     api('jobs_list'),
-    api('entries_list&limit=400&insan=1'),
+    api('entries_list&limit=400&insan=1&belge=1'),
     api(`operations_list&from=${opBas}&to=${ufukIso}`),
     api('customers_list'),
     api('team_list'),
@@ -3996,7 +4759,14 @@ async function workspaceHome(c){
        sessizce kaybolurdu. */
     api('contacts_list').catch(()=>[]),
     /* S4.3: kisisel etkinlikler. RLS zaten sahiplikle sinirlar. */
-    api(`personal_events_list&from=${opBas}&to=${ufukIso}`).catch(()=>[])]);
+    api(`personal_events_list&from=${opBas}&to=${ufukIso}`).catch(()=>[]),
+    /* S6 §47: Dikkat Gerekenler'in geciken kaynagi. Son 400 guncelleme
+       penceresinden DEGIL, terminli acik aksiyonlardan okunur. */
+    api(`entries_list&action_status=open&due_to=${bugun}&limit=1000`).catch(()=>[])]);
+  /* S6 §18/§24: yarim kalmis bir temizlik varsa oturumda bir kez sessizce
+     yeniden denenir (kuyruk yok). */
+  if(!ui._belgeTemizlikDenendi){ ui._belgeTemizlikDenendi=true;
+    api('documents_cleanup',{}).catch(e=>console.error('[belge] temizlik',e)); }
   ui._team=team||[]; ui._jobs=jobs||[]; ui._cust=custs||[];
   const jm={}; (jobs||[]).forEach(j=>jm[j.id]=j);
   const cm={}; (custs||[]).forEach(x=>cm[x.id]=x.firma);
@@ -4115,7 +4885,8 @@ async function workspaceHome(c){
           ? `<button type="button" class="pu-mb" title="Seçenekler" aria-label="Seçenekler"
                onclick="puMenu(event,${e.id})">⋯</button>` : ''}</div>`:''}
       </div>
-      <p class="pu-t" onclick="psAc(this)">${esc(e.body)}</p>
+      ${String(e.body||'').trim()?`<p class="pu-t" onclick="psAc(this)">${esc(e.body)}</p>`:''}
+      ${ekSeridi(e.document_links)}
       ${(sonTarih||ikincil)?`<div class="pu-f">
         <div class="pu-fl">${sonTarih}</div>
         <div class="pu-fr">${ikincil}</div>
@@ -4131,10 +4902,22 @@ async function workspaceHome(c){
      YASTAN urgency CIKARILMAZ; eski bir guncelleme sirf eski diye
      dikkat gerektirmez. "Bekleyen" ADI KULLANILMAZ - lifecycle
      `bekliyor` bambaska bir kavramdir (§2.C). */
-  const dikkatAks=tumEnt.filter(e=>e.action_status==='open'&&gecmis(e.due_at));
-  const dikkatAcil=tumEnt.filter(e=>e.is_urgent&&!(e.action_status==='open'&&gecmis(e.due_at)));
-  const dikkatIs=(jobs||[]).filter(j=>j.is_urgent&&(j.lifecycle_status||'acik')!=='kapandi');
-  const dikkatN=dikkatAks.length+dikkatAcil.length+dikkatIs.length;
+  /* S6 §47 — kart ve hedefi AYNI Work evreni: Görüntüle İşler/Liste'yi
+     `Acil + Geciken` (VEYA) ile acar; bu kart da artik yalniz Work sayar:
+       · Acil isaretli aktif Work (jobs.is_urgent), VEYA
+       · termini gecmis acik aksiyonu olan aktif Work.
+     Yalniz ACIL bir GUNCELLEMESI olan ama kendisi acil olmayan Work
+     buraya GIRMEZ (Liste'deki `Acil` filtresi de onu gostermez). Isten
+     bagimsiz terminli aksiyonlar Ajandam'da yasar. Guncelleme aciliyeti
+     baska hicbir yerde degismedi. Aktif = acik + bekliyor (Liste varsayilani). */
+  const gecAks={};
+  (acikTerminli||[]).forEach(e=>{ if(!e.job_id||!gecmis(e.due_at)) return;
+    const c=gecAks[e.job_id]; if(!c||String(e.due_at)<String(c.due_at)) gecAks[e.job_id]=e; });
+  const dikkatIsler=(jobs||[]).filter(j=>(j.lifecycle_status||'acik')!=='kapandi'&&(j.is_urgent||gecAks[j.id]))
+    .map(j=>({j,e:gecAks[j.id]||null}))
+    .sort((a,b)=>(b.e?psGecikme(b.e.due_at):-1)-(a.e?psGecikme(a.e.due_at):-1)
+                 ||(b.j.is_urgent?1:0)-(a.j.is_urgent?1:0)||a.j.id-b.j.id);
+  const dikkatN=dikkatIsler.length;
 
   const dikkatSatir=(ikon,cls,metin,alt,sag,tik)=>
     `<button type="button" class="pd-row" onclick="${tik}">
@@ -4144,21 +4927,13 @@ async function workspaceHome(c){
   const dikkatHtml=dikkatN?[
     /* §12: NEDEN burada olduğu okunur olsun — küçük kırmızı bir ikona
        bakıp çıkarım yapmak zorunda kalınmasın. */
-    ...dikkatAks.slice(0,6).map(e=>{ const j=jm[e.job_id]||{};
-      const g=psGecikme(e.due_at);
-      return dikkatSatir('⚠','gec',esc(e.body),
-        esc(j.title||orgKisa(orgAdi(j))||'Şirket güncellemesi'),
-        `<span class="pill clay">${g} gün gecikti</span><span class="pd-d">${esc(psGun(e.due_at))}</span>`,
-        e.job_id?`workAc(${e.job_id})`:'void 0'); }),
-    ...dikkatAcil.slice(0,4).map(e=>{ const j=jm[e.job_id]||{};
-      return dikkatSatir('⚡','acil',esc(e.body),
-        esc(j.title||orgKisa(orgAdi(j))||'Şirket güncellemesi'),
-        `<span class="pill clay">ACİL</span>${e.due_at?`<span class="pd-d">${esc(psGun(e.due_at))}</span>`:''}`,
-        e.job_id?`workAc(${e.job_id})`:'void 0'); }),
-    ...dikkatIs.slice(0,4).map(j=>
-      dikkatSatir('⚡','acil',esc(j.title),
-        esc(orgKisa(orgAdi(j))||JOBLBL[j.status]||''),
-        '<span class="pill clay">ACİL İŞ</span>',`workAc(${j.id})`))
+    ...dikkatIsler.slice(0,8).map(({j,e})=>{
+      const g=e?psGecikme(e.due_at):0;
+      const alt=[orgKisa(orgAdi(j)), e?e.body:(JOBLBL[j.status]||'')].filter(Boolean).join(' · ');
+      return dikkatSatir(e?'⚠':'⚡',e?'gec':'acil',esc(j.title),esc(alt),
+        `${j.is_urgent?'<span class="pill clay">ACİL İŞ</span>':''}${e?`<span class="pill clay">${g} gün gecikti</span>`:''}`,
+        `workAc(${j.id})`); }),
+    dikkatN>8?`<button type="button" class="pa-more" onclick="dikkatGoruntule()">+${dikkatN-8} iş daha →</button>`:''
   ].join('') : '<p class="empty">Dikkat gerektiren bir şey yok.</p>';
 
   /* ---- BUGUN & YAKLASAN (§13) ----
@@ -7257,6 +8032,8 @@ async function orgAc(id){
         ${o.relationship_evidence?`<span class="haf-ev">kayıt niteliği: ${esc(evidenceLabel(o.relationship_evidence))}</span>`:''}
       </div></div>`:''}
 
+    ${orgBelgeKart(d)}
+
     <div class="sec-card">
       <div class="sec-head" style="margin-bottom:10px">
         <h4 style="font-size:14px;margin:0">Kişiler <span class="chip">${d.contacts.length}</span></h4>
@@ -7279,7 +8056,8 @@ async function orgAc(id){
           <div class="pu-h"><b>${esc(e.source==='system'?'Sistem':(tm[e.created_by_team_id]||'—'))}</b>
             <time>${esc(psZaman(e.occurred_at))}</time>
             ${e.is_urgent?'<span class="pu-b acil">⚡ Acil</span>':''}</div>
-          <p class="pu-t" onclick="psAc(this)">${esc(e.body)}</p>
+          ${String(e.body||'').trim()?`<p class="pu-t" onclick="psAc(this)">${esc(e.body)}</p>`:''}
+          ${ekSeridi(e.document_links)}
           ${j?`<div class="pu-c"><button type="button" class="pu-chip" onclick="workAc(${j.id})">${esc(j.title)}</button></div>`:''}
         </article>`;}).join('')}</div></div>`:''}
 
