@@ -4704,7 +4704,9 @@ function xlsxLoad(){                       /* SheetJS sadece gerektiğinde yükl
   });
   return _xlsxP;
 }
-const _dt=()=>new Date().toISOString().slice(0,10);
+/* S5 — dosya adindaki tarih YEREL gundur. `toISOString()` UTC verir; TR'de
+   gece 00:00-03:00 arasi uretilen dosya bir onceki gunun adini aliyordu. */
+const _dt=()=>_cIso(new Date());
 
 /* --- DIŞA AKTAR --- */
 /* S2 §5/§13 — tarih anlambilimi.
@@ -4722,31 +4724,67 @@ const _dt=()=>new Date().toISOString().slice(0,10);
    (bkz. importOpen), dolayısıyla başlığın üstüne satır eklemek kendi
    çıktımızı geri alınamaz hale getirirdi; meta sayfasını başa koymak da
    aynı şeyi yapardı. Bu haliyle gidiş-dönüş bozulmaz. */
-async function exportRows(dosyaAdi, sheetAdi, cols, rows, meta){
-  try{ await xlsxLoad(); }catch(e){ mpAlert(e.message); return; }
+/* Veri sayfasi - TEK yazar (ekran disa aktarimlari + Raporlar).
+   · Baslik satiri 1. satir; ice aktarim (`importOpen`) bunu bekler.
+   · `tip:'tarih'` sutunlari GERCEK Excel tarihi olur (siralanir/suzulur),
+     yerel gun olarak kurulur: 'YYYY-MM-DD' -> new Date(y,m-1,d). UTC'den
+     kurmak TR'de gunu bir geri kaydirirdi.
+   · `tip:'sayi'` sutunlari sayi hucresi olur (metin "91.000 TL" degil).
+   · Otomatik filtre: calisma tablosu gibi suzulur. */
+/* Excel tarih seri numarasi, TAM gun. JS Date vermek SheetJS'in yerel saat
+   dilimi donusumunden gecer ve Istanbul'un tarihi LMT ofseti hucreye
+   saniyeler ekliyordu (14.09.2026 00:00:5x). Gun takvim aritmetigiyle
+   hesaplanir; saat dilimi hic devreye girmez. */
+function _xlsxTarih(v){
+  const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(String(v||''));
+  return m?(Date.UTC(+m[1],+m[2]-1,+m[3])-Date.UTC(1899,11,30))/864e5:v;
+}
+function exportVeriSayfasi(cols, rows){
   const head=cols.map(c=>c.label);
   const body=rows.map(r=>cols.map(c=>{
-    const v=typeof c.get==='function'?c.get(r):r[c.key];
-    return (v===null||v===undefined)?'':v; }));
-  const ws=XLSX.utils.aoa_to_sheet([head,...body]);
+    let v=typeof c.get==='function'?c.get(r):r[c.key];
+    if(v===null||v===undefined||v==='') return '';
+    if(c.tip==='tarih') v=_xlsxTarih(v);   /* sayi; bicim asagida */
+    else if(c.tip==='sayi'){ const n=Number(v); v=Number.isFinite(n)?n:v; }
+    return v; }));
+  /* Nokta SSF'te ondalik saniye belirtecidir; literal olarak kacislanir. */
+  const TARIH_NF='dd\\.mm\\.yyyy';
+  const ws=XLSX.utils.aoa_to_sheet([head,...body],{dateNF:TARIH_NF});
+  cols.forEach((c,ci)=>{ if(c.tip!=='tarih') return;
+    for(let ri=1;ri<=body.length;ri++){ const cell=ws[XLSX.utils.encode_cell({r:ri,c:ci})];
+      if(cell&&cell.t==='n') cell.z=TARIH_NF; } });
   ws['!cols']=cols.map(c=>({wch:c.w||18}));
+  if(body.length) ws['!autofilter']={ref:XLSX.utils.encode_range({s:{r:0,c:0},e:{r:body.length,c:head.length-1}})};
+  /* Ust satiri sabitleme (freeze pane) SheetJS 0.18.5 topluluk surumunde
+     YAZILMIYOR (openpyxl ile dogrulandi); bu yuzden denenmiyor. */
+  return ws;
+}
+/* Dosya adi: dosya sistemi guvenli, Turkce harfler ASCII'ye iner. */
+function exportDosyaAdi(...parca){
+  const tr={'ç':'c','Ç':'C','ğ':'g','Ğ':'G','ı':'i','İ':'I','ö':'o','Ö':'O','ş':'s','Ş':'S','ü':'u','Ü':'U'};
+  return parca.filter(Boolean).map(x=>String(x).replace(/[çÇğĞıİöÖşŞüÜ]/g,ch=>tr[ch])
+    .replace(/&/g,'ve').replace(/[^A-Za-z0-9\-]+/g,'_').replace(/^_+|_+$/g,'')).join('_');
+}
+async function exportRows(dosyaAdi, sheetAdi, cols, rows, meta){
+  try{ await xlsxLoad(); }catch(e){ mpAlert(e.message); return; }
   const wb=XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb,ws,sheetAdi.slice(0,30));
+  XLSX.utils.book_append_sheet(wb,exportVeriSayfasi(cols,rows),sheetAdi.slice(0,30));
   XLSX.utils.book_append_sheet(wb,exportMetaSheet(sheetAdi,rows.length,meta),'Bilgi');
   XLSX.writeFile(wb,`${dosyaAdi}-${_dt()}.xlsx`);
 }
 /* Dışa aktarım künyesi. `meta` = [[etiket,değer], ...] — ekranın o anki
    filtresi. Buradaki hiçbir satır iş tarihi DEĞİLDİR; iş tarihleri veri
-   sayfasının kendi sütunlarındadır. */
-function exportMetaSheet(sheetAdi, adet, meta){
+   sayfasının kendi sütunlarındadır. `okunma` verilmezse ekranin son
+   okuma ani (ui._veriOkunma) kullanilir. */
+function exportMetaSheet(sheetAdi, adet, meta, okunma, dosyaNotu){
   const now=new Date();
-  const okundu=ui._veriOkunma instanceof Date?ui._veriOkunma:now;
+  const okundu=okunma instanceof Date?okunma:(ui._veriOkunma instanceof Date?ui._veriOkunma:now);
   const aoa=[
     ['Medyapark — dışa aktarım künyesi'],
     [],
-    ['Görünüm', sheetAdi],
-    ['Kayıt sayısı', adet],
-    []];
+    ['Görünüm', sheetAdi]];
+  if(adet!==null&&adet!==undefined) aoa.push(['Kayıt sayısı', adet]);
+  aoa.push([]);
   (meta||[]).forEach(m=>aoa.push([m[0], m[1]]));
   aoa.push([]);
   aoa.push(['Veri okunma anı', okundu.toLocaleString('tr-TR')]);
@@ -4754,30 +4792,10 @@ function exportMetaSheet(sheetAdi, adet, meta){
   aoa.push([]);
   aoa.push(['Not','Bu dosya yukarıdaki filtrenin O ANKİ durumunun anlık görüntüsüdür.']);
   aoa.push(['','Canlı kayıt uygulamadadır; bu dosya kaynak tablo değildir.']);
+  aoa.push(['',dosyaNotu||'Dosya adındaki tarih dışa aktarım günüdür; iş dönemi değildir.']);
   const ws=XLSX.utils.aoa_to_sheet(aoa);
-  ws['!cols']=[{wch:24},{wch:52}];
+  ws['!cols']=[{wch:26},{wch:70}];
   return ws;
-}
-
-/* çok sayfalı Excel */
-async function exportSheets(dosyaAdi, sheets){
-  try{ await xlsxLoad(); }catch(e){ mpAlert(e.message); return 0; }
-  const wb=XLSX.utils.book_new(); let toplam=0;
-  sheets.forEach(sh=>{
-    if(!sh.rows.length) return;
-    const head=sh.cols.map(c=>c.label);
-    const body=sh.rows.map(r=>sh.cols.map(c=>{
-      const v=typeof c.get==='function'?c.get(r):r[c.key];
-      return (v===null||v===undefined)?'':v; }));
-    const ws=XLSX.utils.aoa_to_sheet([head,...body]);
-    ws['!cols']=sh.cols.map(c=>({wch:c.w||18}));
-    ws['!autofilter']={ref:XLSX.utils.encode_range({s:{r:0,c:0},e:{r:body.length,c:head.length-1}})};
-    XLSX.utils.book_append_sheet(wb,ws,sh.name.slice(0,30));
-    toplam+=sh.rows.length;
-  });
-  if(!wb.SheetNames.length){ mpAlert('Seçtiğiniz aralıkta kayıt bulunamadı.'); return 0; }
-  XLSX.writeFile(wb,`${dosyaAdi}-${_dt()}.xlsx`);
-  return toplam;
 }
 
 /* --- İÇE AKTAR --- */
@@ -5058,19 +5076,238 @@ function haftaAraligi(off){
   const d=new Date(); const g=(d.getDay()+6)%7;           /* pazartesi = 0 */
   const bas=new Date(d.getFullYear(),d.getMonth(),d.getDate()-g+(off||0)*7);
   const bit=new Date(bas); bit.setDate(bas.getDate()+6);
-  const f=x=>x.toISOString().slice(0,10);
-  return [f(bas),f(bit)];
+  /* S5: YEREL gun. `toISOString()` TR'de pazartesi 00:00-03:00 arasi haftayi
+     bir onceki haftaya, ay preset'ini ise gun boyu bir gun geriye kaydiriyordu. */
+  return [_cIso(bas),_cIso(bit)];
 }
+
+/* ============ RAPORLAR (Sprint 5) ====================================
+   Raporlar ikinci bir veri sistemi DEGILDIR. Her rapor kanonik kayitlarin
+   bir PROJEKSIYONUDUR; rapora ozel tablo / elle tutulan durum YOK.
+
+   Tek kural: BIR RAPOR = BIR VERI KUMESI URETICISI.
+     rapBaglam(b,e)          -> kanonik kayitlar tek turda okunur
+     RAPOR[i].satirlar(ctx)  -> normalize satirlar
+       ├─ rapOnizle()        -> ayni satirlar, ayni sutun `get`leri
+       └─ rapUret()          -> ayni satirlar, ayni sutun `get`leri
+   Onizleme ile Excel ayri sorgu ya da ayri alan turetimi KULLANMAZ.
+
+   Uc zaman kavrami ayri tutulur (S2 §5):
+     is donemi   -> satirin kendi tarih sutunlari + Bilgi'deki aralik
+     okunma ani  -> ctx.okunma (rapBaglam'in veriyi cektigi an)
+     uretim ani  -> Bilgi sayfasi + dosya adi
+   Dosya adindaki tarih asla is donemi yerine okunmaz. */
+
+/* Yerel gun sinirlari -> timestamptz filtresi. [b 00:00, e+1 00:00) */
+function rapSinir(b,e){
+  const bas=new Date(b+'T00:00:00'); const son=new Date(e+'T00:00:00'); son.setDate(son.getDate()+1);
+  return [bas.toISOString(), son.toISOString()];
+}
+/* PostgREST yaniti `max_rows` (1000) ile SESSIZCE kesilir. Rapor eksik
+   veriyle "tamam" gorunmemeli: sayfa sayfa sonuna kadar okunur. */
+async function rapHepsi(kur){
+  const out=[]; const N=1000;
+  for(let i=0;i<200;i++){
+    const {data,error}=await kur().range(i*N,i*N+N-1);
+    if(error) throw error;
+    out.push(...(data||[]));
+    if(!data||data.length<N) break;
+  }
+  return out;
+}
+const RAP_AY=['Oca','Şub','Mar','Nis','May','Haz','Tem','Ağu','Eyl','Eki','Kas','Ara'];
+const rapTr=iso=>{ const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso||'')); return m?`${m[3]}.${m[2]}.${m[1]}`:''; };
+/* timestamptz -> yerel 'YYYY-MM-DD' */
+const rapGun=ts=>ts?_cIso(new Date(ts)):'';
+const RAP_MUH={yok:'Yok',hazir:'Hazır',gonderildi:'Gönderildi',islendi:'İşlendi'};
+const RAP_TEKLIF={yeni:'Yeni',gorusuldu:'Görüşüldü',onaylandi:'Onaylandı',iptal:'İptal'};
+/* Calisan icin iki kategori: Aktif / Arsiv. `bekliyor` saklanan deger
+   olarak kalir, raporda Aktif'in ikincil baglamidir. */
+const rapYasam=j=>(j&&j.lifecycle_status==='kapandi')?'Arşiv':'Aktif';
+const rapBekliyor=j=>(j&&j.lifecycle_status==='bekliyor')?'Bekliyor':'';
+/* Operasyon: gunluk UI kapsami + AYRINTI kaybolmaz. */
+const rapOpKapsam=s=>s==='done'?'Tamamlandı':s==='cancelled'?'İptal':'Aktif';
+const RAP_LED_NOT='LED kısa dönem/yayın rotasyonlarının tamamı V0 aylık doluluk modelinde temsil edilmeyebilir.';
+
+async function rapBaglam(b,e){
+  const [ts0,ts1]=rapSinir(b,e);
+  /* Ay listesi: araligin kapsadigi aylar (yerel). */
+  const aylar=[]; { const d=new Date(+b.slice(0,4),+b.slice(5,7)-1,1); const son=e.slice(0,7);
+    for(let i=0;i<60;i++){ const ym=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
+      aylar.push(ym); if(ym>=son)break; d.setMonth(d.getMonth()+1); } }
+  const [jobs,cust,team,cts,fol,rel,aksiyon,sonGunc,ops,mec,alt,uni,prod,book,teklif]=await Promise.all([
+    rapHepsi(()=>sb.from('jobs').select('*').order('id')),
+    rapHepsi(()=>sb.from('customers').select('id,firma').order('id')),
+    api('team_list'),
+    rapHepsi(()=>sb.from('contacts').select('id,name').order('id')),
+    rapHepsi(()=>sb.from('work_followers').select('job_id,team_id').order('job_id').order('team_id')),
+    rapHepsi(()=>sb.from('entry_relevance').select('entry_id,team_id').order('entry_id').order('team_id')),
+    /* Aksiyon Plani: TARIHLI insan Entry'leri. Sistem hareketi YOK,
+       tarihsiz duz guncelleme YOK, kisisel etkinlik (ayri tablo) YOK. */
+    rapHepsi(()=>sb.from('entries').select('id,job_id,customer_id,contact_id,body,action_status,assignee_id,due_at,is_urgent,created_by_team_id')
+      .neq('source','system').not('due_at','is',null).gte('due_at',ts0).lt('due_at',ts1)
+      .order('due_at').order('id')),
+    /* Is Takibi "son guncelleme": yalniz INSAN yazimi, en yeni once. */
+    rapHepsi(()=>sb.from('entries').select('id,job_id,body,occurred_at').neq('source','system')
+      .not('job_id','is',null).order('occurred_at',{ascending:false}).order('id',{ascending:false})),
+    rapHepsi(()=>sb.from('work_operations').select('*').gte('planned_date',b).lte('planned_date',e)
+      .order('planned_date').order('id')),
+    rapHepsi(()=>sb.from('mecralar').select('id,name,sort').order('sort').order('id')),
+    rapHepsi(()=>sb.from('alt_mecralar').select('id,name,mecra_id').order('id')),
+    rapHepsi(()=>sb.from('units').select('id,name,mecra_id,alt_mecra_id,product_id,active,sort').order('sort').order('id')),
+    rapHepsi(()=>sb.from('products').select('id,name').order('id')),
+    rapHepsi(()=>sb.from('bookings').select('*').in('ym',aylar).order('id')),
+    rapHepsi(()=>sb.from('quotes').select('id,customer_id,customer_name,firma,telefon,eposta,total,status,created_at,kaynak,gecerlilik,work_id,revision_no')
+      .gte('created_at',ts0).lt('created_at',ts1).order('created_at').order('id'))
+  ]);
+  const idx=(arr,f)=>{ const m={}; (arr||[]).forEach(x=>m[x.id]=f?f(x):x); return m; };
+  const grup=(arr,k,v)=>{ const m={}; (arr||[]).forEach(x=>(m[x[k]]=m[x[k]]||[]).push(v(x))); return m; };
+  const son={}; sonGunc.forEach(x=>{ if(!son[x.job_id]) son[x.job_id]=x; });
+  return {b,e,aylar,okunma:new Date(),
+    jobs, jm:idx(jobs), cm:idx(cust,x=>x.firma||''), tm:idx(team||[],x=>x.name||''),
+    km:idx(cts,x=>x.name||''), folJ:grup(fol,'job_id',x=>x.team_id), relE:grup(rel,'entry_id',x=>x.team_id),
+    aksiyon, sonGunc:son, ops, mec, am:idx(alt), mm:idx(mec), uni, um:idx(uni), pm:idx(prod,x=>x.name||''),
+    book, teklif};
+}
+const rapAdlar=(tm,ids)=>[...new Set((ids||[]).filter(Boolean))].map(id=>tm[id]).filter(Boolean)
+  .sort((a,b)=>a.localeCompare(b,'tr')).join(', ');
+
+/* ---- Rapor tanimlari. Sutun `get`leri onizleme VE Excel icin ORTAK. ---- */
+const RAPOR=[
+ {id:'aksiyon', ad:'Aksiyon Planı', sayfa:'Aksiyon Planı', dosya:'Aksiyon_Plani', varsayilan:1, donemli:true,
+  aciklama:'Son tarihi seçilen aralıkta olan güncellemeler — acil ve gecikenler öne çıkar',
+  kapsam:'Son tarihi aralıkta olan insan güncellemeleri. Sistem hareketleri, tarihsiz güncellemeler, iptal edilenler ve kişisel etkinlikler dahil değildir.',
+  satirlar:c=>{
+    const bugun=_cIso(new Date());
+    return c.aksiyon.filter(x=>x.action_status!=='cancelled').map(x=>{
+      const j=c.jm[x.job_id]||null; const gun=rapGun(x.due_at);
+      const kapali=x.action_status==='done';
+      const fark=Math.round((new Date(bugun+'T00:00:00')-new Date(gun+'T00:00:00'))/864e5);
+      /* Mevcut deterministik tanim: gun gecmeden gecikme yok (gecikti()). */
+      const gec=kapali?'Tamamlandı':fark>0?`${fark} gün gecikti`:fark===0?'Bugün':'';
+      /* Bir Entry = bir satir. Ilgili = etiketlenenler; eski `assignee_id`
+         varsa ayni kumeye katilir ama ayri "Sorumlu" kavrami DONDURMEZ. */
+      const ilgili=rapAdlar(c.tm,[...(c.relE[x.id]||[]),x.assignee_id]);
+      return {gun,gec,acil:!!x.is_urgent,metin:x.body||'',ilgili,
+        is:j?j.title||'':'', kurum:c.cm[j?j.customer_id:x.customer_id]||'',
+        asama:j?(FAZ_ETIKET[j.status]||JOBLBL[j.status]||j.status||''):'',
+        durum:j?[rapYasam(j),rapBekliyor(j)].filter(Boolean).join(' · '):'',
+        kisi:c.km[x.contact_id]||'', yazan:c.tm[x.created_by_team_id]||''};
+    }).sort((p,q)=>p.gun.localeCompare(q.gun)||(q.acil-p.acil));
+  },
+  cols:[{key:'gun',label:'Son tarih',w:12,tip:'tarih'},{key:'gec',label:'Gecikme',w:14},
+    {label:'Acil',w:7,get:r=>r.acil?'Acil':''},{key:'metin',label:'Güncelleme',w:56},
+    {key:'ilgili',label:'İlgili',w:26},{key:'is',label:'İş',w:32},{key:'kurum',label:'Kurum',w:30},
+    {key:'asama',label:'Aşama',w:10},{key:'durum',label:'İş durumu',w:16},{key:'kisi',label:'Kişi',w:18},
+    {key:'yazan',label:'Yazan',w:16}]},
+
+ {id:'is', ad:'İş Takibi', sayfa:'İş Takibi', dosya:'Is_Takibi', varsayilan:1, donemli:false,
+  aciklama:'Şirketin iş tablosu: aktif işler önce, arşiv sonra — tarih aralığından bağımsız',
+  kapsam:'Tüm işler (aktif + arşiv). "Son güncelleme" yalnız insan yazımı güncellemedir.',
+  satirlar:c=>{
+    const FS=Object.fromEntries(FAZ_SIRA.map((k,i)=>[k,i]));
+    return c.jobs.map(j=>{ const sg=c.sonGunc[j.id];
+      return {j, ilgili:rapAdlar(c.tm,c.folJ[j.id]), kurum:c.cm[j.customer_id]||'', is:j.title||'',
+        asama:FAZ_ETIKET[j.status]||JOBLBL[j.status]||j.status||'', durum:rapYasam(j), bek:rapBekliyor(j),
+        acil:!!j.is_urgent, son:sg?sg.body||'':'', sonTarih:sg?rapGun(sg.occurred_at):'',
+        kisi:c.km[j.primary_contact_id]||'', muh:RAP_MUH[j.accounting_status||'yok']||j.accounting_status||''};
+    }).sort((p,q)=>(p.durum==='Arşiv')-(q.durum==='Arşiv')||(q.acil-p.acil)
+      ||((FS[p.j.status]??9)-(FS[q.j.status]??9))||p.is.localeCompare(q.is,'tr'));
+  },
+  cols:[{key:'ilgili',label:'İlgili',w:24},{key:'kurum',label:'Kurum',w:30},{key:'is',label:'İş',w:36},
+    {key:'asama',label:'Aşama',w:10},{key:'durum',label:'Durum',w:9},{key:'bek',label:'Bekliyor',w:10},
+    {label:'Acil',w:7,get:r=>r.acil?'Acil':''},{key:'son',label:'Son güncelleme',w:56},
+    {key:'sonTarih',label:'Son güncelleme tarihi',w:14,tip:'tarih'},{key:'kisi',label:'Kişi',w:18},
+    {key:'muh',label:'Muhasebe',w:12}]},
+
+ {id:'op', ad:'Baskı & Montaj', sayfa:'Baskı & Montaj', dosya:'Baski_Montaj', varsayilan:1, donemli:true,
+  aciklama:'Planlanan tarihi seçilen aralıkta olan baskı, montaj ve söküm kayıtları',
+  kapsam:'Planlanan tarihi aralıkta olan operasyonlar. Tarihi girilmemiş operasyonlar bu aralığa girmez.',
+  satirlar:c=>c.ops.map(o=>{ const j=c.jm[o.job_id]||{}; const u=c.um[o.unit_id]||null;
+    const m=u?(c.mm[(c.am[u.alt_mecra_id]||{}).mecra_id||u.mecra_id]||{}):{};
+    return {tarih:o.planned_date||'', tur:opTypeLbl(o.operation_type), kurum:c.cm[j.customer_id]||'', is:j.title||'',
+      aciklama:o.description||'', adet:o.quantity, olcu:o.dimensions||'',
+      poz:u?[m.name,u.name].filter(Boolean).join(' · '):'', yer:o.location_text||'',
+      uygulayan:c.cm[o.supplier_org_id]||'', kapsam:rapOpKapsam(o.status), durum:opStatLbl(o.status),
+      bitti:o.completed_at?rapGun(o.completed_at):'', maliyet:o.cost, not:o.note||''}; }),
+  cols:[{key:'tarih',label:'Tarih',w:12,tip:'tarih'},{key:'tur',label:'Tür',w:9},{key:'kurum',label:'Kurum',w:26},
+    {key:'is',label:'İş',w:30},{key:'aciklama',label:'Açıklama / Ürün',w:32},{key:'adet',label:'Adet',w:7,tip:'sayi'},
+    {key:'olcu',label:'Ölçü',w:12},{key:'poz',label:'Pozisyon / Mecra',w:22},{key:'yer',label:'Yer',w:22},
+    {key:'uygulayan',label:'Uygulayan',w:22},{key:'kapsam',label:'Durum',w:11},{key:'durum',label:'Durum ayrıntısı',w:14},
+    {key:'bitti',label:'Tamamlanma',w:12,tip:'tarih'},{key:'maliyet',label:'Maliyet',w:11,tip:'sayi'},{key:'not',label:'Not',w:36}]},
+
+ {id:'dol', ad:'Mecra Doluluk Detayı', sayfa:'Doluluk Detayı', dosya:'Doluluk_Detay', varsayilan:1, donemli:true,
+  aciklama:'Aralığın kapsadığı her ay için pozisyon bazında durum, kurum ve gerçek dönem',
+  kapsam:'Aralığın kapsadığı aylar × tüm pozisyonlar. Doluluk AYLIK kayıttır; gerçek dönem yalnız girilmişse yazılır, aydan gün üretilmez.',
+  satirlar:c=>{ const bm={}; c.book.forEach(x=>{(bm[x.unit_id]=bm[x.unit_id]||{})[x.ym]=x;});
+    const rows=[];
+    /* Calisma tablosu gibi GRUPLU: mecra (panel sirasi) -> alan -> pozisyon
+       (dogal sira: P2 < P10) -> ay. Ham `units.sort` mecra/alan karistiriyordu. */
+    const ms=Object.fromEntries(c.mec.map((m,i)=>[m.id,i]));
+    const mid=u=>(c.am[u.alt_mecra_id]||{}).mecra_id||u.mecra_id;
+    const dogal=(x,y)=>String(x||'').localeCompare(String(y||''),'tr',{numeric:true});
+    const uniS=[...c.uni].sort((p,q)=>((ms[mid(p)]??999)-(ms[mid(q)]??999))
+      ||dogal((c.am[p.alt_mecra_id]||{}).name,(c.am[q.alt_mecra_id]||{}).name)||dogal(p.name,q.name));
+    uniS.forEach(u=>{ const a=c.am[u.alt_mecra_id]||{}; const m=c.mm[a.mecra_id||u.mecra_id]||{}; const p=posParts(u.name);
+      c.aylar.forEach(ym=>{ const r=(bm[u.id]||{})[ym];
+        const durum=r?(r.status==='dolu'?'Dolu':r.status==='rezerve'?'Rezerve':r.status):(u.active===false?'Pasif':'Boş');
+        rows.push({mecra:m.name||'',alan:a.name||'',poz:p.base,yuzey:p.surf,tur:c.pm[u.product_id]||'',
+          ay:`${RAP_AY[+ym.slice(5,7)-1]} ${ym.slice(0,4)}`, durum,
+          kurum:r&&r.customer_id?(c.cm[r.customer_id]||''):'',
+          ps:(r&&r.period_start)||'', pe:(r&&r.period_end)||'', pnot:(r&&r.period_note)||'',
+          /* Gercek bitis varsa gun, yoksa ay seviyesi - gun UYDURULMAZ (bookBosalma). */
+          bosalma:r?bookBosalma(r):'', not:(r&&r.note)||'', led:/\bLED\b/i.test(c.pm[u.product_id]||'')});
+      }); });
+    return rows; },
+  cols:[{key:'mecra',label:'Mecra',w:22},{key:'alan',label:'Alan',w:22},{key:'poz',label:'Pozisyon',w:11},
+    {key:'yuzey',label:'Yüzey',w:7},{key:'tur',label:'Mecra türü',w:14},{key:'ay',label:'Ay',w:10},
+    {key:'durum',label:'Durum',w:9},{key:'kurum',label:'Kurum',w:28},
+    {key:'ps',label:'Dönem başlangıç',w:14,tip:'tarih'},{key:'pe',label:'Dönem bitiş',w:14,tip:'tarih'},
+    {key:'pnot',label:'Kaynak dönem ifadesi',w:24},{key:'bosalma',label:'Boşalma',w:22},{key:'not',label:'Not',w:28}]},
+
+ {id:'ozet', ad:'Doluluk Özeti', sayfa:'Doluluk Özeti', dosya:'Doluluk_Ozet', varsayilan:1, donemli:true,
+  aciklama:'Mecra bazında dolu / rezerve / boş ay sayısı ve doluluk oranı',
+  kapsam:'Mecra başına pozisyon × ay sayımı. Doluluk = (dolu + rezerve) / (dolu + rezerve + boş).',
+  /* Ozet, Detay'in AYNI satirlarindan sayilir: iki rapor asla celismez. */
+  satirlar:c=>{ const o={};
+    RAPOR.find(r=>r.id==='dol').satirlar(c).forEach(r=>{
+      const x=o[r.mecra]=o[r.mecra]||{mecra:r.mecra||'—',pozSet:new Set(),dolu:0,rez:0,bos:0};
+      x.pozSet.add(r.alan+'|'+r.poz+'|'+r.yuzey);
+      if(r.durum==='Dolu')x.dolu++; else if(r.durum==='Rezerve')x.rez++; else if(r.durum==='Boş')x.bos++; });
+    const sira=Object.fromEntries(c.mec.map((m,i)=>[m.name,i]));
+    return Object.values(o).map(x=>{ const t=x.dolu+x.rez+x.bos;
+      return {mecra:x.mecra,poz:x.pozSet.size,dolu:x.dolu,rez:x.rez,bos:x.bos,toplam:t,
+        oran:t?Math.round((x.dolu+x.rez)*100/t):0}; })
+      .sort((p,q)=>(sira[p.mecra]??99)-(sira[q.mecra]??99)); },
+  cols:[{key:'mecra',label:'Mecra',w:26},{key:'poz',label:'Pozisyon',w:10,tip:'sayi'},{key:'dolu',label:'Dolu (ay)',w:10,tip:'sayi'},
+    {key:'rez',label:'Rezerve (ay)',w:12,tip:'sayi'},{key:'bos',label:'Boş (ay)',w:10,tip:'sayi'},
+    {key:'toplam',label:'Toplam (ay)',w:11,tip:'sayi'},
+    {label:'Doluluk',w:10,get:r=>r.oran+'%'}]},
+
+ {id:'teklif', ad:'Teklifler', sayfa:'Teklifler', dosya:'Teklifler', varsayilan:0, donemli:true,
+  aciklama:'Seçilen aralıkta oluşturulan teklifler; kurum, bağlı iş, durum ve tutar',
+  kapsam:'Oluşturulma tarihi aralıkta olan teklifler. Kurum ve iş yalnız AÇIK bağlantıdan okunur; isim benzerliğiyle eşleştirme yapılmaz.',
+  satirlar:c=>c.teklif.map(q=>({no:'#'+q.id+(q.revision_no>1?` (rev ${q.revision_no})`:''), tarih:rapGun(q.created_at),
+    kurum:q.customer_id&&c.cm[q.customer_id]?c.cm[q.customer_id]:'', firmaForm:q.firma||'',
+    talepEden:q.customer_name||'', is:q.work_id&&c.jm[q.work_id]?c.jm[q.work_id].title||'':'',
+    durum:RAP_TEKLIF[q.status]||q.status||'Yeni', tutar:q.total, gecerlilik:q.gecerlilik||'',
+    kaynak:q.kaynak||'', tel:q.telefon||'', mail:q.eposta||''})),
+  cols:[{key:'no',label:'Teklif',w:10},{key:'tarih',label:'Tarih',w:12,tip:'tarih'},{key:'kurum',label:'Kurum (bağlı)',w:28},
+    {key:'firmaForm',label:'Firma (talepte yazılan)',w:24},{key:'talepEden',label:'Talep eden',w:20},{key:'is',label:'İş',w:30},
+    {key:'durum',label:'Durum',w:11},{key:'tutar',label:'Tutar',w:12,tip:'sayi'},{key:'gecerlilik',label:'Geçerlilik',w:12,tip:'tarih'},
+    {key:'kaynak',label:'Kaynak',w:12},{key:'tel',label:'Telefon',w:15},{key:'mail',label:'E-posta',w:24}]}
+];
+
 async function raporlar(c){
   const [b,e]=haftaAraligi(0);
   c.innerHTML=`<div class="sec-head">
-      <div><h3>Raporlar</h3><p class="sub">Seçtiğiniz aralık için Excel dosyası oluşturur</p></div></div>
+      <div><h3>Raporlar</h3><p class="sub">Uygulamadaki kayıtların seçtiğiniz dönem için anlık görüntüsü — önizleyin, Excel'e aktarın</p></div></div>
 
     <div class="sec-card">
-      <label class="flabel" style="font-weight:700">Tarih aralığı</label>
+      <label class="flabel" style="font-weight:700">İş dönemi</label>
       <div class="row2" style="max-width:460px">
-        <div class="field"><label class="flabel">Başlangıç</label><input class="inp" type="date" id="rb" value="${b}"></div>
-        <div class="field"><label class="flabel">Bitiş</label><input class="inp" type="date" id="re" value="${e}"></div>
+        <div class="field"><label class="flabel" for="rb">Başlangıç</label><input class="inp" type="date" id="rb" value="${b}" onchange="rapDonemCiz()"></div>
+        <div class="field"><label class="flabel" for="re">Bitiş</label><input class="inp" type="date" id="re" value="${e}" onchange="rapDonemCiz()"></div>
       </div>
       <div class="rp-quick">
         <button class="btn btn-ghost btn-sm" onclick="rapHafta(0)">Bu hafta</button>
@@ -5079,132 +5316,107 @@ async function raporlar(c){
         <button class="btn btn-ghost btn-sm" onclick="rapAy()">Bu ay</button>
         <button class="btn btn-ghost btn-sm" onclick="rapAy(1)">Gelecek ay</button>
       </div>
+      <p class="rp-donem" id="rpDonem" aria-live="polite"></p>
     </div>
 
     <div class="sec-card">
-      <label class="flabel" style="font-weight:700">Rapora eklenecek bölümler</label>
+      <label class="flabel" style="font-weight:700">Raporlar</label>
       <div class="rp-list">
-        ${[['r_hafta','Haftalık Aksiyon Planı','Seçilen aralıkta başlayan veya biten tüm işler; aşama, tarih ve sorumlu firma ile',1],
-           ['r_baski','Baskı & Montaj Takibi','Yalnızca baskı ve montaj aşamasındaki işler; atanan tedarikçi bilgisiyle',1],
-           ['r_is','İş Takibi (tümü)','Arşiv dahil bütün işlerin listesi',0],
-           ['r_dol','Mecra Doluluk Detayı','Pozisyon ve yüzey bazında ay ay durum ve kiralayan firma',1],
-           ['r_ozet','Doluluk Özeti','Mecra bazında dolu/rezerve/boş ay sayısı ve doluluk yüzdesi',1],
-           ['r_teklif','Teklifler','Seçilen aralıkta gelen teklifler ve durumları',0]
-          ].map(x=>`<label class="rp-item"><input type="checkbox" id="${x[0]}" ${x[3]?'checked':''}>
-            <span><b>${esc(x[1])}</b><em>${esc(x[2])}</em></span></label>`).join('')}
+        ${RAPOR.map(r=>`<label class="rp-item"><input type="checkbox" id="r_${r.id}" ${r.varsayilan?'checked':''}>
+            <span><b>${esc(r.ad)}</b><em>${esc(r.aciklama)}</em></span></label>`).join('')}
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:16px">
-        <button class="btn btn-primary btn-sm" onclick="rapUret()">${ic('download',15)} Excel Raporu Oluştur</button>
         <button class="btn btn-outline btn-sm" onclick="rapOnizle()">Önizleme</button>
+        <button class="btn btn-primary btn-sm" onclick="rapUret()">${ic('download',15)} Excel'e Aktar</button>
       </div>
       <div id="rapOut"></div>
     </div>`;
+  rapDonemCiz();
 }
+function rapDonemCiz(){ const el=document.getElementById('rpDonem'); if(!el) return;
+  const b=gv('rb'), e=gv('re');
+  el.innerHTML=b&&e?`<b>İş dönemi:</b> ${esc(rapTr(b))} – ${esc(rapTr(e))}`:'İş dönemi seçilmedi.'; }
 function rapHafta(o){ const [b,e]=haftaAraligi(o);
-  document.getElementById('rb').value=b; document.getElementById('re').value=e; }
+  document.getElementById('rb').value=b; document.getElementById('re').value=e; rapDonemCiz(); }
 function rapAy(o){ const d=new Date(); const m=d.getMonth()+(o||0);
   const b=new Date(d.getFullYear(),m,1), e=new Date(d.getFullYear(),m+1,0);
-  const f=x=>x.toISOString().slice(0,10);
-  document.getElementById('rb').value=f(b); document.getElementById('re').value=f(e); }
+  document.getElementById('rb').value=_cIso(b); document.getElementById('re').value=_cIso(e); rapDonemCiz(); }
 
-async function rapVeri(){
+/* Tek veri yolu: aralik dogrula -> baglam oku -> secili raporlarin satirlari. */
+async function rapHazirla(){
   const b=gv('rb'), e=gv('re');
   if(!b||!e){ mpAlert('Tarih aralığı seçin.'); return null; }
   if(b>e){ mpAlert('Başlangıç tarihi bitişten sonra olamaz.'); return null; }
-  const [jb,cu,su,mc,al,un,bk,qs,ct]=await Promise.all([
-    sb.from('jobs').select('*').order('start_day'),
-    api('customers_list'), api('suppliers_list'), api('mecra_list'),
-    sb.from('alt_mecralar').select('*'), sb.from('units').select('*').order('sort').order('id'),
-    sb.from('bookings').select('*'), sb.from('quotes').select('*').order('created_at',{ascending:false}),
-    api('contacts_list')
-  ]);
-  const cm={}; cu.forEach(x=>cm[x.id]=x);
-  /* "İlgili Kişi" sütunu artık gerçek Contact'tan gelir (S02_001). */
-  const km={}; (ct||[]).forEach(k=>{ if(k.active!==false && (!km[k.customer_id]||k.is_primary)) km[k.customer_id]=k.name; });
-  const sm={}; su.forEach(x=>sm[x.id]=x);
-  const mm={}; mc.forEach(x=>mm[x.id]=x);
-  const am={}; (al.data||[]).forEach(x=>am[x.id]=x);
-  const jobs=(jb.data||[]);
-  const araliktaMi=j=>{
-    const s1=j.start_day||'', s2=j.end_day||j.start_day||'';
-    if(!s1&&!s2) return false;
-    return !(s2<b || s1>e);                         /* aralıkla kesişiyorsa */
-  };
-  const jrow=j=>({
-    is:j.title||'', asama:JOBLBL[j.status]||j.status||'',
-    firma:(cm[j.customer_id]||{}).firma||'', kisi:km[j.customer_id]||'',
-    mecra:(mm[j.mecra_id]||{}).name||'', tedarikci:(sm[j.supplier_id]||{}).firma||'',
-    bas:j.start_day||'', bit:j.end_day||'', not:j.note||''
-  });
-  /* ay listesi: aralığın kapsadığı aylar */
-  const aylar=[]; { const d=new Date(b.slice(0,7)+'-01'); const son=e.slice(0,7);
-    for(let i=0;i<36;i++){ const ym=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
-      aylar.push(ym); if(ym>=son)break; d.setMonth(d.getMonth()+1); } }
-  const bmap={}; (bk.data||[]).forEach(x=>{(bmap[x.unit_id]=bmap[x.unit_id]||{})[x.ym]=x;});
-  const dolRows=[], ozet={};
-  (un.data||[]).forEach(u=>{
-    const a=am[u.alt_mecra_id]||{}; const m=mm[a.mecra_id||u.mecra_id]||{};
-    const p=posParts(u.name);
-    const o=ozet[m.id]=ozet[m.id]||{mecra:m.name||'—',poz:0,dolu:0,rez:0,bos:0};
-    o.poz++;
-    aylar.forEach(ym=>{ const r=(bmap[u.id]||{})[ym];
-      const durum=r?(r.status==='dolu'?'Dolu':'Rezerve'):'Boş';
-      if(durum==='Dolu')o.dolu++; else if(durum==='Rezerve')o.rez++; else o.bos++;
-      dolRows.push({mecra:m.name||'',alt:a.name||'',poz:p.base,yuzey:p.surf,ay:ym,durum,
-        firma:r&&r.customer_id?((cm[r.customer_id]||{}).firma||''):'', not:r&&r.note?r.note:''});
-    });
-  });
-  const ozetRows=Object.values(ozet).map(o=>({...o,
-    toplam:o.dolu+o.rez+o.bos,
-    oran:(o.dolu+o.rez+o.bos)?Math.round((o.dolu+o.rez)*100/(o.dolu+o.rez+o.bos))+'%':'0%'}));
-  const qrows=(qs.data||[]).filter(q=>{const d=(q.created_at||'').slice(0,10); return d>=b&&d<=e;})
-    .map(q=>({no:'#'+q.id,musteri:q.customer_name||q.firma||'',tel:q.telefon||'',mail:q.eposta||'',
-      durum:({yeni:'Yeni',gorusuldu:'Görüşüldü',onaylandi:'Onaylandı',iptal:'İptal'})[q.status]||q.status||'Yeni',
-      tarih:(q.created_at||'').slice(0,10)}));
-  return {b,e,
-    hafta:jobs.filter(araliktaMi).map(jrow),
-    baski:jobs.filter(j=>['baski','montaj'].includes(j.status)).map(jrow),
-    tumIs:jobs.map(jrow), dolRows, ozetRows, qrows, ayAdet:aylar.length};
+  const secili=RAPOR.filter(r=>(document.getElementById('r_'+r.id)||{}).checked);
+  if(!secili.length) return {b,e,S:[]};
+  const ctx=await rapBaglam(b,e);
+  const S=secili.map(r=>({r, rows:r.satirlar(ctx)}));
+  ui._rapSon={b,e,S,okunma:ctx.okunma};   /* QA/kanit icin: son onizleme/aktarim verisi */
+  return {b,e,ctx,S};
 }
-const RC={
-  is:[{key:'is',label:'İş',w:32},{key:'asama',label:'Aşama',w:12},{key:'firma',label:'Müşteri',w:24},
-      {key:'kisi',label:'İlgili Kişi',w:18},{key:'mecra',label:'Mecra',w:20},{key:'tedarikci',label:'Tedarikçi',w:22},
-      {key:'bas',label:'Başlangıç',w:12},{key:'bit',label:'Bitiş',w:12},{key:'not',label:'Not',w:30}],
-  dol:[{key:'mecra',label:'Mecra',w:22},{key:'alt',label:'Alt Mecra',w:20},{key:'poz',label:'Pozisyon',w:14},
-       {key:'yuzey',label:'Yüzey',w:8},{key:'ay',label:'Ay',w:10},{key:'durum',label:'Durum',w:10},
-       {key:'firma',label:'Kiralayan',w:24},{key:'not',label:'Not',w:26}],
-  ozet:[{key:'mecra',label:'Mecra',w:24},{key:'poz',label:'Pozisyon',w:10},{key:'dolu',label:'Dolu (ay)',w:11},
-        {key:'rez',label:'Rezerve (ay)',w:13},{key:'bos',label:'Boş (ay)',w:11},
-        {key:'toplam',label:'Toplam (ay)',w:12},{key:'oran',label:'Doluluk',w:10}],
-  q:[{key:'no',label:'No',w:8},{key:'musteri',label:'Müşteri',w:26},{key:'tel',label:'Telefon',w:16},
-     {key:'mail',label:'E-posta',w:24},{key:'durum',label:'Durum',w:12},{key:'tarih',label:'Tarih',w:12}]
-};
-function rapSecim(d){
-  const S=[];
-  if(document.getElementById('r_hafta').checked) S.push({name:'Haftalık Aksiyon',cols:RC.is,rows:d.hafta});
-  if(document.getElementById('r_baski').checked) S.push({name:'Baskı-Montaj',cols:RC.is,rows:d.baski});
-  if(document.getElementById('r_is').checked)    S.push({name:'İş Takibi',cols:RC.is,rows:d.tumIs});
-  if(document.getElementById('r_dol').checked)   S.push({name:'Doluluk Detay',cols:RC.dol,rows:d.dolRows});
-  if(document.getElementById('r_ozet').checked)  S.push({name:'Doluluk Özet',cols:RC.ozet,rows:d.ozetRows});
-  if(document.getElementById('r_teklif').checked)S.push({name:'Teklifler',cols:RC.q,rows:d.qrows});
-  return S;
+function rapHucre(col,row){
+  const v=typeof col.get==='function'?col.get(row):row[col.key];
+  if(v===null||v===undefined) return '';
+  if(col.tip==='tarih') return rapTr(v);
+  if(col.tip==='sayi'&&v!==''&&Number.isFinite(Number(v))) return Number(v).toLocaleString('tr-TR');
+  return String(v);
 }
+const RAP_ONIZLE_SATIR=10;
+const rapLedVar=S=>S.some(x=>x.r.id==='dol'&&x.rows.some(r=>r.led));
 async function rapOnizle(){
   const out=document.getElementById('rapOut'); out.innerHTML='<p class="muted" style="margin-top:14px">Hazırlanıyor…</p>';
-  const d=await rapVeri(); if(!d){ out.innerHTML=''; return; }
-  const S=rapSecim(d);
-  if(!S.length){ out.innerHTML='<div class="banner" style="margin-top:14px">En az bir bölüm seçin.</div>'; return; }
-  out.innerHTML=`<div class="rp-prev"><div class="imp-info">${d.b} – ${d.e} · ${d.ayAdet} ay kapsanıyor</div>
-    ${S.map(x=>`<div class="rp-line"><b>${esc(x.name)}</b><span>${x.rows.length} satır</span></div>`).join('')}
-    ${S.every(x=>!x.rows.length)?'<div class="imp-warn">Bu aralıkta kayıt bulunamadı.</div>':''}</div>`;
+  let d; try{ d=await rapHazirla(); }catch(err){ out.innerHTML=`<div class="imp-warn" style="margin-top:14px">Rapor okunamadı: ${esc(err.message||err)}</div>`; return; }
+  if(!d){ out.innerHTML=''; return; }
+  if(!d.S.length){ out.innerHTML='<div class="banner" style="margin-top:14px">En az bir rapor seçin.</div>'; return; }
+  out.innerHTML=`<div class="rp-prev">
+    <div class="rp-prev-h"><b>İş dönemi: ${esc(rapTr(d.b))} – ${esc(rapTr(d.e))}</b>
+      <span>Veri okunma: ${esc(d.ctx.okunma.toLocaleString('tr-TR'))}</span></div>
+    ${d.S.map(({r,rows})=>`<section class="rp-sec">
+      <div class="rp-line"><b>${esc(r.ad)}</b><span>${rows.length} satır</span></div>
+      <p class="rp-kapsam">${r.donemli?'':'<b>Tarih aralığından bağımsız.</b> '}${esc(r.kapsam)}</p>
+      ${r.id==='dol'&&rapLedVar(d.S)?`<p class="rp-kapsam">${esc(RAP_LED_NOT)}</p>`:''}
+      ${rows.length?`<div class="tbl-wrap rp-tbl"><table class="tbl"><thead><tr>${r.cols.map(cl=>`<th>${esc(cl.label)}</th>`).join('')}</tr></thead>
+        <tbody>${rows.slice(0,RAP_ONIZLE_SATIR).map(row=>`<tr>${r.cols.map(cl=>`<td>${esc(rapHucre(cl,row))}</td>`).join('')}</tr>`).join('')}</tbody></table></div>
+        ${rows.length>RAP_ONIZLE_SATIR?`<p class="rp-kapsam">İlk ${RAP_ONIZLE_SATIR} satır gösteriliyor; Excel'de ${rows.length} satırın tamamı var.</p>`:''}`
+        :'<p class="empty" style="margin:6px 0 0">Bu dönemde kayıt yok.</p>'}
+    </section>`).join('')}</div>`;
+}
+/* Calisma kitabi olusturma - dosyaya yazmadan. QA ayni kitabi okuyabilsin
+   diye rapUret'ten ayri. */
+function rapKitap(d){
+  /* Veri sayfalari ONCE, Bilgi SONRA (ice aktarim ilk sayfayi okur).
+     Bos rapor da sayfa olarak yazilir: "bu donemde kayit yok" bir bilgidir,
+     sayfanin sessizce kaybolmasi degil. */
+  const wb=XLSX.utils.book_new();
+  d.S.forEach(({r,rows})=>XLSX.utils.book_append_sheet(wb,exportVeriSayfasi(r.cols,rows),r.sayfa.slice(0,31)));
+  const meta=[['Raporlar', d.S.map(x=>x.r.ad).join(', ')],
+    ['İş dönemi', `${rapTr(d.b)} – ${rapTr(d.e)}`], []];
+  d.S.forEach(({r,rows})=>{ meta.push([r.ad, `${rows.length} satır`]);
+    meta.push(['', (r.donemli?'':'Tarih aralığından bağımsız. ')+r.kapsam]); });
+  if(rapLedVar(d.S)){ meta.push([]); meta.push(['LED', RAP_LED_NOT]); }
+  /* Dosya adi: tek rapor -> rapor adi; donemsiz tek rapor -> uretim gunu;
+     aksi halde is donemi. Tarih daima baglamiyla - ve Bilgi o tarihin
+     NE oldugunu acikca yazar. */
+  const tek=d.S.length===1?d.S[0].r:null;
+  const uretimGunlu=!!(tek&&!tek.donemli);
+  const ad=uretimGunlu ? exportDosyaAdi('Medyapark',tek.dosya,_dt())
+    : exportDosyaAdi('Medyapark', tek?tek.dosya:'Rapor', d.b, d.e);
+  XLSX.utils.book_append_sheet(wb,exportMetaSheet('Medyapark Raporları',null,meta,d.ctx.okunma,
+    uretimGunlu?'Dosya adındaki tarih dışa aktarım günüdür; iş dönemi değildir.'
+               :'Dosya adındaki tarih aralığı iş dönemidir; dosyanın üretildiği gün değildir.'),'Bilgi');
+  return {wb, ad:ad+'.xlsx'};
 }
 async function rapUret(){
   const out=document.getElementById('rapOut'); out.innerHTML='<p class="muted" style="margin-top:14px">Rapor hazırlanıyor…</p>';
-  const d=await rapVeri(); if(!d){ out.innerHTML=''; return; }
-  const S=rapSecim(d);
-  if(!S.length){ out.innerHTML='<div class="banner" style="margin-top:14px">En az bir bölüm seçin.</div>'; return; }
-  const n=await exportSheets('medyapark-rapor-'+d.b+'_'+d.e, S);
-  out.innerHTML=n?`<div class="imp-info" style="margin-top:14px">Rapor indirildi · ${S.filter(x=>x.rows.length).length} sayfa, ${n} satır</div>`:'';
+  let d; try{ d=await rapHazirla(); }catch(err){ out.innerHTML=`<div class="imp-warn" style="margin-top:14px">Rapor okunamadı: ${esc(err.message||err)}</div>`; return; }
+  if(!d){ out.innerHTML=''; return; }
+  if(!d.S.length){ out.innerHTML='<div class="banner" style="margin-top:14px">En az bir rapor seçin.</div>'; return; }
+  try{ await xlsxLoad(); }catch(err){ mpAlert(err.message); out.innerHTML=''; return; }
+  const {wb,ad}=rapKitap(d);
+  XLSX.writeFile(wb, ad);
+  const toplam=d.S.reduce((t,x)=>t+x.rows.length,0);
+  out.innerHTML=`<div class="imp-info" style="margin-top:14px">İndirildi: <b>${esc(ad)}</b> · ${d.S.length} rapor, ${toplam} satır</div>`;
+  return ad;
 }
 
 /* ---------- ANASAYFA ---------- */
