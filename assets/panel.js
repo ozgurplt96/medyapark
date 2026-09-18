@@ -107,7 +107,7 @@ const BELGE_MIME={jpg:'image/jpeg',jpeg:'image/jpeg',png:'image/png',webp:'image
 const BELGE_ACCEPT='image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp,.pdf,.doc,.docx,.xls,.xlsx,.csv,.txt';
 /* `documents` altinda belgenin TUM baglantilari da gelir: "kurumda da var
    mi?" ve "son baglanti mi?" sorulari ek istek acmadan cevaplanir. */
-const BELGE_SEL='document_links(id,document_id,created_by_team_id,documents(id,original_name,title,doc_type,mime_type,size_bytes,provider,storage_path,external_url,uploaded_by_team_id,created_at,note,document_links(id,job_id,entry_id,operation_id,customer_id,quote_id,created_by_team_id)))';
+const BELGE_SEL='document_links(id,document_id,created_by_team_id,documents(id,original_name,title,doc_type,mime_type,size_bytes,provider,storage_path,external_url,uploaded_by_team_id,created_at,note,document_links(id,job_id,entry_id,operation_id,customer_id,quote_id,contract_id,created_by_team_id)))';
 
 const _belgeler=new Map();                 /* id -> doc (acma/menu icin) */
 const _belgeUrl=new Map();                 /* yol|indir -> {url,son} */
@@ -659,19 +659,20 @@ async function api(action, body){
      son baglantiysa belge `detached_at` alir) dosya + metadata temizlenir.
      Baska bir baglami olan belge KORUNUR. RLS 0 satir dondururse bu artik
      sessiz basari degil, acik hatadir. */
-  if(act==='entry_delete'||act==='operation_delete'||act==='job_delete'){
+  if(act==='entry_delete'||act==='operation_delete'||act==='job_delete'||act==='contract_delete'){
     const delId=(q.id!=null&&q.id!=='')?q.id:(body&&body.id);
     if(delId==null||delId==='') throw new Error('Silinecek kayıt belirtilmedi.');
     let bq=sb.from('document_links').select('document_id');
     if(act==='entry_delete') bq=bq.eq('entry_id',delId);
     else if(act==='operation_delete') bq=bq.eq('operation_id',delId);
+    else if(act==='contract_delete') bq=bq.eq('contract_id',delId);
     else {
       const {data:ops}=await sb.from('work_operations').select('id').eq('job_id',delId);
       const oids=(ops||[]).map(o=>o.id);
       bq=bq.or(`job_id.eq.${delId}${oids.length?`,operation_id.in.(${oids.join(',')})`:''}`);
     }
     const {data:bl,error:be}=await bq; if(be)throw be;
-    const {data:sil,error}=await sb.from(DELMAP[act]).delete().eq('id',delId).select('id');
+    const {data:sil,error}=await sb.from(act==='contract_delete'?'contracts':DELMAP[act]).delete().eq('id',delId).select('id');
     if(error)throw error;
     if(!sil||!sil.length) throw new Error('Bu kaydı silme yetkiniz yok.');
     const docIds=[...new Set((bl||[]).map(x=>x.document_id))];
@@ -828,7 +829,7 @@ async function api(action, body){
       const mi=Object.fromEntries((mr.data||[]).map(x=>[x.id,x.name]));
       const ai=Object.fromEntries((ar.data||[]).map(x=>[x.id,x.name]));
       const pi=Object.fromEntries((pr.data||[]).map(x=>[x.id,x.name]));
-      return ok((ur.data||[]).map(u=>({id:u.id,name:u.name,olcu:u.olcu,konum:u.konum,
+      return ok((ur.data||[]).map(u=>({id:u.id,name:u.name,olcu:u.olcu,konum:u.konum,mecra_id:u.mecra_id,
         mecra:mi[u.mecra_id]||'',alt:ai[u.alt_mecra_id]||'',urun:pi[u.product_id]||''})));
     }
     case 'quote_builder_save':{
@@ -868,7 +869,7 @@ async function api(action, body){
       /* S6 §16: Belgeler TEK turda - is, guncellemeler, operasyonlar ve
          teklifler ayni Promise.all icinde baglantilarini gomulu getirir.
          Fiziksel kopya ya da ek baglanti satiri URETILMEZ. */
-      const [j,wp,en,qs,bk,op]=await Promise.all([
+      const [j,wp,en,qs,bk,op,sz]=await Promise.all([
         sb.from('jobs').select('*,'+BELGE_SEL).eq('id',q.id).single(),
         sb.from('work_parties').select('*').eq('job_id',q.id),
         sb.from('entries').select('*,'+BELGE_SEL).eq('job_id',q.id).order('occurred_at',{ascending:false}),
@@ -879,11 +880,16 @@ async function api(action, body){
         sb.from('bookings').select('id,unit_id,ym,status,source_quote_id')
           .eq('work_id',q.id).order('ym'),
         sb.from('work_operations').select('id,operation_type,description,planned_date,'+BELGE_SEL)
-          .eq('job_id',q.id)]);
+          .eq('job_id',q.id),
+        /* S7: yapisal sozlesmeler kalemleri ve belgeleriyle AYNI turda
+           (sozlesme / kalem / belge basina istek YOK). */
+        sb.from('contracts').select('*,contract_items(*),'+BELGE_SEL)
+          .eq('job_id',q.id).order('id',{ascending:false})]);
       if(j.error)throw j.error; if(wp.error)throw wp.error; if(en.error)throw en.error;
       if(qs.error)throw qs.error; if(bk.error)throw bk.error; if(op.error)throw op.error;
+      if(sz.error)throw sz.error;
       return ok({job:j.data, parties:wp.data||[], entries:en.data||[],
-                 quotes:qs.data||[], bookings:bk.data||[], ops:op.data||[]}); }
+                 quotes:qs.data||[], bookings:bk.data||[], ops:op.data||[], contracts:sz.data||[]}); }
     case 'quote_revise':{
       /* Gönderilmiş Offer overwrite edilmez: klon + revision_of_id +
          revision_no artışı (06 §10.2). */
@@ -938,7 +944,7 @@ async function api(action, body){
       let sel=sb.from('entries')
         .select('id,job_id,body,system_kind,created_by_team_id,occurred_at,jobs(title,customer_id)',{count:'exact'})
         .eq('source','system');
-      const GRUP={isler:['work_created','work_phase','work_lifecycle','work_contract','quote_revised','quote_approved','document_added'],
+      const GRUP={isler:['work_created','work_phase','work_lifecycle','work_contract','quote_revised','quote_approved','document_added','contract_created','contract_signed','contract_cancelled'],
                   operasyon:['operation_created','operation_status'],
                   muhasebe:['work_accounting']};
       if(q.tur&&GRUP[q.tur]) sel=sel.in('system_kind',GRUP[q.tur]);
@@ -1008,6 +1014,25 @@ async function api(action, body){
         const {data:dd,error:de}=await sb.from('documents').delete().in('id',[...tamam]).select('id');
         if(de)throw de; silinen=(dd||[]).length; }
       return ok({silinen,kalan:aday.length-silinen}); }
+    /* ---- Sozlesmeler (S7) ----
+       Baslik + kalemler + (belge-once akista) mevcut belge baglantilari TEK
+       islemde yazilir; imzali sozlesmenin kalemsiz kalmamasi COMMIT'te
+       kontrol edilir. Olusturan kimligi sunucuda damgalanir. */
+    case 'contract_save':{
+      const {data,error}=await sb.rpc('contract_save',
+        {p_contract:body.contract, p_items:body.items||[], p_doc_ids:body.doc_ids||[]});
+      if(error)throw error; logYaz(act,{id:data}); return ok({id:data}); }
+    case 'contract_detail':{
+      const {data,error}=await sb.from('contracts').select('*,contract_items(*),'+BELGE_SEL)
+        .eq('id',q.id).single();
+      if(error)throw error; return ok(data); }
+    case 'contract_status':{
+      const patch={status:body.status};
+      if(body.status==='imzali'&&body.signed_at!==undefined) patch.signed_at=body.signed_at||null;
+      const {data,error}=await sb.from('contracts').update(patch).eq('id',body.id).select('id');
+      if(error)throw error;
+      if(!data||!data.length) throw new Error('Bu sözleşmeyi değiştirme yetkiniz yok.');
+      logYaz(act,body); return ok(); }
     case 'entry_save':{
       const row={...body};
       /* `_ilgili` bir entries kolonu DEĞİLDİR: composer'ın "kime özellikle
@@ -1176,7 +1201,7 @@ async function api(action, body){
       /* PS3 §16: kurumun hafızası tek turda gelir - kimlik, kişiler
          (BAĞLANTILAR üzerinden), açık işler, son güncellemeler, geçmiş.
          Kurum başına ek sorgu YOK; ekran başına sabit sayıda okuma. */
-      const [c,af,jb,qt]=await Promise.all([
+      const [c,af,jb,qt,sz]=await Promise.all([
         sb.from('customers').select('*,'+BELGE_SEL).eq('id',q.id).single(),
         sb.from('contact_affiliations')
           .select('id,contact_id,customer_id,title,department,is_primary,active')
@@ -1184,8 +1209,12 @@ async function api(action, body){
         sb.from('jobs').select('id,title,status,lifecycle_status,is_urgent,closed_reason,primary_contact_id,created_at,'+BELGE_SEL)
           .eq('customer_id',q.id).order('id',{ascending:false}),
         sb.from('quotes').select('id,status,total,created_at,revision_no,work_id')
-          .eq('customer_id',q.id).order('id',{ascending:false}).limit(20)]);
+          .eq('customer_id',q.id).order('id',{ascending:false}).limit(20),
+        /* S7: kurumun ticari hafizasi - sinirli, en yeniler once. */
+        sb.from('contracts').select('id,title,reference_no,status,job_id,quote_id,signed_at,currency,vat_mode,created_at,contract_items(item_type,description,unit_id,start_date,end_date,quantity,unit_price,line_total),document_links(id)')
+          .eq('customer_id',q.id).order('id',{ascending:false}).limit(30)]);
       if(c.error)throw c.error; if(af.error)throw af.error; if(jb.error)throw jb.error;
+      if(sz.error)throw sz.error;
       const afl=af.data||[];
       const kids=[...new Set(afl.map(a=>a.contact_id))];
       const jids=(jb.data||[]).map(j=>j.id);
@@ -1203,7 +1232,8 @@ async function api(action, body){
           aff_id:a.id, aff_title:a.title, aff_department:a.department,
           is_primary:a.is_primary, aff_active:a.active}))
         .sort((x,y)=>(y.is_primary?1:0)-(x.is_primary?1:0)||String(x.name||'').localeCompare(String(y.name||''),'tr'));
-      return ok({org:c.data, contacts, jobs:jb.data||[], entries:en.data||[], quotes:qt.data||[]}); }
+      return ok({org:c.data, contacts, jobs:jb.data||[], entries:en.data||[], quotes:qt.data||[],
+                 contracts:sz.data||[]}); }
 
     /* ---- Hafıza: Kişi (PS3 §17) ----
        `contacts` Person kimliğidir; bağlantılar ayrı tabloda. Kişinin
@@ -1672,6 +1702,7 @@ async function renderSection(){
 let _modalOnceki=null;
 function modal(html){
   const m=document.getElementById('modal'), bg=document.getElementById('modalBg');
+  m.classList.remove('mdl-gen');                 /* S7: genis modal bir sonrakine sizmasin */
   m.innerHTML=html;
   m.setAttribute('role','dialog'); m.setAttribute('aria-modal','true'); m.setAttribute('tabindex','-1');
   const b=m.querySelector('h3');
@@ -3351,12 +3382,13 @@ async function workAc(id){
              İlgili'dir, bu yalnızca opsiyonel iş sahipliğidir. Boşsa hiç
              gösterilmez — doldurulması gereken bir alan gibi durmasın. */''}
         ${j.assignee_id?`İş sahibi: ${esc((tm||[]).find(t=>t.id===j.assignee_id)?.name||'—')}<br>`:''}
-        Sözleşme: ${j.contract_status==='signed'?'<span class="pill">İmzalı</span>':j.contract_status==='pending'?'<span class="pill">Bekleniyor</span>':'<span class="pill">Eksik</span>'}
-        ${j.contract_signed_at?' · '+esc(trTarih(j.contract_signed_at)):''}
-        ${j.contract_url?` · <a href="${esc(j.contract_url)}" target="_blank" rel="noopener">Belge</a>`:''}<br>
+        ${/* S7: sozlesme durumu artik YAPISAL kayitlardan okunur. Eski
+             jobs.contract_* alanlari yalniz uyumluluk icindir; yapisal
+             kayit yoksa eski deger "eski kayıt" etiketiyle gosterilir. */''}
+        Sözleşme: ${sozOzetHtml(d.contracts||[],j)}<br>
         Muhasebe: <span class="pill">${esc({yok:'Yok',hazir:'Hazır',gonderildi:'Gönderildi',islendi:'İşlendi'}[j.accounting_status]||j.accounting_status)}</span>
         ${j.accounting_amount?' · '+esc(j.accounting_amount)+' ₺':''}
-        <button class="btn btn-ghost btn-sm" onclick="workMetaForm(${j.id})">Sözleşme / Muhasebe</button>
+        <button class="btn btn-ghost btn-sm" onclick="workMetaForm(${j.id})">Muhasebe</button>
       </div>
     </div>
 
@@ -3377,14 +3409,7 @@ async function workAc(id){
        <button class="btn-link" onclick="partyForm(${j.id})">Taraf ekle</button></p>
       <div id="wParties" hidden></div>`}
 
-    ${d.quotes.length?`<div class="sec-card">
-      <div class="sec-head" style="margin-bottom:10px"><h4 style="font-size:14px;margin:0">Teklifler <span class="chip">${d.quotes.length}</span></h4></div>
-      ${d.quotes.map(o=>`<div class="list-item">
-        <div class="nm">Teklif #${o.id}${o.revision_no>1?` <span class="pill">rev ${o.revision_no}</span>`:''}</div>
-        <div class="meta"><span class="badge-st st-${esc(o.status||'yeni')}">${esc(({yeni:'Yeni',gorusuldu:'Görüşüldü',onaylandi:'Onaylandı',iptal:'İptal'})[o.status]||o.status)}</span> · ${esc(money(o.total))}${o.gecerlilik?' · geçerlilik '+esc(trTarih(o.gecerlilik)):''}</div>
-        <button class="btn btn-outline btn-sm" onclick="quoteView(${o.id})">Aç</button>
-        ${isAdmin()?`<button class="btn btn-outline btn-sm" onclick="quoteRevise(${o.id})">Revize</button>`:''}</div>`).join('')}
-    </div>`:''}
+    <div class="sec-card" id="wTicari"></div>
 
     ${d.bookings.length?`<div class="sec-card">
       <div class="sec-head" style="margin-bottom:10px"><h4 style="font-size:14px;margin:0">Mecra / Doluluk <span class="chip">${d.bookings.length}</span></h4></div>
@@ -3404,7 +3429,7 @@ async function workAc(id){
     <div class="sec-card">
       <div class="sec-head" style="margin-bottom:10px"><h4 style="font-size:14px;margin:0">Zaman Çizelgesi <span class="chip">${d.entries.length}</span></h4></div>
       <div id="wTimeline"></div></div>`;
-  workPartyCiz(); workTimelineCiz(); workOpsCiz(j.id); workBelgeCiz();
+  workPartyCiz(); workTimelineCiz(); workOpsCiz(j.id); workBelgeCiz(); workTicariCiz();
 }
 async function workOpsCiz(jobId){
   const box=document.getElementById('wOps'); if(!box)return;
@@ -3425,6 +3450,383 @@ async function workOpsCiz(jobId){
     </div>`).join('')
     ||'<p class="empty">Bu işe bağlı baskı/montaj kaydı yok.</p>';
 }
+/* ============ SOZLESMELER (S7) =========================================
+   Sozlesme = ticari anlasma (baslik + 1..N kalem). Dosya DEGILDIR; dosyalar
+   S6 belge katmaninda yasar ve `document_links.contract_id` ile baglanir.
+   Bu bolum depolama saglayicisina DOGRUDAN hic dokunmaz: yukleme/acma
+   belgeEkleAc / ekSeridi / belgeAc uzerinden gecer.
+   Kalemler rezervasyon/doluluk/LED yayini URETMEZ (Sprint 8). */
+const SOZ_ST={taslak:'Taslak',imzali:'İmzalı',iptal:'İptal'};
+const SOZ_KALEM=[['mecra','Mecra'],['baski','Baskı'],['montaj','Montaj'],['produksiyon','Prodüksiyon'],['hizmet','Hizmet'],['diger','Diğer']];
+const sozKalemLbl=v=>(SOZ_KALEM.find(x=>x[0]===v)||[null,'Diğer'])[1];
+const SOZ_KDV={haric:'+KDV',dahil:'KDV dahil',belirtilmemis:'KDV belirtilmemiş'};
+const sozGun=v=>v?new Date(String(v).slice(0,10)+'T12:00:00').toLocaleDateString('tr-TR',{day:'numeric',month:'short',year:'numeric'}):'';
+function sozPara(n,cur){
+  const x=Number(n); if(n==null||n===''||!isFinite(x)) return '';
+  try{ return x.toLocaleString('tr-TR',{style:'currency',currency:cur||'TRY',maximumFractionDigits:2}); }
+  catch(e){ return x.toLocaleString('tr-TR')+' '+(cur||''); }
+}
+/* Satir tutari: acikca girilen satir toplami SOZLESMESEL dogrudur; yoksa
+   adet x birim fiyattan turetilir. Girilmis tutar asla yeniden hesaplanmaz. */
+function sozSatirTutar(i){
+  if(i.line_total!=null&&i.line_total!=='') return +i.line_total;
+  if(i.unit_price!=null&&i.unit_price!=='') return (+i.quantity||1)*(+i.unit_price);
+  return null;
+}
+function sozToplam(c){
+  const it=c.contract_items||[]; let t=0, bilinen=0;
+  it.forEach(i=>{ const v=sozSatirTutar(i); if(v!=null){ t+=v; bilinen++; } });
+  return {toplam:bilinen?t:null, eksik:it.length-bilinen};
+}
+function sozDonem(c){
+  const it=(c.contract_items||[]);
+  const bas=it.map(i=>i.start_date).filter(Boolean).sort()[0]||null;
+  const son=it.map(i=>i.end_date).filter(Boolean).sort().slice(-1)[0]||null;
+  return {bas,son};
+}
+/* Zamansal durum TURETILIR (§47): elle "aktif/suresi doldu" saklanmaz.
+   "Yayında" kelimesi Work fazi ile karismasin diye KULLANILMAZ. */
+function sozDurum(c){
+  if(c.status==='iptal') return {k:'iptal',lbl:'İptal',cls:''};
+  if(c.status==='taslak') return {k:'taslak',lbl:'Taslak',cls:'sand'};
+  const {bas,son}=sozDonem(c); const bugun=_cIso(new Date());
+  /* Aktif donem notr; yalniz suresi dolan dikkat rengi alir (uyari degil sinyal). */
+  if(bas&&bugun<bas) return {k:'baslamadi',lbl:'İmzalı · Başlamadı',cls:''};
+  if(son&&bugun>son) return {k:'bitti',lbl:'İmzalı · Süresi doldu',cls:'clay'};
+  if(bas||son) return {k:'devam',lbl:'İmzalı · Devam ediyor',cls:''};
+  return {k:'imzali',lbl:'İmzalı',cls:''};
+}
+function sozDonemYazi(c){ const {bas,son}=sozDonem(c);
+  return bas||son?`${sozGun(bas)||'?'} – ${sozGun(son)||'?'}`:''; }
+/* Karma sozlesme OZETI: adetler tur bazinda ayri kalir (1 Megalight +
+   11 Raket, "12 adet" DEGIL). */
+function sozKalemOzet(c){
+  const it=c.contract_items||[]; if(!it.length) return 'Kalem yok';
+  const U=ui._sozUnits||{};
+  const grup={};
+  it.forEach(i=>{ const u=U[i.unit_id];
+    const ad=(u&&u.urun)||String(i.description||sozKalemLbl(i.item_type)).split(/[—\-·,(]/)[0].trim().slice(0,28)||sozKalemLbl(i.item_type);
+    grup[ad]=(grup[ad]||0)+(+i.quantity||1); });
+  const parca=Object.entries(grup).map(([k,v])=>`${k} ×${String(v).replace(/\.0+$/,'')}`);
+  return it.length+' kalem · '+(parca.length>3?parca.slice(0,3).join(', ')+' …':parca.join(', '));
+}
+function sozBelgeSayi(c){ return (c.document_links||[]).length; }
+function sozSatirHtml(c,opt){
+  opt=opt||{}; const du=sozDurum(c); const {toplam}=sozToplam(c); const bs=sozBelgeSayi(c);
+  const belgeAdlari=(c.document_links||[]).map(l=>l.documents).filter(Boolean).map(belgeKaydet);
+  return `<div class="sz-row" role="button" tabindex="0" onclick="sozAc(${c.id})" onkeydown="if(event.key==='Enter')sozAc(${c.id})">
+    <div class="sz-b">
+      <div class="sz-t">${esc(c.title)}${c.reference_no?` <span class="sz-ref">${esc(c.reference_no)}</span>`:''}${opt.isAdi?` <span class="sz-ref">· ${esc(opt.isAdi)}</span>`:''}</div>
+      <div class="sz-s"><span class="pill ${du.cls}">${esc(du.lbl)}</span>
+        ${sozDonemYazi(c)?`<span>${esc(sozDonemYazi(c))}</span>`:''}
+        <span>${esc(sozKalemOzet(c))}</span>
+        ${toplam!=null?`<b>${esc(sozPara(toplam,c.currency))}</b> <span>${esc(SOZ_KDV[c.vat_mode]||'')}</span>`:''}</div>
+    </div>
+    <div class="sz-d">${bs?(belgeAdlari.length===1?`<span class="bl-nm" title="${esc(belgeAd(belgeAdlari[0]))}">📎 ${esc(belgeAd(belgeAdlari[0]))}</span>`:`📎 ${bs} belge`)
+      :'<span class="muted">Belge yok</span>'}</div>
+  </div>`;
+}
+/* Work > Durum satiri ozeti. Yapisal kayit yoksa eski alan (uyumluluk). */
+function sozOzetHtml(list,j){
+  const akt=list.filter(c=>c.status!=='iptal');
+  if(list.length){
+    const imz=akt.filter(c=>c.status==='imzali');
+    const du=imz.length?sozDurum(imz[0]):akt.length?sozDurum(akt[0]):{lbl:'İptal',cls:''};
+    return `<span class="pill ${du.cls}">${esc(du.lbl)}</span> <span class="muted">· ${list.length} sözleşme kaydı</span>`;
+  }
+  const eski={signed:'İmzalı',pending:'Bekleniyor',missing:'Eksik'}[j.contract_status]||'Eksik';
+  return j.contract_status&&j.contract_status!=='missing'
+    ?`<span class="pill">${eski}</span> <span class="muted" title="Yapısal sözleşme kaydı yok; eski iş alanından okunuyor">· eski kayıt</span>`
+    :'<span class="pill">Sözleşme kaydı yok</span>';
+}
+/* Work Detail > Ticari: Teklifler (yapisal + teklif belgeleri) ve
+   Sozlesmeler (yapisal + henuz kayda baglanmamis sozlesme belgeleri). */
+async function workTicariCiz(){
+  const box=document.getElementById('wTicari'); if(!box) return;
+  const d=ui._workDetay; if(!d) return; const j=d.job;
+  await sozUnitYukle();
+  const belgeler=workBelgeListe(d);
+  const teklifBelge=belgeler.filter(x=>x.doc.doc_type==='teklif');
+  const sozBelge=belgeler.filter(x=>x.doc.doc_type==='sozlesme'&&!(x.doc.document_links||[]).some(l=>l.contract_id));
+  const qs=d.quotes||[], cs=d.contracts||[];
+  const QST={yeni:'Yeni',gorusuldu:'Görüşüldü',onaylandi:'Onaylandı',iptal:'İptal'};
+  box.innerHTML=`<div class="sec-head" style="margin-bottom:10px">
+      <h4 style="font-size:14px;margin:0">Ticari</h4>
+      <button class="btn btn-outline btn-sm" onclick="sozForm({jobId:${j.id},custId:${j.customer_id||0}})">${ic('plus',15)} Sözleşme</button></div>
+    <div class="tc-g">
+      <div class="tc-h">Sözleşmeler <span class="chip">${cs.length}</span></div>
+      ${cs.length?cs.map(c=>sozSatirHtml(c)).join(''):'<p class="empty">Bu işe bağlı sözleşme kaydı yok.</p>'}
+      ${sozBelge.length?`<div class="tc-not">Kayda bağlanmamış sözleşme belgesi:</div>
+        ${sozBelge.map(x=>`<div class="tc-dok">${belgeCip(x.doc)}
+          <button class="btn btn-ghost btn-sm" onclick="sozForm({docId:${x.doc.id},jobId:${j.id},custId:${j.customer_id||0}})">Sözleşme kaydı oluştur</button></div>`).join('')}`:''}
+    </div>
+    <div class="tc-g">
+      <div class="tc-h">Teklifler <span class="chip">${qs.length}</span>${teklifBelge.length?` <span class="muted" style="font-weight:500">· ${teklifBelge.length} teklif belgesi</span>`:''}</div>
+      ${qs.map(o=>`<div class="list-item">
+        <div class="nm">Teklif #${o.id}${o.revision_no>1?` <span class="pill">rev ${o.revision_no}</span>`:''}</div>
+        <div class="meta"><span class="badge-st st-${esc(o.status||'yeni')}">${esc(QST[o.status]||o.status)}</span> · ${esc(money(o.total))}${o.gecerlilik?' · geçerlilik '+esc(trTarih(o.gecerlilik)):''}</div>
+        <button class="btn btn-outline btn-sm" onclick="quoteView(${o.id})">Aç</button>
+        ${isAdmin()?`<button class="btn btn-outline btn-sm" onclick="quoteRevise(${o.id})">Revize</button>`:''}</div>`).join('')}
+      ${teklifBelge.length?`<div class="bl-strip">${teklifBelge.map(x=>belgeCip(x.doc)).join('')}</div>`:''}
+      ${!qs.length&&!teklifBelge.length?'<p class="empty">Yapısal teklif ya da teklif belgesi yok.</p>':''}
+      ${!qs.length&&teklifBelge.length?'<p class="fhint">Teklif belgesi bir dosyadır; yapısal teklif kaydı değildir.</p>':''}
+    </div>`;
+}
+/* Kurum > Ticari: once guncel/aktif, sonra en yeniler; kisa. */
+function orgTicariKart(d){
+  const cs=(d.contracts||[]).slice();
+  const agir=c=>({devam:0,baslamadi:1,taslak:2,imzali:3,bitti:4,iptal:5})[sozDurum(c).k];
+  cs.sort((a,b)=>agir(a)-agir(b)||b.id-a.id);
+  const jm={}; (d.jobs||[]).forEach(j=>jm[j.id]=j.title);
+  const tum=!!ui._orgSozTum, gos=tum?cs:cs.slice(0,5);
+  return `<div class="sec-card">
+    <div class="sec-head" style="margin-bottom:10px">
+      <h4 style="font-size:14px;margin:0">Ticari <span class="chip">${cs.length} sözleşme</span>${(d.quotes||[]).length?` <span class="chip">${d.quotes.length} teklif</span>`:''}</h4>
+      <button class="btn btn-outline btn-sm" onclick="sozForm({custId:${d.org.id}})">${ic('plus',15)} Sözleşme</button></div>
+    ${gos.length?gos.map(c=>sozSatirHtml(c,{isAdi:c.job_id?orgKisa(jm[c.job_id]||'',36):''})).join('')
+      :'<p class="empty">Bu kurumla sözleşme kaydı yok.</p>'}
+    ${cs.length>5?`<button type="button" class="btn-link" onclick="ui._orgSozTum=${!tum};orgAc(${d.org.id})">${tum?'Daha az göster':'Tümünü göster ('+cs.length+')'}</button>`:''}
+    ${(d.quotes||[]).length?'<p class="fhint">Yapısal teklifler aşağıda Geçmiş bölümünde.</p>':''}
+  </div>`;
+}
+async function sozUnitYukle(){
+  if(ui._sozUnits) return ui._sozUnits;
+  const u=await api('units_full').catch(()=>[]);
+  ui._sozUnitList=u||[]; ui._sozUnits={}; (u||[]).forEach(x=>ui._sozUnits[x.id]=x);
+  return ui._sozUnits;
+}
+const sozUnitAd=u=>u?[u.mecra,u.urun,u.name].filter(Boolean).join(' · '):'';
+
+/* ---- Sozlesme detayi ---- */
+async function sozAc(id){
+  const [c]=await guard(()=>Promise.all([api('contract_detail&id='+id),sozUnitYukle()]),'Sözleşme açılamadı')||[];
+  if(!c) return;
+  ui._soz=c;
+  const cu=(ui._cust||[]).find(x=>x.id===c.customer_id);
+  const jb=c.job_id?((ui._jobs||[]).find(x=>x.id===c.job_id)||(ui._work&&ui._work.id===c.job_id?ui._work:null)):null;
+  const du=sozDurum(c); const {toplam,eksik}=sozToplam(c);
+  const it=(c.contract_items||[]).slice().sort((a,b)=>a.sort-b.sort||a.id-b.id);
+  const benim=(ui._me&&ui._me.id)||0;
+  const silinebilir=c.status==='taslak'&&(isAdmin()||c.created_by_team_id===benim);
+  const kdvli=toplam!=null&&c.vat_mode==='haric'&&c.vat_rate!=null?toplam*(1+(+c.vat_rate)/100):null;
+  const docs=(c.document_links||[]).map(l=>l.documents).filter(Boolean);
+  modal(`<div class="sz-dh">
+      <div><h3 style="margin:0">${esc(c.title)}</h3>
+        <p class="muted" style="margin:4px 0 0;font-size:12.5px">${c.reference_no?esc(c.reference_no)+' · ':''}<span class="pill ${du.cls}">${esc(du.lbl)}</span>${c.signed_at?' · imza '+esc(sozGun(c.signed_at)):''}${c.cancelled_at?' · iptal '+esc(sozGun(c.cancelled_at)):''}</p></div>
+    </div>
+    <div class="sz-sec"><div class="tc-h">Bağlam</div>
+      <div class="meta" style="line-height:1.9">
+        Kurum: <button type="button" class="btn-link" onclick="closeModal();orgAc(${c.customer_id})">${esc((cu&&cu.firma)||('#'+c.customer_id))}</button><br>
+        İş: ${c.job_id?`<button type="button" class="btn-link" onclick="closeModal();workAc(${c.job_id})">${esc((jb&&jb.title)||('#'+c.job_id))}</button>`:'<span class="muted">kurum düzeyinde (işe bağlı değil)</span>'}<br>
+        Teklif: ${c.quote_id?`<button type="button" class="btn-link" onclick="closeModal();quoteView(${c.quote_id})">Teklif #${c.quote_id}</button>`:'<span class="muted">bağlı değil</span>'}
+      </div></div>
+    <div class="sz-sec"><div class="tc-h">Kalemler <span class="chip">${it.length}</span></div>
+      ${it.length?`<div class="sz-tw"><table class="tbl sz-tbl"><thead><tr><th>Tür</th><th>Kapsam</th><th style="text-align:right">Adet</th><th>Dönem</th><th style="text-align:right">Birim</th><th style="text-align:right">Tutar</th></tr></thead><tbody>
+        ${it.map(i=>{ const u=ui._sozUnits[i.unit_id]; const v=sozSatirTutar(i);
+          return `<tr><td>${esc(sozKalemLbl(i.item_type))}</td>
+            <td><b>${esc(i.description||sozUnitAd(u)||'—')}</b>${u&&i.description?`<div class="sz-sub">${esc(sozUnitAd(u))}</div>`:''}${i.note?`<div class="sz-sub">${esc(i.note)}</div>`:''}</td>
+            <td style="text-align:right">${esc(String(i.quantity).replace(/\.0+$/,''))}</td>
+            <td>${i.start_date||i.end_date?esc(sozGun(i.start_date)+' – '+sozGun(i.end_date)):''}${i.duration_note?`<div class="sz-sub">${esc(i.duration_note)}</div>`:''}</td>
+            <td style="text-align:right">${esc(sozPara(i.unit_price,c.currency))}</td>
+            <td style="text-align:right"><b>${esc(sozPara(v,c.currency))}</b></td></tr>`; }).join('')}
+        </tbody></table></div>
+        <div class="sz-top"><span>Toplam ${esc(SOZ_KDV[c.vat_mode]||'')}</span><b>${esc(sozPara(toplam,c.currency)||'—')}</b>
+          ${kdvli!=null?`<span class="muted">KDV dahil (%${esc(String(+c.vat_rate))}) ≈ ${esc(sozPara(kdvli,c.currency))}</span>`:''}
+          ${eksik?`<span class="muted">${eksik} kalemde tutar yok</span>`:''}</div>`
+        :'<p class="empty">Henüz kalem yok. Taslak boş kalabilir; imzalı sözleşmenin en az bir kalemi olmalı.</p>'}
+      <p class="fhint">Kalemler ticari kayıttır; rezervasyon, doluluk ya da LED yayını oluşturmaz.</p></div>
+    ${c.payment_terms||c.note?`<div class="sz-sec"><div class="tc-h">Ödeme ve notlar</div>
+      ${c.payment_terms?`<p class="sz-pre"><b>Ödeme:</b> ${esc(c.payment_terms)}</p>`:''}
+      ${c.note?`<p class="sz-pre">${esc(c.note)}</p>`:''}</div>`:''}
+    <div class="sz-sec"><div class="tc-h">Belgeler <span class="chip">${docs.length}</span>
+        <button type="button" class="btn btn-outline btn-sm" style="margin-left:auto" onclick="belgeEkleAc({contractId:${c.id},baslik:${esc(JSON.stringify(c.title))}})">${ic('plus',15)} Belge Ekle</button></div>
+      ${docs.length?ekSeridi(c.document_links):'<p class="empty">Belge yok. İmzalı kopya geldiğinde eklenebilir.</p>'}</div>
+    <div class="sz-act">
+      ${silinebilir?`<button class="btn btn-danger btn-sm" style="margin-right:auto" onclick="sozSil(${c.id})">Taslağı sil</button>`:''}
+      ${c.status!=='iptal'?`<button class="btn btn-ghost btn-sm" onclick="sozIptal(${c.id})">İptal et</button>`:''}
+      ${c.status==='taslak'?`<button class="btn btn-outline btn-sm" onclick="sozImzala(${c.id})">İmzalı işaretle</button>`:''}
+      ${c.status!=='iptal'||isAdmin()?`<button class="btn btn-primary btn-sm" onclick="sozForm({id:${c.id}})">Düzenle</button>`:''}
+      <button class="btn btn-ghost btn-sm" onclick="closeModal()">Kapat</button></div>`);
+  const m=document.getElementById('modal'); if(m) m.classList.add('mdl-gen');
+}
+async function sozImzala(id){
+  const c=ui._soz; if(!c) return;
+  if(!(c.contract_items||[]).length){ mpAlert('İmzalı bir sözleşmenin en az bir kalemi olmalı. Önce kalem ekleyin.','Sözleşme'); return; }
+  if(!await mpConfirm('“'+c.title+'” imzalı olarak işaretlensin mi? İmza tarihi bugün olarak yazılır (Düzenle ile değiştirilebilir).','İmzalı işaretle',{danger:false,ok:'İmzalı işaretle'})) return;
+  const r=await guard(()=>api('contract_status',{id,status:'imzali',signed_at:c.signed_at||_cIso(new Date())}),'İşaretlenemedi'); if(r===null) return;
+  toast('Sözleşme imzalı olarak işaretlendi.'); await ekranTazele(); sozAc(id);
+}
+async function sozIptal(id){
+  const c=ui._soz; if(!c) return;
+  if(!await mpConfirm('“'+c.title+'” iptal edilsin mi? İptal edilen sözleşme geçmiş olarak kalır, silinmez ve yeniden açılamaz.','Sözleşmeyi iptal et',{danger:true,ok:'İptal et'})) return;
+  const r=await guard(()=>api('contract_status',{id,status:'iptal'}),'İptal edilemedi'); if(r===null) return;
+  toast('Sözleşme iptal edildi.'); await ekranTazele(); sozAc(id);
+}
+async function sozSil(id){
+  if(!await mpConfirm('Bu taslak sözleşme kalıcı olarak silinsin mi? Yalnız ona bağlı belgeler de silinir; başka yere bağlı belgeler kalır.','Taslağı sil',{danger:true,ok:'Sil'})) return;
+  const r=await guard(()=>api('contract_delete&id='+id),'Silinemedi'); if(r===null) return;
+  closeModal(); toast('Taslak silindi.'); ekranTazele();
+}
+
+/* ---- Sozlesme olustur / duzenle: baslik + tekrarlayan kalem satirlari ---- */
+async function sozForm(ctx){
+  ctx=ctx||{};
+  const veri=await guard(()=>Promise.all([
+    ctx.id?api('contract_detail&id='+ctx.id):Promise.resolve(null),
+    api('customers_list'), api('jobs_list'), sozUnitYukle(),
+    api('quotes_list').catch(()=>[])]),'Form açılamadı');
+  if(!veri) return;
+  const [c0,cu,jobs,,qts]=veri;
+  ui._cust=cu||[]; ui._jobs=jobs||[];
+  const c=c0||{status:'taslak',currency:'TRY',vat_mode:'haric',vat_rate:20,contract_items:[]};
+  const custId=c.customer_id||ctx.custId||((jobs||[]).find(j=>j.id===ctx.jobId)||{}).customer_id||0;
+  const jobId=c0?c.job_id:(ctx.jobId||0);
+  const doc=ctx.docId?_belgeler.get(ctx.docId):null;
+  ui._szQuotes=qts||[];
+  ui._szForm={id:c.id||0,docIds:ctx.docId?[ctx.docId]:[]};
+  ui._szSatir=(c.contract_items||[]).slice().sort((a,b)=>a.sort-b.sort||a.id-b.id)
+    .map(i=>({...i,_k:'k'+i.id,_elle:i.line_total!=null}));
+  if(!ui._szSatir.length&&!c0) ui._szSatir=[{_k:'y'+Date.now(),item_type:'mecra',quantity:1}];
+  const opt=(arr,val,lbl,bos)=>`${bos?`<option value="">${bos}</option>`:''}`+arr.map(x=>`<option value="${x.id}" ${String(val)===String(x.id)?'selected':''}>${esc(lbl(x))}</option>`).join('');
+  modal(`<h3 style="margin:0 0 4px">${c.id?'Sözleşmeyi düzenle':'Yeni sözleşme kaydı'}</h3>
+    <p class="muted" style="font-size:12.5px;margin:0 0 12px">Ticari anlaşmanın yapısal kaydı. Dosya ayrıca Belgeler'den eklenir; kalemler rezervasyon oluşturmaz.</p>
+    ${doc?`<div class="qc-ctx"><span class="qc-lbl">Belge</span><b>${esc(belgeAd(doc))}</b><em>bu kayda bağlanacak (yeniden yüklenmez)</em></div>`:''}
+    <div class="row2">
+      <div class="field"><label class="flabel" for="szOrg">Kurum *</label>
+        <select class="inp" id="szOrg" onchange="sozOrgDegis()">${opt((cu||[]).slice().sort((a,b)=>String(a.firma||'').localeCompare(String(b.firma||''),'tr')),custId,x=>x.firma||('#'+x.id),'— kurum seçin —')}</select></div>
+      <div class="field"><label class="flabel" for="szJob">İş</label>
+        <select class="inp" id="szJob" onchange="sozIsDegis()"></select>
+        <p class="fhint">Kurum düzeyindeki çerçeve anlaşmalar işe bağlanmadan kaydedilebilir.</p></div></div>
+    <div class="row2">
+      <div class="field"><label class="flabel" for="szTitle">Başlık *</label>
+        <input class="inp" id="szTitle" value="${esc(c.title||'')}" placeholder="ör. M1 Adana AVM — Eylül kampanyası"></div>
+      <div class="field"><label class="flabel" for="szRef">Referans / sözleşme no</label>
+        <input class="inp" id="szRef" value="${esc(c.reference_no||'')}"></div></div>
+    <div class="row2">
+      <div class="field"><label class="flabel" for="szSt">Durum</label>
+        <select class="inp" id="szSt">${[['taslak','Taslak'],['imzali','İmzalı']].concat(c.status==='iptal'?[['iptal','İptal']]:[]).map(o=>`<option value="${o[0]}" ${c.status===o[0]?'selected':''}>${o[1]}</option>`).join('')}</select></div>
+      <div class="field"><label class="flabel" for="szSigned">İmza tarihi</label>
+        <input class="inp" type="date" id="szSigned" value="${esc(c.signed_at||'')}"></div></div>
+    <div class="row2">
+      <div class="field"><label class="flabel" for="szQuote">İlgili yapısal teklif</label>
+        <select class="inp" id="szQuote"></select>
+        <p class="fhint">Yalnız açık bağlantı; otomatik eşleştirme yapılmaz.</p></div>
+      <div class="field"><label class="flabel">Para birimi · KDV</label>
+        <div style="display:flex;gap:6px">
+          <select class="inp" id="szCur" style="max-width:90px">${['TRY','USD','EUR'].map(x=>`<option ${c.currency===x?'selected':''}>${x}</option>`).join('')}</select>
+          <select class="inp" id="szVat">${Object.entries(SOZ_KDV).map(([k,v])=>`<option value="${k}" ${c.vat_mode===k?'selected':''}>${v}</option>`).join('')}</select>
+          <input class="inp" id="szVatR" type="number" min="0" max="100" step="1" style="max-width:74px" aria-label="KDV oranı %" value="${c.vat_rate!=null?esc(c.vat_rate):''}" placeholder="%"></div></div></div>
+
+    <div class="tc-h" style="margin-top:6px">Kalemler</div>
+    <div class="sz-ed" id="szKalem"></div>
+    <div style="display:flex;gap:8px;align-items:center;margin:6px 0 12px">
+      <button type="button" class="btn btn-outline btn-sm" onclick="sozSatirEkle()">${ic('plus',15)} Kalem ekle</button>
+      <span class="fhint" id="szTop" style="margin:0 0 0 auto"></span></div>
+
+    <div class="field"><label class="flabel" for="szPay">Ödeme koşulları</label>
+      <textarea class="inp" id="szPay" rows="2" placeholder="ör. Fatura tarihinden itibaren 90 gün vadeli çek">${esc(c.payment_terms||'')}</textarea></div>
+    <div class="field"><label class="flabel" for="szNote">Not</label>
+      <textarea class="inp" id="szNote" rows="2">${esc(c.note||'')}</textarea></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button class="btn btn-ghost btn-sm" onclick="closeModal()">Vazgeç</button>
+      <button class="btn btn-primary btn-sm" onclick="sozKaydet()">Kaydet</button></div>`);
+  const m=document.getElementById('modal'); if(m) m.classList.add('mdl-gen');
+  sozOrgDegis(jobId, c.quote_id||ctx.quoteId||'');
+  sozSatirCiz();
+  const t=document.getElementById('szTitle'); if(t&&!t.value&&doc) t.value=belgeAd(doc).replace(/\.[a-z0-9]{2,5}$/i,'');
+}
+function sozOrgDegis(jobSec,quoteSec){
+  const org=+gv('szOrg')||0;
+  const js=document.getElementById('szJob'), qs=document.getElementById('szQuote'); if(!js||!qs) return;
+  const cur=jobSec!==undefined?jobSec:+gv('szJob');
+  const isler=(ui._jobs||[]).filter(j=>org&&j.customer_id===org);
+  js.innerHTML=`<option value="">— işe bağlı değil —</option>`+isler.map(j=>`<option value="${j.id}" ${String(cur)===String(j.id)?'selected':''}>${esc(j.title)}</option>`).join('');
+  const qcur=quoteSec!==undefined?quoteSec:gv('szQuote');
+  const jid=+js.value||0;
+  const qlist=(ui._szQuotes||[]).filter(q=>(org&&q.customer_id===org)||(jid&&q.work_id===jid)||String(q.id)===String(qcur));
+  qs.innerHTML=`<option value="">— bağlı değil —</option>`+qlist.map(q=>`<option value="${q.id}" ${String(qcur)===String(q.id)?'selected':''}>Teklif #${q.id}${q.revision_no>1?' rev '+q.revision_no:''} · ${esc(money(q.total))}</option>`).join('');
+}
+function sozIsDegis(){ sozOrgDegis(+gv('szJob'), gv('szQuote')); }
+function sozSatirOku(){
+  document.querySelectorAll('#szKalem .sz-er').forEach(r=>{
+    const s=ui._szSatir.find(x=>x._k===r.dataset.k); if(!s) return;
+    const g=n=>{ const e=r.querySelector('[data-f="'+n+'"]'); return e?e.value:''; };
+    s.item_type=g('item_type'); s.description=g('description'); s.unit_id=g('unit_id')||null;
+    s.quantity=g('quantity'); s.start_date=g('start_date')||null; s.end_date=g('end_date')||null;
+    s.duration_note=g('duration_note'); s.unit_price=g('unit_price'); s.line_total=g('line_total');
+  });
+}
+function sozSatirCiz(){
+  const box=document.getElementById('szKalem'); if(!box) return;
+  const L=ui._sozUnitList||[];
+  const gr={}; L.forEach(u=>{ const k=(u.mecra||'—')+' · '+(u.urun||''); (gr[k]=gr[k]||[]).push(u); });
+  const uOpt=sel=>`<option value="">— envanter bağlantısı yok —</option>`+Object.entries(gr).map(([k,us])=>
+    `<optgroup label="${esc(k)}">${us.map(u=>`<option value="${u.id}" ${String(sel)===String(u.id)?'selected':''}>${esc(u.name)} · ${esc(u.urun||'')}${u.olcu?' · '+esc(u.olcu):''}</option>`).join('')}</optgroup>`).join('');
+  box.innerHTML=ui._szSatir.length?ui._szSatir.map((s,ix)=>`<div class="sz-er" data-k="${s._k}">
+      <div class="sz-r1">
+        <select class="inp inp-sm" data-f="item_type" aria-label="Kalem türü">${SOZ_KALEM.map(t=>`<option value="${t[0]}" ${s.item_type===t[0]?'selected':''}>${t[1]}</option>`).join('')}</select>
+        <input class="inp inp-sm" data-f="description" aria-label="Kapsam / açıklama" placeholder="Kapsam — ör. Megalight P3-A / Kurttepe duvar 4,3×4,7 m / LED 15 sn" value="${esc(s.description||'')}">
+        <select class="inp inp-sm sz-unit" data-f="unit_id" aria-label="Envanter pozisyonu (isteğe bağlı)">${uOpt(s.unit_id)}</select>
+        <button type="button" class="ek-x" aria-label="Kalemi çıkar" onclick="sozSatirSil('${s._k}')">✕</button></div>
+      <div class="sz-r2">
+        <label>Adet<input class="inp inp-sm" data-f="quantity" type="number" min="0.01" step="0.01" value="${esc(s.quantity??1)}" oninput="sozTutarVarsay('${s._k}')"></label>
+        <label>Başlangıç<input class="inp inp-sm" data-f="start_date" type="date" value="${esc(s.start_date||'')}"></label>
+        <label>Bitiş<input class="inp inp-sm" data-f="end_date" type="date" value="${esc(s.end_date||'')}"></label>
+        <label>Süre notu<input class="inp inp-sm" data-f="duration_note" placeholder="12 Ay" value="${esc(s.duration_note||'')}"></label>
+        <label>Birim fiyat<input class="inp inp-sm" data-f="unit_price" type="number" min="0" step="0.01" value="${esc(s.unit_price??'')}" oninput="sozTutarVarsay('${s._k}')"></label>
+        <label>Satır tutarı<input class="inp inp-sm" data-f="line_total" type="number" min="0" step="0.01" value="${esc(s.line_total??'')}" oninput="sozTutarElle('${s._k}')"></label>
+      </div></div>`).join('')
+    :'<p class="empty">Kalem yok. Taslak boş kaydedilebilir.</p>';
+  sozTopCiz();
+}
+function sozSatirEkle(){ sozSatirOku(); ui._szSatir.push({_k:'y'+Date.now()+Math.random().toString(36).slice(2,5),item_type:'mecra',quantity:1}); sozSatirCiz();
+  const r=[...document.querySelectorAll('#szKalem .sz-er')].pop(); if(r){ const d=r.querySelector('[data-f="description"]'); if(d) d.focus(); } }
+function sozSatirSil(k){ sozSatirOku(); ui._szSatir=ui._szSatir.filter(x=>x._k!==k); sozSatirCiz(); }
+/* Adet x birim fiyat yalniz satir tutari ELLE girilmediyse varsayilan olur. */
+function sozTutarVarsay(k){
+  sozSatirOku(); const s=ui._szSatir.find(x=>x._k===k); if(!s) return;
+  if(!s._elle&&s.unit_price!==''&&s.unit_price!=null){
+    const v=(+s.quantity||1)*(+s.unit_price);
+    const e=document.querySelector(`.sz-er[data-k="${k}"] [data-f="line_total"]`);
+    if(e&&isFinite(v)){ e.value=String(Math.round(v*100)/100); s.line_total=e.value; }
+  }
+  sozTopCiz();
+}
+function sozTutarElle(k){ const s=ui._szSatir.find(x=>x._k===k); if(s) s._elle=true; sozSatirOku(); sozTopCiz(); }
+function sozTopCiz(){
+  const el=document.getElementById('szTop'); if(!el) return;
+  const t=sozToplam({contract_items:ui._szSatir.map(s=>({...s,line_total:s.line_total===''?null:s.line_total,unit_price:s.unit_price===''?null:s.unit_price}))});
+  el.textContent=t.toplam!=null?`Kalem toplamı: ${sozPara(t.toplam,gv('szCur')||'TRY')} ${SOZ_KDV[gv('szVat')]||''}`:'';
+}
+async function sozKaydet(){
+  sozSatirOku();
+  const org=+gv('szOrg'), title=(gv('szTitle')||'').trim(), st=gv('szSt');
+  if(!org){ mpAlert('Kurum seçimi zorunlu.','Sözleşme'); return; }
+  if(!title){ mpAlert('Başlık zorunlu.','Sözleşme'); return; }
+  const satir=ui._szSatir.filter(s=>(s.description||'').trim()||s.unit_id);
+  const bos=ui._szSatir.length-satir.length;
+  if(bos&&!await mpConfirm(bos+' kalemde kapsam ya da envanter bağlantısı yok; bu kalemler kaydedilmeyecek. Devam edilsin mi?','Boş kalem',{danger:false,ok:'Devam'})) return;
+  if(st==='imzali'&&!satir.length){ mpAlert('İmzalı bir sözleşmenin en az bir kalemi olmalı.','Sözleşme'); return; }
+  for(const s of satir){ if(s.start_date&&s.end_date&&s.end_date<s.start_date){ mpAlert('Bir kalemde bitiş tarihi başlangıçtan önce.','Sözleşme'); return; } }
+  const U=ui._sozUnits||{};
+  const items=satir.map((s,ix)=>({id:s.id||null,item_type:s.item_type||'mecra',description:(s.description||'').trim()||null,
+    unit_id:s.unit_id?+s.unit_id:null,mecra_id:s.unit_id&&U[s.unit_id]?U[s.unit_id].mecra_id:null,
+    quantity:s.quantity===''||s.quantity==null?1:+s.quantity,start_date:s.start_date||null,end_date:s.end_date||null,
+    duration_note:(s.duration_note||'').trim()||null,unit_price:s.unit_price===''||s.unit_price==null?null:+s.unit_price,
+    line_total:s.line_total===''||s.line_total==null?null:+s.line_total,note:s.note||null,sort:ix}));
+  const vr=gv('szVatR');
+  const contract={id:ui._szForm.id||null,customer_id:org,job_id:+gv('szJob')||null,quote_id:+gv('szQuote')||null,
+    title,reference_no:gv('szRef'),status:st,
+    signed_at:gv('szSigned')||(st==='imzali'?_cIso(new Date()):null),
+    currency:gv('szCur')||'TRY',vat_mode:gv('szVat')||'haric',vat_rate:vr===''?null:+vr,
+    payment_terms:gv('szPay'),note:gv('szNote')};
+  modalBusy(true);
+  const r=await guard(()=>api('contract_save',{contract,items,doc_ids:ui._szForm.docIds}),'Sözleşme kaydedilemedi');
+  modalBusy(false); if(r===null) return;
+  closeModal(); toast(ui._szForm.id?'Sözleşme güncellendi.':'Sözleşme kaydı oluşturuldu.');
+  await ekranTazele(); sozAc(r.id);
+}
+
 /* ============ BELGELER: Work ve Kurum yuzeyi (S6 §35-§41) ============= */
 const BELGE_GRUP=[
   ['tumu','Tümü',()=>true],
@@ -3449,6 +3851,7 @@ function workBelgeListe(d){
   (d.entries||[]).forEach(e=>(e.document_links||[]).forEach(l=>ekle(l,'Güncelleme')));
   (d.ops||[]).forEach(o=>(o.document_links||[]).forEach(l=>ekle(l,opTypeLbl(o.operation_type))));
   (d.quotes||[]).forEach(q=>(q.document_links||[]).forEach(l=>ekle(l,'Teklif #'+q.id)));
+  (d.contracts||[]).forEach(c=>(c.document_links||[]).forEach(l=>ekle(l,'Sözleşme kaydı')));
   return [...m.values()].sort((a,b)=>String(b.doc.created_at||'').localeCompare(String(a.doc.created_at||'')));
 }
 function belgeSatirHtml(x,ctx){
@@ -3520,10 +3923,12 @@ function orgBelgeKart(d){
 /* Tek "Belge Ekle" formu: Work ya da Kurum. Ayni ek bileseni. */
 function belgeEkleAc(ctx){
   ctx=ctx||{}; ui._blCtx=ctx;
-  ekYeni('bl',{turZorunlu:true});
+  /* S7 §41: sozlesmeye eklenen belgenin turu varsayilan Sozlesme (duzeltilebilir). */
+  ekYeni('bl',ctx.contractId?{varsayilan:'sozlesme',varsayilanResim:'sozlesme'}:{turZorunlu:true});
   const w=ctx.jobId?ui._work:null;
   const orgAd=w&&w.customer_id?((ui._cust||[]).find(x=>x.id===w.customer_id)||{}).firma:'';
-  const hedef=ctx.jobId?`İş: <b>${esc((w||{}).title||'#'+ctx.jobId)}</b>`
+  const hedef=ctx.contractId?`Sözleşme: <b>${esc(ctx.baslik||'#'+ctx.contractId)}</b>`
+    :ctx.jobId?`İş: <b>${esc((w||{}).title||'#'+ctx.jobId)}</b>`
     :`Kurum: <b>${esc(((ui._org||{}).firma)||'#'+ctx.custId)}</b>`;
   modal(`<h3 style="margin:0 0 4px">Belge Ekle</h3>
     <p class="muted" style="font-size:12.5px;margin:0 0 12px">${hedef}</p>
@@ -3540,7 +3945,8 @@ async function belgeEkleKaydet(){
   if(!ekBekleyen('bl').length){ mpAlert('Bir dosya seçin ya da bağlantı ekleyin.','Belge'); return; }
   if(ekTurEksik('bl')){ mpAlert('Her belge için türünü seçin.','Belge'); return; }
   const links=[];
-  if(ctx.jobId){ links.push({job_id:ctx.jobId});
+  if(ctx.contractId) links.push({contract_id:ctx.contractId});
+  else if(ctx.jobId){ links.push({job_id:ctx.jobId});
     const w=ui._work; if(w&&w.customer_id&&(document.getElementById('blOrg')||{}).checked) links.push({customer_id:w.customer_id}); }
   else if(ctx.custId) links.push({customer_id:ctx.custId});
   if(!links.length){ mpAlert('Belgenin ekleneceği yer bulunamadı.'); return; }
@@ -3549,7 +3955,8 @@ async function belgeEkleKaydet(){
   modalBusy(false);
   if(!g.ok){ mpAlert('Belge eklenemedi: '+g.hata+' — Kaydet ile tekrar deneyin.','Belge'); return; }
   closeModal(); toast(g.sayi>1?g.sayi+' belge eklendi.':'Belge eklendi.');
-  ekranTazele();
+  await ekranTazele();
+  if(ctx.contractId) sozAc(ctx.contractId);
 }
 /* Satir menusu: tur duzelt, kuruma bagla, bu baglamdan kaldir. Yetki
    sunucuda zorlanir; burada yalniz anlamli secenekler gosterilir. */
@@ -3566,6 +3973,9 @@ function belgeMenu(ev,docId,linkId,tip,ctxId,orgId){
   const items=[];
   if(sahip) items.push(`<button type="button" role="menuitem" onclick="belgeTurForm(${docId})">Adı / türü düzelt</button>`);
   if(tip==='is'&&orgId&&!kurumdaVar) items.push(`<button type="button" role="menuitem" onclick="belgeKurumaBagla(${docId},${orgId})">Kurumun belgelerine de ekle</button>`);
+  /* S7 §25: yuklenmis sozlesme belgesinden yapisal kayit - yeniden yukleme yok. */
+  if(d.doc_type==='sozlesme'&&!tum.some(l=>l.contract_id)&&(tip==='is'||tip==='kurum'))
+    items.push(`<button type="button" role="menuitem" onclick="puMenuKapat();sozForm({docId:${docId},jobId:${tip==='is'?ctxId:0},custId:${tip==='is'?(orgId||0):ctxId}})">Sözleşme kaydı oluştur</button>`);
   if(kaldirabilir) items.push(`<button type="button" role="menuitem" class="sil" onclick="belgeBaglamdanKaldir(${docId},${linkId},'${tip}')">${tip==='is'?'Bu işten kaldır':'Kurumdan kaldır'}</button>`);
   if(!items.length){ toast('Bu belge için yapılabilecek bir işlem yok.'); return; }
   const b=ev.currentTarget.getBoundingClientRect();
@@ -3771,15 +4181,11 @@ function workMetaForm(id,job){
   const j=job||((ui._work&&ui._work.id===id)?ui._work:null)
            ||(ui._jobs||[]).find(x=>x.id===id)||{};
   const as0=j.accounting_status||'yok';
-  modal(`<h3 style="margin:0 0 6px">Sözleşme ve Muhasebe</h3>
-    <p class="muted" style="font-size:12.5px;margin:0 0 14px">Sözleşme eksikliği bir uyarıdır, engel değildir (D-218). Kapanmış iş muhasebenin işlendiği anlamına gelmez (BR-W04).</p>
+  /* S7: sozlesme artik yapisal kayit (Ticari bolumu). Eski jobs.contract_*
+     alanlari burada DUZENLENMEZ - iki bagimsiz dogru olusmasin. */
+  modal(`<h3 style="margin:0 0 6px">Muhasebe</h3>
+    <p class="muted" style="font-size:12.5px;margin:0 0 14px">Kapanmış iş muhasebenin işlendiği anlamına gelmez (BR-W04). Sözleşmeler işin Ticari bölümünde yönetilir.</p>
     <input type="hidden" id="wmid" value="${id}">
-    <div class="row2">
-      <div class="field"><label class="flabel" for="wcs">Sözleşme durumu</label>
-        <select class="inp" id="wcs">${[['missing','Eksik'],['pending','Bekleniyor'],['signed','İmzalı']].map(o=>`<option value="${o[0]}" ${j.contract_status===o[0]?'selected':''}>${o[1]}</option>`).join('')}</select></div>
-      <div class="field"><label class="flabel" for="wcd">İmza tarihi</label>
-        <input class="inp" type="date" id="wcd" value="${esc(j.contract_signed_at)}"></div></div>
-    <div class="field"><label class="flabel" for="wcu">Sözleşme bağlantısı (Drive)</label><input class="inp" id="wcu" value="${esc(j.contract_url)}" placeholder="https://drive.google.com/..."></div>
     <div class="row2">
       <div class="field"><label class="flabel" for="was">Muhasebe durumu</label>
         <select class="inp" id="was" onchange="workMetaDurumDegis()">${ACCST.slice().sort((a,b)=>['yok','hazir','gonderildi','islendi'].indexOf(a[0])-['yok','hazir','gonderildi','islendi'].indexOf(b[0])).map(o=>`<option value="${o[0]}" ${as0===o[0]?'selected':''}>${esc(o[1])}</option>`).join('')}</select></div>
@@ -3820,10 +4226,9 @@ function accZaman(j,yeni,elleTarih){
 async function workMetaSave(){
   const id=+gv('wmid');
   const j=((ui._work&&ui._work.id===id)?ui._work:null)||(ui._jobs||[]).find(x=>x.id===id)||{};
-  const cs=gv('wcs'), as=gv('was');
+  const as=gv('was');
   modalBusy(true);
-  const r=await guard(()=>api('job_save',{id,contract_status:cs,contract_signed_at:gv('wcd')||null,
-    contract_url:gv('wcu')||null,accounting_status:as,
+  const r=await guard(()=>api('job_save',{id,accounting_status:as,
     accounting_amount:gv('waa')?+gv('waa'):null,accounting_note:gv('wan')||null,
     ...accZaman(j,as,gv('wasd'))}),'Kaydedilemedi');
   modalBusy(false);
@@ -4667,7 +5072,8 @@ function hrSayfa(p){ hrYaz({...hrDurum(),p:Math.max(1,p)}); renderSection();
 const HR_TUR=[['','Tümü'],['isler','İşler'],['operasyon','Operasyon'],['muhasebe','Muhasebe']];
 const HR_ROZET={work_created:'Yeni iş',work_phase:'Aşama',work_lifecycle:'Durum',work_contract:'Sözleşme',
   work_accounting:'Muhasebe',operation_created:'Operasyon',operation_status:'Operasyon',
-  quote_revised:'Teklif',quote_approved:'Teklif',document_added:'Belge'};
+  quote_revised:'Teklif',quote_approved:'Teklif',document_added:'Belge',
+  contract_created:'Sözleşme',contract_signed:'Sözleşme',contract_cancelled:'Sözleşme'};
 
 function hareketGovde(veri,hg,jm,cm,tm){
   const filtre=`<div class="pf hr-f">
@@ -7997,7 +8403,8 @@ function orgListe(){ hafCiz(); }
    kurum ekranı açılmadı. Bilgi hiyerarşisi: Kimlik → Kişiler → Aktif İşler
    → Son Güncellemeler → Geçmiş. Boş bölümler gizlenir (§33). */
 async function orgAc(id){
-  const d=await guard(()=>api('org_detail&id='+id),'Kurum açılamadı'); if(!d)return;
+  const [d]=await guard(()=>Promise.all([api('org_detail&id='+id),sozUnitYukle()]),'Kurum açılamadı')||[];
+  if(!d)return;
   ui._org=d.org; ui._orgContacts=d.contacts; ui._orgDetay=d;
   navKayit('org',ui.section,d.org.id,orgKisa(d.org.firma,30));
   const o=d.org, roles=Array.isArray(o.relationship_roles)?o.relationship_roles:[];
@@ -8032,6 +8439,7 @@ async function orgAc(id){
         ${o.relationship_evidence?`<span class="haf-ev">kayıt niteliği: ${esc(evidenceLabel(o.relationship_evidence))}</span>`:''}
       </div></div>`:''}
 
+    ${orgTicariKart(d)}
     ${orgBelgeKart(d)}
 
     <div class="sec-card">
