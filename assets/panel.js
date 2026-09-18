@@ -879,8 +879,10 @@ async function api(action, body){
           .eq('work_id',q.id).order('revision_no',{ascending:false}),
         sb.from('bookings').select('id,unit_id,ym,status,source_quote_id')
           .eq('work_id',q.id).order('ym'),
-        sb.from('work_operations').select('id,operation_type,description,planned_date,'+BELGE_SEL)
-          .eq('job_id',q.id),
+        /* S7.1: tam satir. Work Detail'in Baski & Montaj bolumu bunu dogrudan
+           kullanir - ayri operations_list + customers_list okumasi KALKTI. */
+        sb.from('work_operations').select('*,'+BELGE_SEL)
+          .eq('job_id',q.id).order('planned_date',{ascending:true,nullsFirst:false}).order('id'),
         /* S7: yapisal sozlesmeler kalemleri ve belgeleriyle AYNI turda
            (sozlesme / kalem / belge basina istek YOK). */
         sb.from('contracts').select('*,contract_items(*),'+BELGE_SEL)
@@ -942,11 +944,9 @@ async function api(action, body){
     case 'hareketler_list':{
       const sayfa=Math.max(1,+q.sayfa||1), adet=Math.min(50,+q.adet||20);
       let sel=sb.from('entries')
-        .select('id,job_id,body,system_kind,created_by_team_id,occurred_at,jobs(title,customer_id)',{count:'exact'})
+        .select('id,job_id,body,system_kind,work_operation_id,document_id,created_by_team_id,occurred_at,jobs(title,customer_id)',{count:'exact'})
         .eq('source','system');
-      const GRUP={isler:['work_created','work_phase','work_lifecycle','work_contract','quote_revised','quote_approved','document_added','contract_created','contract_signed','contract_cancelled'],
-                  operasyon:['operation_created','operation_status'],
-                  muhasebe:['work_accounting']};
+      const GRUP=HR_GRUP;
       if(q.tur&&GRUP[q.tur]) sel=sel.in('system_kind',GRUP[q.tur]);
       const bas=(sayfa-1)*adet;
       const {data,error,count}=await sel.order('occurred_at',{ascending:false})
@@ -1149,7 +1149,11 @@ async function api(action, body){
       return ok(data); }
     case 'job_lifecycle':{
       const patch={lifecycle_status:body.lifecycle_status};
-      patch.closed_reason=(body.lifecycle_status==='kapandi')?(body.closed_reason||'tamamlandi'):null;
+      /* S7.1: arsivleme nedeni ACIKCA secilir; varsayilan UYDURULMAZ.
+         Kapanmayan iste neden tutulmaz (DB: jobs_closed_reason_only_closed). */
+      if(body.lifecycle_status==='kapandi'&&!CLOSELBL[body.closed_reason])
+        throw new Error('Arşivleme nedeni seçilmeli.');
+      patch.closed_reason=(body.lifecycle_status==='kapandi')?body.closed_reason:null;
       const {error}=await sb.from('jobs').update(patch).eq('id',body.id);
       if(error)throw error; logYaz(act,body); return ok(); }
     case 'work_party_save':{ const r=await saveRow('work_parties',body); logYaz(act,body); return ok(r); }
@@ -1178,6 +1182,12 @@ async function api(action, body){
       if(row.status==='done'&&!row.completed_at) row.completed_at=new Date().toISOString();
       if(row.status&&row.status!=='done') row.completed_at=null;
       const r=await saveRow('work_operations',row); logYaz(act,body); return ok(r); }
+    /* S7.1: cok satirli olusturma TEK islemde (RPC). Ya tum satirlar ve
+       ortak belge baglantilari yazilir ya hicbiri - yarim "basari" yok. */
+    case 'operations_batch':{
+      const {data,error}=await sb.rpc('operations_batch_create',
+        {p_job:body.job_id, p_rows:body.rows||[], p_docs:body.docs||[]});
+      if(error)throw error; logYaz('operation_save',{job_id:body.job_id,sayi:(body.rows||[]).length}); return ok(data); }
 
     /* ---- Kurumlar / Kişiler (Sprint 02) ----
        Organization backing = physical `customers` (D-212 / D-227).
@@ -2206,7 +2216,10 @@ const JOBST=FAZ_SIRA.map(k=>[k,FAZ_ETIKET[k]]);
 const JOBC={temas_takip:'violet',teklif:'amber',baski:'cyan',montaj:'green',yayinda_aktif:'slate'};
 const LIFE=[['acik','Açık'],['bekliyor','Bekliyor'],['kapandi','Kapandı']];
 const LIFELBL={acik:'Açık',bekliyor:'Bekliyor',kapandi:'Kapandı'};
-const CLOSELBL={tamamlandi:'Tamamlandı',kaybedildi:'Kaybedildi / Reddedildi',iptal:'İptal'};
+const CLOSELBL={tamamlandi:'Tamamlandı',kaybedildi:'Kaybedildi',iptal:'İptal'};
+/* S7.1: calisanin zihinsel modeli Aktif / Arsiv. Depolanan uc deger
+   (acik/bekliyor/kapandi) DEGISMEDI; Bekliyor Aktif'in ikincil bir hali. */
+const yasamAna=ls=>ls==='kapandi'?'arsiv':'aktif';
 const ENTRY_SRC={manual:'',system:'sistem',email:'e-posta',whatsapp:'WhatsApp',web:'web'};
 
 function ekipRozet(aid){
@@ -3329,10 +3342,18 @@ async function jobMove(id,status){
 async function jobDelete(id){ if(await mpConfirm('Bu iş kaydı silinsin mi? Bağlı güncellemeler de silinir.','İşi Sil')){ await api('job_delete&id='+id); renderSection(); } }
 
 /* ---------- WORK DETAIL (07 §7) ---------- */
-async function workAc(id){
+/* S7.1 ust hiyerarsi: Ad -> Kurum/kisi -> ASAMA (belirgin) -> operasyonel
+   durum (Aktif/Arsiv, Bekliyor, Acil, Ilgili). Kapanis nedeni, sozlesme ve
+   muhasebe ust kimlik alanini ISGAL ETMEZ; kendi bolumlerinde yasarlar.
+
+   `odak` (istege bagli): Hareketler'den gelen derin baglanti. Yeni bir
+   router DEGIL - yalniz bu cizimden sonra hangi bolumun/kaydin one
+   cikarilacagini soyler ve bir kez tuketilir. */
+async function workAc(id,odak){
+  if(odak) ui._workOdak=odak;
   const veri=await guard(()=>Promise.all([api('work_detail&id='+id),api('team_list'),
     api('customers_list'),api('contacts_list'),
-    api('work_followers_all&job_id='+id).catch(()=>[])]),'İş açılamadı');
+    api('work_followers_all&job_id='+id).catch(()=>[]), sozUnitYukle()]),'İş açılamadı');
   if(!veri)return;
   const [d,tm,cu,ct,fol]=veri; ui._team=tm||[]; ui._cust=cu||[]; ui._contacts=ct||[];
   const benim=(ui._me&&ui._me.id)||0;
@@ -3341,14 +3362,19 @@ async function workAc(id){
   const folAdlari=folBu.map(r=>((tm||[]).find(t=>t.id===r.team_id)||{}).name).filter(Boolean);
   ui._work=d.job; ui._workParties=d.parties; ui._workEntries=d.entries;
   ui._workQuotes=d.quotes||[]; ui._workBookings=d.bookings||[]; ui._workDetay=d;
+  ui._workOps=d.ops||[];
+  ui._opCust=ui._opCust||{}; (cu||[]).forEach(x=>ui._opCust[x.id]=x.firma);
+  ui._opUnits=ui._opUnits||{}; Object.values(ui._sozUnits||{}).forEach(u=>ui._opUnits[u.id]=u);
   const j=d.job, org=(cu||[]).find(x=>x.id===j.customer_id);
+  const kisi=(ct||[]).find(x=>x.id===j.primary_contact_id);
   navKayit('work',ui.section,j.id,orgKisa(j.title,34));
-  const ls=j.lifecycle_status||'acik';
+  const belgeN=workBelgeListe(d).length, opN=(d.ops||[]).length, ticariN=workTicariSayi(d);
   const c=document.getElementById('content');
-  c.innerHTML=`<div class="sec-head">
-      <div><h3>${geriBtn('is-takibi')} ${esc(j.title)}</h3>
-        <p class="sub">${j.is_urgent?'<span class="pu-b acil">⚡ Acil</span> ':''}${org?esc(org.firma):'<span class="muted">kurum bağlı değil</span>'} · ${esc(JOBLBL[j.status]||j.status)} · ${esc(LIFELBL[ls])}${j.closed_reason?' · '+esc(CLOSELBL[j.closed_reason]||j.closed_reason):''}${folAdlari.length?' · ilgili: '+esc(folAdlari.join(', ')):''}</p></div>
-      <div style="display:flex;gap:8px">
+  c.innerHTML=`<div class="sec-head w-head">
+      <div class="w-id"><h3>${geriBtn('is-takibi')} <span class="w-ad">${esc(j.title)}</span>
+          <button type="button" class="w-ed" onclick="workAdForm(${j.id})" aria-label="İş adını değiştir" title="İş adını değiştir">✎</button></h3>
+        <p class="sub">${org?`<button type="button" class="btn-link" onclick="orgAc(${org.id})" title="${esc(org.firma)}">${esc(orgKisa(org.firma,60))}</button>`:'<span class="muted">kurum bağlı değil</span>'}${kisi?` · ${esc(kisi.name)}${kisi.title?' <span class="muted">('+esc(kisi.title)+')</span>':''}`:''}</p></div>
+      <div class="w-act">
         <button class="btn btn-primary btn-sm" onclick="qcAc({jobId:${j.id}})">${ic('plus',15)} Güncelleme</button>
         <button class="btn ${takipEdiyorum?'btn-ghost':'btn-outline'} btn-sm" id="wFol"
           onclick="workTakip(${j.id},${takipEdiyorum?'false':'true'})"
@@ -3357,49 +3383,38 @@ async function workAc(id){
         <button class="btn btn-outline btn-sm" onclick="jobForm(null,${j.id})">Düzenle</button>
       </div></div>
 
-    <div class="sec-card">
-      <div class="sec-head" style="margin-bottom:10px"><h4 style="font-size:14px;margin:0">Durum</h4></div>
-      <div class="row2">
-        <div class="field"><label class="flabel" for="wLife">Yaşam döngüsü</label>
-          <select class="inp" id="wLife" onchange="workLifeDegis(${j.id})">
-            ${LIFE.map(l=>`<option value="${l[0]}" ${ls===l[0]?'selected':''}>${l[1]}</option>`).join('')}
-          </select></div>
-        <div class="field"><label class="flabel" for="wClose">Kapanış nedeni</label>
-          <select class="inp" id="wClose" ${ls!=='kapandi'?'disabled':''} onchange="workLifeDegis(${j.id})">
-            ${Object.keys(CLOSELBL).map(k=>`<option value="${k}" ${j.closed_reason===k?'selected':''}>${CLOSELBL[k]}</option>`).join('')}
-          </select></div>
-      </div>
-      <div class="meta" style="line-height:1.9">
-        İlgili kişi: ${(()=>{ const k=(ct||[]).find(x=>x.id===j.primary_contact_id);
-          return k?`<b>${esc(k.name)}</b>${k.title?' · '+esc(k.title):''}`
-                   +`${k.phone?' · '+esc(k.phone):''}${k.email?` · <a href="mailto:${esc(k.email)}">${esc(k.email)}</a>`:''}`
-                 :'<span class="muted">seçilmedi</span>'; })()}
-        <button class="btn btn-ghost btn-sm" onclick="jobForm(null,${j.id})">Değiştir</button><br>
-        İlgili ekip: ${folAdlari.length?folAdlari.map(x=>`<span class="pu-chip who">@${esc(x)}</span>`).join(' ')
-          :'<span class="muted">henüz kimse takip etmiyor</span>'}<br>
-        ${/* S2 §3: `jobs.assignee_id` şemada kalır ve doluysa İKİNCİL bağlam
-             olarak görünür. Artık "Sorumlu" DEĞİL: genel koordinasyon kavramı
-             İlgili'dir, bu yalnızca opsiyonel iş sahipliğidir. Boşsa hiç
-             gösterilmez — doldurulması gereken bir alan gibi durmasın. */''}
-        ${j.assignee_id?`İş sahibi: ${esc((tm||[]).find(t=>t.id===j.assignee_id)?.name||'—')}<br>`:''}
-        ${/* S7: sozlesme durumu artik YAPISAL kayitlardan okunur. Eski
-             jobs.contract_* alanlari yalniz uyumluluk icindir; yapisal
-             kayit yoksa eski deger "eski kayıt" etiketiyle gosterilir. */''}
-        Sözleşme: ${sozOzetHtml(d.contracts||[],j)}<br>
-        Muhasebe: <span class="pill">${esc({yok:'Yok',hazir:'Hazır',gonderildi:'Gönderildi',islendi:'İşlendi'}[j.accounting_status]||j.accounting_status)}</span>
-        ${j.accounting_amount?' · '+esc(j.accounting_amount)+' ₺':''}
-        <button class="btn btn-ghost btn-sm" onclick="workMetaForm(${j.id})">Muhasebe</button>
-      </div>
+    ${workFazHtml(j)}
+    ${workDurumHtml(j,folAdlari)}
+
+    <div class="sec-card w-sec w-bilgi">
+      <div class="w-kv"><span class="w-k">İlgili kişi</span>
+        <span class="w-v">${kisi?`<b>${esc(kisi.name)}</b>${kisi.title?' · '+esc(kisi.title):''}`
+          +`${kisi.phone?' · '+esc(kisi.phone):''}${kisi.email?` · <a href="mailto:${esc(kisi.email)}">${esc(kisi.email)}</a>`:''}`
+          :'<span class="muted">seçilmedi</span>'}
+        <button class="btn-link" onclick="jobForm(null,${j.id})">Değiştir</button></span></div>
+      ${/* S2 §3: `jobs.assignee_id` doluysa IKINCIL baglam; bossa hic yok. */''}
+      ${j.assignee_id?`<div class="w-kv"><span class="w-k">İş sahibi</span><span class="w-v">${esc((tm||[]).find(t=>t.id===j.assignee_id)?.name||'—')}</span></div>`:''}
+      <div class="w-kv" id="wMuhasebe"><span class="w-k">Muhasebe</span>
+        <span class="w-v"><span class="pill">${esc(accLbl(j.accounting_status||'yok'))}</span>
+          ${j.accounting_amount?' · '+esc(money(j.accounting_amount)):''}
+          ${j.accounting_sent_at?' · gönderim '+esc(trTarih(j.accounting_sent_at)):''}
+          <button class="btn-link" onclick="workMetaForm(${j.id})">Düzenle</button></span></div>
     </div>
 
-    <div class="sec-card" id="wBelgeKart">
-      <div class="sec-head" style="margin-bottom:10px">
-        <h4 style="font-size:14px;margin:0">Belgeler <span class="chip" id="wBelgeSayi">0</span></h4>
-        <button class="btn btn-outline btn-sm" onclick="belgeEkleAc({jobId:${j.id}})">${ic('plus',15)} Belge Ekle</button></div>
-      <div id="wBelgeler"></div></div>
+    ${wBolum({id:'wBelgeKart',baslik:'Belgeler',sayiId:'wBelgeSayi',sayi:belgeN,govde:'wBelgeler',
+      bos:!belgeN,ipucu:'Henüz belge yok.',
+      eylem:`<button class="btn btn-outline btn-sm" onclick="belgeEkleAc({jobId:${j.id}})">${ic('plus',15)} Belge Ekle</button>`})}
 
-    ${/* S2 §27: boş bölüm sessiz kalır. Hiç taraf yoksa koca bir boş kart
-         yerine tek satırlık bir ekleme bağlantısı gösterilir. */''}
+    ${wBolum({id:'wTicari',baslik:'Ticari',sayi:ticariN,govde:'wTicariG',
+      bos:!ticariN,ipucu:'Teklif ya da sözleşme belgesi yok.',
+      eylem:`<button class="btn btn-outline btn-sm" onclick="belgeEkleAc({jobId:${j.id},tur:'teklif'})">${ic('plus',15)} Teklif Belgesi</button>
+        <button class="btn btn-outline btn-sm" onclick="belgeEkleAc({jobId:${j.id},tur:'sozlesme'})">${ic('plus',15)} Sözleşme Belgesi</button>`})}
+
+    ${wBolum({id:'wOpKart',baslik:'Baskı &amp; Montaj',sayiId:'wOpSayi',sayi:opN,govde:'wOps',
+      bos:!opN,ipucu:'Bu işe bağlı baskı/montaj kaydı yok.',
+      eylem:`<button class="btn btn-sm act act-ops" onclick="opForm(0,${j.id})">${ic('plus',15)} Kayıt Ekle</button>`})}
+
+    ${/* S2 §27: bos bolum sessiz kalir. */''}
     ${d.parties.length?`<div class="sec-card">
       <div class="sec-head" style="margin-bottom:10px">
         <h4 style="font-size:14px;margin:0">Taraflar <span class="chip">${d.parties.length}</span></h4>
@@ -3408,8 +3423,6 @@ async function workAc(id){
     :`<p class="w-quiet"><span class="muted">Ek taraf (ajans, fatura, tedarikçi) tanımlı değil.</span>
        <button class="btn-link" onclick="partyForm(${j.id})">Taraf ekle</button></p>
       <div id="wParties" hidden></div>`}
-
-    <div class="sec-card" id="wTicari"></div>
 
     ${d.bookings.length?`<div class="sec-card">
       <div class="sec-head" style="margin-bottom:10px"><h4 style="font-size:14px;margin:0">Mecra / Doluluk <span class="chip">${d.bookings.length}</span></h4></div>
@@ -3420,35 +3433,175 @@ async function workAc(id){
       <button class="btn btn-ghost btn-sm" onclick="go('listeler')">Doluluk ekranında aç</button>
     </div>`:''}
 
-    <div class="sec-card">
-      <div class="sec-head" style="margin-bottom:10px">
-        <h4 style="font-size:14px;margin:0">Baskı &amp; Montaj <span class="chip" id="wOpSayi">0</span></h4>
-        <button class="btn btn-sm act act-ops" onclick="opForm(0,${j.id})">${ic('plus',15)} Kayıt Ekle</button></div>
-      <div id="wOps"></div></div>
-
-    <div class="sec-card">
+    <div class="sec-card" id="wZaman">
       <div class="sec-head" style="margin-bottom:10px"><h4 style="font-size:14px;margin:0">Zaman Çizelgesi <span class="chip">${d.entries.length}</span></h4></div>
       <div id="wTimeline"></div></div>`;
-  workPartyCiz(); workTimelineCiz(); workOpsCiz(j.id); workBelgeCiz(); workTicariCiz();
+  /* Belgeye derin baglantida tur filtresi hedefi gizlemesin. */
+  if(ui._workOdak&&ui._workOdak.bolum==='belge') ui._blFiltre='tumu';
+  workPartyCiz(); workTimelineCiz(); workOpsCiz(); workBelgeCiz(); workTicariCiz();
+  workOdakUygula();
 }
-async function workOpsCiz(jobId){
+
+/* Bolum kabugu. Veri yoksa TEK satir: baslik + sayi + eylem + kisa ipucu
+   (S7.1 §24). Eylem her zaman gorunur kalir - kompakt != gorunmez (§25). */
+function wBolum(o){
+  return `<div class="sec-card w-sec ${o.bos?'bos':''}" id="${o.id}">
+    <div class="w-sh">
+      <h4>${o.baslik} <span class="chip"${o.sayiId?` id="${o.sayiId}"`:''}>${o.sayi}</span></h4>
+      ${o.bos&&o.ipucu?`<span class="w-sh-i">${esc(o.ipucu)}</span>`:''}
+      <div class="w-sh-a">${o.eylem||''}</div></div>
+    ${o.bos?'':`<div id="${o.govde}"></div>`}</div>`;
+}
+
+/* ---- Asama gostergesi (S7.1 §7-§9) ----
+   Bir ilerleme yuzdesi DEGIL, isin su an agirlikla nerede oldugu. Asamalar
+   atlanabilir/geri alinabilir (BR-W02): gecmis adimlar "tamamlandi" isareti
+   TASIMAZ, yalniz hafifce tonlanir. Renkler Pano sutunlariyla ayni (JOBC).
+   Tiklama mevcut `job_move` yolunu kullanir; ikinci bir faz yazicisi yok.
+   Depolanan deger (`temas_takip`, `yayinda_aktif`) degismez. */
+function workFazHtml(j){
+  const i=FAZ_SIRA.indexOf(j.status);
+  return `<nav class="w-faz" id="wFaz" aria-label="İşin aşaması">
+    <span class="w-faz-l">Aşama</span>
+    <ol>${FAZ_SIRA.map((k,ix)=>{ const cur=ix===i;
+      return `<li class="${cur?'on':(i>=0&&ix<i?'once':'')}" style="--fc:var(--c-${JOBC[k]})">
+        <button type="button" ${cur?'aria-current="step"':''} onclick="workFazDegis(${j.id},'${k}')"
+          title="${cur?'Şu anki aşama':'Aşamayı “'+FAZ_ETIKET[k]+'” yap'}">${esc(FAZ_ETIKET[k])}</button></li>`; }).join('')}</ol>
+    ${i<0?`<span class="w-faz-eski">Eski aşama: ${esc(JOBLBL[j.status]||j.status)}</span>`:''}
+  </nav>`;
+}
+async function workFazDegis(id,st){
+  const j=ui._work; if(j&&j.id===id&&j.status===st) return;
+  const r=await guard(()=>api('job_move',{id,status:st}),'Aşama değiştirilemedi'); if(r===null) return;
+  /* Hareket DB tetikleyicisinden gelir (trg_jobs_hareket) - insan Update'i YAZILMAZ. */
+  toast('Aşama: '+FAZ_ETIKET[st]);
+  workAc(id,{bolum:'faz'});
+}
+
+/* ---- Operasyonel durum satiri (S7.1 §4-§6) ----
+   Birincil: Aktif | Arsiv. Bekliyor Aktif'in ikincil rozeti. Kapanis
+   nedeni YALNIZ arsivde gorunur. Iki yan yana select yerine acik eylemler:
+   celiskili bir kombinasyon (Acik + Tamamlandi) kurulamaz. */
+function workDurumHtml(j,folAdlari){
+  const ls=j.lifecycle_status||'acik', arsiv=ls==='kapandi';
+  return `<div class="w-st" id="wDurum">
+    <span class="pill w-ya ${arsiv?'arsiv':'aktif'}">${arsiv?'Arşiv':'Aktif'}</span>
+    ${ls==='bekliyor'?'<span class="pill sand" title="Dış cevap, onay ya da materyal bekleniyor">Bekliyor</span>':''}
+    ${arsiv&&j.closed_reason?`<span class="w-st-n">Arşiv nedeni: <b>${esc(CLOSELBL[j.closed_reason]||j.closed_reason)}</b></span>`:''}
+    ${j.is_urgent?'<span class="pu-b acil">⚡ Acil</span>':''}
+    ${folAdlari.length?`<span class="w-st-il"><span class="w-k">İlgili</span> ${folAdlari.map(x=>`<span class="pu-chip who">@${esc(x)}</span>`).join(' ')}</span>`:''}
+    <span class="w-st-a">
+      ${arsiv?`<button class="btn btn-outline btn-sm" onclick="workYenidenAc(${j.id})">Yeniden aç</button>`
+        :`<button class="btn btn-ghost btn-sm" onclick="workBekle(${j.id},${ls==='bekliyor'?'false':'true'})">${ls==='bekliyor'?'Beklemeden çıkar':'Beklemeye al'}</button>
+          <button class="btn btn-outline btn-sm" onclick="workArsivForm(${j.id})">Arşivle</button>`}
+    </span></div>`;
+}
+async function workYasam(id,ls,neden,mesaj){
+  const r=await guard(()=>api('job_lifecycle',{id,lifecycle_status:ls,closed_reason:neden||null}),'Durum değiştirilemedi');
+  if(r===null) return false;
+  /* S4.4: hareket VERITABANI tetikleyicisinden gelir (trg_jobs_hareket). */
+  toast(mesaj); workAc(id,{bolum:'durum'}); return true;
+}
+function workBekle(id,bekle){
+  return workYasam(id,bekle?'bekliyor':'acik',null,bekle?'İş beklemeye alındı.':'İş yeniden aktif.');
+}
+async function workYenidenAc(id){
+  if(!await mpConfirm('Bu iş yeniden açılsın mı? Aktif işler arasına döner; arşiv geçmişi zaman çizelgesinde kalır.','İşi yeniden aç',{danger:false,ok:'Yeniden aç'})) return;
+  workYasam(id,'acik',null,'İş yeniden açıldı.');
+}
+function workArsivForm(id){
+  const j=(ui._work&&ui._work.id===id)?ui._work:{};
+  const S=[['tamamlandi','Tamamlandı','İş yapıldı ve bitti.'],
+           ['kaybedildi','Kaybedildi','Müşteri reddetti ya da başka yerle çalıştı.'],
+           ['iptal','İptal','İş vazgeçildi ya da geçersiz.']];
+  modal(`<h3 style="margin:0 0 4px">İşi arşivle</h3>
+    <p class="muted" style="font-size:12.5px;margin:0 0 14px">${esc(j.title||'')}</p>
+    <fieldset class="w-ars"><legend class="flabel">Neden arşivleniyor? *</legend>
+      ${S.map(([v,l,a])=>`<label class="w-ars-o"><input type="radio" name="wArs" value="${v}">
+        <span><b>${l}</b><em>${a}</em></span></label>`).join('')}</fieldset>
+    <p class="fhint">Arşivlemek muhasebenin işlendiği anlamına gelmez. İş gerekirse yeniden açılabilir.</p>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
+      <button class="btn btn-ghost btn-sm" onclick="closeModal()">Vazgeç</button>
+      <button class="btn btn-primary btn-sm" onclick="workArsivKaydet(${id})">Arşivle</button></div>`);
+}
+async function workArsivKaydet(id){
+  const s=document.querySelector('input[name="wArs"]:checked');
+  if(!s){ mpAlert('Arşivleme nedenini seçin.','İşi arşivle'); return; }
+  modalBusy(true);
+  const r=await guard(()=>api('job_lifecycle',{id,lifecycle_status:'kapandi',closed_reason:s.value}),'Arşivlenemedi');
+  modalBusy(false); if(r===null) return;
+  closeModal(); toast('İş arşivlendi: '+CLOSELBL[s.value]+'.'); workAc(id,{bolum:'durum'});
+}
+
+/* ---- Is adi (S7.1 §10-§11) ----
+   Ayni Work; id ve tum iliskiler aynen kalir. Anlamli degisiklik DB
+   tetikleyicisinde guvenilir `work_renamed` hareketi uretir; yalniz bosluk
+   farki hareket uretmez. Istemci hicbir hareket YAZMAZ. */
+function workAdForm(id){
+  const j=(ui._work&&ui._work.id===id)?ui._work:{};
+  modal(`<h3 style="margin:0 0 12px">İş adını değiştir</h3>
+    <div class="field"><label class="flabel" for="wAd">İş adı *</label>
+      <input class="inp" id="wAd" value="${esc(j.title||'')}" maxlength="200"
+        onkeydown="if(event.key==='Enter')workAdKaydet(${id})"></div>
+    <p class="fhint">Aynı iş kalır; belgeler, operasyonlar ve geçmiş değişmez. Eski ad zaman çizelgesinde görünür.</p>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
+      <button class="btn btn-ghost btn-sm" onclick="closeModal()">Vazgeç</button>
+      <button class="btn btn-primary btn-sm" onclick="workAdKaydet(${id})">Kaydet</button></div>`);
+  const e=document.getElementById('wAd'); if(e){ e.focus(); e.select(); }
+}
+async function workAdKaydet(id){
+  const yeni=(gv('wAd')||'').replace(/\s+/g,' ').trim();
+  if(!yeni){ mpAlert('İş adı boş olamaz.','İş adı'); return; }
+  const eski=String(((ui._work&&ui._work.id===id)?ui._work:{}).title||'').replace(/\s+/g,' ').trim();
+  if(yeni===eski){ closeModal(); return; }
+  modalBusy(true);
+  const r=await guard(()=>api('job_save',{id,title:yeni}),'İş adı kaydedilemedi');
+  modalBusy(false); if(r===null) return;
+  closeModal(); toast('İş adı güncellendi.'); workAc(id,{bolum:'faz'});
+}
+
+/* ---- Derin baglanti odagi (S7.1 §39-§51) ----
+   Hareketler satirindaki YAPISAL hedef (job_id / work_operation_id /
+   document_id) kullanilir; olay metninden id AYRISTIRILMAZ. Hedef kayit
+   artik yoksa (silinmis operasyon/belge) ilgili bolume dusulur. */
+function workOdakUygula(){
+  const o=ui._workOdak; ui._workOdak=null; if(!o) return;
+  const bolum={faz:'wFaz',durum:'wDurum',op:'wOpKart',belge:'wBelgeKart',
+               muhasebe:'wMuhasebe',ticari:'wTicari',zaman:'wZaman'}[o.bolum]||'wFaz';
+  const isaret=[];
+  if(o.bolum==='op'&&o.opId){
+    const satirlar=[...document.querySelectorAll('#wOps [data-op]')];
+    const h=satirlar.find(r=>r.dataset.op===String(o.opId));
+    /* Toplu kaydin kardesleri ayni islemde, ayni anda olusturulur. */
+    if(h) satirlar.filter(r=>r.dataset.oc===h.dataset.oc).forEach(r=>isaret.push(r));
+    if(h) isaret.unshift(h);
+  }
+  if(o.bolum==='belge'&&o.docId){
+    const h=document.querySelector(`#wBelgeler [data-doc="${o.docId}"]`);
+    if(h) isaret.push(h);
+  }
+  const hedef=isaret[0]||document.getElementById(bolum);
+  if(!isaret.length&&hedef) isaret.push(hedef);
+  if(o.entryId){ const e=document.querySelector(`#wTimeline [data-e="${o.entryId}"]`); if(e) isaret.push(e); }
+  isaret.forEach(el=>{ el.classList.remove('odak'); void el.offsetWidth; el.classList.add('odak'); });
+  if(hedef) setTimeout(()=>hedef.scrollIntoView({block:'center',behavior:'smooth'}),30);
+}
+
+function workOpsCiz(){
   const box=document.getElementById('wOps'); if(!box)return;
-  const [ops,custs,units]=await Promise.all([
-    api('operations_list&belge=1&job_id='+jobId), api('customers_list'), api('units_full').catch(()=>[])]);
-  ui._workOps=ops||[];
-  ui._opCust=ui._opCust||{}; (custs||[]).forEach(x=>ui._opCust[x.id]=x.firma);
-  ui._opUnits=ui._opUnits||{}; (units||[]).forEach(u=>ui._opUnits[u.id]=u);
-  const say=document.getElementById('wOpSayi'); if(say) say.textContent=String((ops||[]).length);
-  box.innerHTML=(ops||[]).map(o=>`<div class="list-item" style="cursor:pointer" onclick="opForm(${o.id},${jobId})">
-      <div class="nm"><span class="pill">${esc(opTypeLbl(o.operation_type))}</span> ${esc(o.description||'')}</div>
+  const ops=ui._workOps||[], jobId=(ui._work||{}).id;
+  box.innerHTML=ops.map(o=>`<div class="list-item w-op" data-op="${o.id}" data-oc="${esc(String(o.created_at||''))}"
+      role="button" tabindex="0" style="cursor:pointer" onclick="opForm(${o.id},${jobId})"
+      onkeydown="if(event.key==='Enter')opForm(${o.id},${jobId})">
+      <div class="nm"><span class="pill">${esc(opTypeLbl(o.operation_type))}</span>
+        ${o.unit_id&&ui._opUnits[o.unit_id]?`<b>${esc(ui._opUnits[o.unit_id].name)}</b>`:''} ${esc(o.description||'')}</div>
       <div class="meta">${o.planned_date?esc(trTarih(o.planned_date)):'tarihsiz'}
-        ${o.quantity!=null?' · '+esc(o.quantity)+' adet':''}${o.dimensions?' · '+esc(o.dimensions):''}
-        ${o.unit_id&&ui._opUnits[o.unit_id]?' · '+esc(ui._opUnits[o.unit_id].name):(o.location_text?' · '+esc(o.location_text):'')}
-        ${o.supplier_org_id&&ui._opCust[o.supplier_org_id]?' · '+esc(ui._opCust[o.supplier_org_id]):''}
+        ${o.quantity!=null?' · '+esc(String(o.quantity).replace(/\.0+$/,''))+' adet':''}${o.dimensions?' · '+esc(o.dimensions):''}
+        ${!o.unit_id&&o.location_text?' · '+esc(o.location_text):''}
+        ${o.supplier_org_id&&ui._opCust[o.supplier_org_id]?' · '+esc(orgKisa(ui._opCust[o.supplier_org_id],34)):''}
         · <span class="badge-st st-${esc(o.status)}">${esc(opStatLbl(o.status))}</span>
         ${(o.document_links||[]).length?` · <span title="Ek dosya">📎 ${(o.document_links||[]).length}</span>`:''}</div>
-    </div>`).join('')
-    ||'<p class="empty">Bu işe bağlı baskı/montaj kaydı yok.</p>';
+    </div>`).join('');
 }
 /* ============ SOZLESMELER (S7) =========================================
    Sozlesme = ticari anlasma (baslik + 1..N kalem). Dosya DEGILDIR; dosyalar
@@ -3526,50 +3679,43 @@ function sozSatirHtml(c,opt){
       :'<span class="muted">Belge yok</span>'}</div>
   </div>`;
 }
-/* Work > Durum satiri ozeti. Yapisal kayit yoksa eski alan (uyumluluk). */
-function sozOzetHtml(list,j){
-  const akt=list.filter(c=>c.status!=='iptal');
-  if(list.length){
-    const imz=akt.filter(c=>c.status==='imzali');
-    const du=imz.length?sozDurum(imz[0]):akt.length?sozDurum(akt[0]):{lbl:'İptal',cls:''};
-    return `<span class="pill ${du.cls}">${esc(du.lbl)}</span> <span class="muted">· ${list.length} sözleşme kaydı</span>`;
-  }
-  const eski={signed:'İmzalı',pending:'Bekleniyor',missing:'Eksik'}[j.contract_status]||'Eksik';
-  return j.contract_status&&j.contract_status!=='missing'
-    ?`<span class="pill">${eski}</span> <span class="muted" title="Yapısal sözleşme kaydı yok; eski iş alanından okunuyor">· eski kayıt</span>`
-    :'<span class="pill">Sözleşme kaydı yok</span>';
+/* Work Detail > Ticari (S7.1 §15-§21): BELGE-ONCELIKLI.
+   Gunluk gercek: sozlesme/teklif uygulama disinda hazirlanir, Word/PDF
+   olarak ise eklenir. Yuklenen dosya yeterlidir; kalemleri yeniden yazdiran
+   yapisal form artik birincil akis DEGIL. Mevcut yapisal sozlesme/teklif
+   kayitlari (S7 backend) aynen gorunur ve acilir.
+   Ekleme ayni S6 yukleyicisidir (belgeEkleAc, tur onceden secili). */
+function workTicariBelge(d){
+  const b=workBelgeListe(d);
+  return {teklif:b.filter(x=>x.doc.doc_type==='teklif'),
+          /* Yapisal kayda bagli belge o kaydin satirinda gorunur; iki kez listelenmez. */
+          sozlesme:b.filter(x=>x.doc.doc_type==='sozlesme'&&!(x.doc.document_links||[]).some(l=>l.contract_id))};
 }
-/* Work Detail > Ticari: Teklifler (yapisal + teklif belgeleri) ve
-   Sozlesmeler (yapisal + henuz kayda baglanmamis sozlesme belgeleri). */
+function workTicariSayi(d){
+  const tb=workTicariBelge(d);
+  return (d.quotes||[]).length+(d.contracts||[]).length+tb.teklif.length+tb.sozlesme.length;
+}
 async function workTicariCiz(){
-  const box=document.getElementById('wTicari'); if(!box) return;
+  const box=document.getElementById('wTicariG'); if(!box) return;
   const d=ui._workDetay; if(!d) return; const j=d.job;
-  await sozUnitYukle();
-  const belgeler=workBelgeListe(d);
-  const teklifBelge=belgeler.filter(x=>x.doc.doc_type==='teklif');
-  const sozBelge=belgeler.filter(x=>x.doc.doc_type==='sozlesme'&&!(x.doc.document_links||[]).some(l=>l.contract_id));
-  const qs=d.quotes||[], cs=d.contracts||[];
+  const tb=workTicariBelge(d), qs=d.quotes||[], cs=d.contracts||[];
   const QST={yeni:'Yeni',gorusuldu:'Görüşüldü',onaylandi:'Onaylandı',iptal:'İptal'};
-  box.innerHTML=`<div class="sec-head" style="margin-bottom:10px">
-      <h4 style="font-size:14px;margin:0">Ticari</h4>
-      <button class="btn btn-outline btn-sm" onclick="sozForm({jobId:${j.id},custId:${j.customer_id||0}})">${ic('plus',15)} Sözleşme</button></div>
-    <div class="tc-g">
-      <div class="tc-h">Sözleşmeler <span class="chip">${cs.length}</span></div>
-      ${cs.length?cs.map(c=>sozSatirHtml(c)).join(''):'<p class="empty">Bu işe bağlı sözleşme kaydı yok.</p>'}
-      ${sozBelge.length?`<div class="tc-not">Kayda bağlanmamış sözleşme belgesi:</div>
-        ${sozBelge.map(x=>`<div class="tc-dok">${belgeCip(x.doc)}
-          <button class="btn btn-ghost btn-sm" onclick="sozForm({docId:${x.doc.id},jobId:${j.id},custId:${j.customer_id||0}})">Sözleşme kaydı oluştur</button></div>`).join('')}`:''}
+  const ctx={tip:'is',id:j.id,orgId:j.customer_id||0};
+  box.innerHTML=`<div class="tc-g">
+      <div class="tc-h">Sözleşmeler <span class="chip">${tb.sozlesme.length+cs.length}</span></div>
+      ${tb.sozlesme.length?`<div class="bl-list">${tb.sozlesme.map(x=>belgeSatirHtml(x,ctx)).join('')}</div>`:''}
+      ${cs.length?`${tb.sozlesme.length?'<div class="tc-not">Yapısal sözleşme kaydı</div>':''}${cs.map(c=>sozSatirHtml(c)).join('')}`:''}
+      ${!tb.sozlesme.length&&!cs.length?'<p class="tc-bos">Sözleşme belgesi yok.</p>':''}
     </div>
     <div class="tc-g">
-      <div class="tc-h">Teklifler <span class="chip">${qs.length}</span>${teklifBelge.length?` <span class="muted" style="font-weight:500">· ${teklifBelge.length} teklif belgesi</span>`:''}</div>
+      <div class="tc-h">Teklifler <span class="chip">${qs.length+tb.teklif.length}</span></div>
+      ${tb.teklif.length?`<div class="bl-list">${tb.teklif.map(x=>belgeSatirHtml(x,ctx)).join('')}</div>`:''}
       ${qs.map(o=>`<div class="list-item">
         <div class="nm">Teklif #${o.id}${o.revision_no>1?` <span class="pill">rev ${o.revision_no}</span>`:''}</div>
         <div class="meta"><span class="badge-st st-${esc(o.status||'yeni')}">${esc(QST[o.status]||o.status)}</span> · ${esc(money(o.total))}${o.gecerlilik?' · geçerlilik '+esc(trTarih(o.gecerlilik)):''}</div>
         <button class="btn btn-outline btn-sm" onclick="quoteView(${o.id})">Aç</button>
         ${isAdmin()?`<button class="btn btn-outline btn-sm" onclick="quoteRevise(${o.id})">Revize</button>`:''}</div>`).join('')}
-      ${teklifBelge.length?`<div class="bl-strip">${teklifBelge.map(x=>belgeCip(x.doc)).join('')}</div>`:''}
-      ${!qs.length&&!teklifBelge.length?'<p class="empty">Yapısal teklif ya da teklif belgesi yok.</p>':''}
-      ${!qs.length&&teklifBelge.length?'<p class="fhint">Teklif belgesi bir dosyadır; yapısal teklif kaydı değildir.</p>':''}
+      ${!qs.length&&!tb.teklif.length?'<p class="tc-bos">Teklif belgesi yok.</p>':''}
     </div>`;
 }
 /* Kurum > Ticari: once guncel/aktif, sonra en yeniler; kisa. */
@@ -3579,10 +3725,14 @@ function orgTicariKart(d){
   cs.sort((a,b)=>agir(a)-agir(b)||b.id-a.id);
   const jm={}; (d.jobs||[]).forEach(j=>jm[j.id]=j.title);
   const tum=!!ui._orgSozTum, gos=tum?cs:cs.slice(0,5);
+  /* S7.1 §16: yapisal sozlesme olusturma normal ekibin gunluk adimi DEGIL
+     (belge-oncelikli; kurum belgeleri Belgeler kartinda). Kayit yoksa bu
+     kart normal kullaniciya bos bir olusturma formu gibi durmaz. */
+  if(!cs.length&&!(d.quotes||[]).length&&!isAdmin()) return '';
   return `<div class="sec-card">
     <div class="sec-head" style="margin-bottom:10px">
       <h4 style="font-size:14px;margin:0">Ticari <span class="chip">${cs.length} sözleşme</span>${(d.quotes||[]).length?` <span class="chip">${d.quotes.length} teklif</span>`:''}</h4>
-      <button class="btn btn-outline btn-sm" onclick="sozForm({custId:${d.org.id}})">${ic('plus',15)} Sözleşme</button></div>
+      ${isAdmin()?`<button class="btn btn-ghost btn-sm" onclick="sozForm({custId:${d.org.id}})" title="Yapısal sözleşme kaydı (kalemli)">${ic('plus',15)} Sözleşme kaydı</button>`:''}</div>
     ${gos.length?gos.map(c=>sozSatirHtml(c,{isAdi:c.job_id?orgKisa(jm[c.job_id]||'',36):''})).join('')
       :'<p class="empty">Bu kurumla sözleşme kaydı yok.</p>'}
     ${cs.length>5?`<button type="button" class="btn-link" onclick="ui._orgSozTum=${!tum};orgAc(${d.org.id})">${tum?'Daha az göster':'Tümünü göster ('+cs.length+')'}</button>`:''}
@@ -3861,7 +4011,7 @@ function belgeSatirHtml(x,ctx){
   const menuVar=(x.direkt&&(isAdmin()||x.direkt.created_by_team_id===benim||d.uploaded_by_team_id===benim))
     ||isAdmin()||d.uploaded_by_team_id===benim
     ||(ctx.tip==='is'&&ctx.orgId);
-  return `<div class="bl-row">
+  return `<div class="bl-row" data-doc="${d.id}">
     ${resim?`<button type="button" class="bl-th sm" onclick="belgeAc(${d.id})" aria-label="${esc(belgeAd(d))} — önizle"><img data-belge-yol="${esc(d.storage_path)}" alt="" loading="lazy"></button>`
       :`<span class="bl-ext ${d.provider==='external'?'dis':''}">${esc(belgeUzanti(d))}</span>`}
     <div class="bl-rb">
@@ -3923,19 +4073,25 @@ function orgBelgeKart(d){
 /* Tek "Belge Ekle" formu: Work ya da Kurum. Ayni ek bileseni. */
 function belgeEkleAc(ctx){
   ctx=ctx||{}; ui._blCtx=ctx;
-  /* S7 §41: sozlesmeye eklenen belgenin turu varsayilan Sozlesme (duzeltilebilir). */
-  ekYeni('bl',ctx.contractId?{varsayilan:'sozlesme',varsayilanResim:'sozlesme'}:{turZorunlu:true});
+  /* S7 §41: sozlesmeye eklenen belgenin turu varsayilan Sozlesme (duzeltilebilir).
+     S7.1 §21: Ticari'deki "+ Teklif/Sözleşme Belgesi" ayni yukleyiciyi turu
+     ONCEDEN SECILI acar; kullanici yine degistirebilir (§23). */
+  const on=ctx.contractId?'sozlesme':ctx.tur||null;
+  ekYeni('bl',on?{varsayilan:on,varsayilanResim:on}:{turZorunlu:true});
   const w=ctx.jobId?ui._work:null;
   const orgAd=w&&w.customer_id?((ui._cust||[]).find(x=>x.id===w.customer_id)||{}).firma:'';
   const hedef=ctx.contractId?`Sözleşme: <b>${esc(ctx.baslik||'#'+ctx.contractId)}</b>`
     :ctx.jobId?`İş: <b>${esc((w||{}).title||'#'+ctx.jobId)}</b>`
     :`Kurum: <b>${esc(((ui._org||{}).firma)||'#'+ctx.custId)}</b>`;
-  modal(`<h3 style="margin:0 0 4px">Belge Ekle</h3>
+  /* S7.1 §22: kullaniciya veritabani mimarisi ogretilmez. */
+  const yerYazi=ctx.contractId?'Bu dosya sözleşme kaydının belgelerine eklenecek.'
+    :ctx.jobId?'Bu dosya işin belgelerine eklenecek.':'Bu dosya kurumun belgelerine eklenecek.';
+  modal(`<h3 style="margin:0 0 4px">${on==='sozlesme'&&!ctx.contractId?'Sözleşme Belgesi Ekle':on==='teklif'?'Teklif Belgesi Ekle':'Belge Ekle'}</h3>
     <p class="muted" style="font-size:12.5px;margin:0 0 12px">${hedef}</p>
     ${ekAlan('bl')}
-    ${ctx.jobId&&w&&w.customer_id?`<label class="qc-who" style="margin-top:10px"><input type="checkbox" id="blOrg">
+    <p class="fhint" style="margin-top:10px">${yerYazi}</p>
+    ${ctx.jobId&&w&&w.customer_id?`<label class="qc-who" style="margin-top:4px"><input type="checkbox" id="blOrg">
       <span>Kurumun belgelerinde de görünsün${orgAd?' ('+esc(orgKisa(orgAd,30))+')':''}</span></label>`:''}
-    <p class="fhint" style="margin-top:10px">Sözleşme ya da teklif eklemek yapısal bir sözleşme/teklif kaydı oluşturmaz; dosya işin belgesi olarak saklanır.</p>
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
       <button class="btn btn-ghost btn-sm" onclick="closeModal()">Vazgeç</button>
       <button class="btn btn-primary btn-sm" onclick="belgeEkleKaydet()">Kaydet</button></div>`);
@@ -3973,8 +4129,10 @@ function belgeMenu(ev,docId,linkId,tip,ctxId,orgId){
   const items=[];
   if(sahip) items.push(`<button type="button" role="menuitem" onclick="belgeTurForm(${docId})">Adı / türü düzelt</button>`);
   if(tip==='is'&&orgId&&!kurumdaVar) items.push(`<button type="button" role="menuitem" onclick="belgeKurumaBagla(${docId},${orgId})">Kurumun belgelerine de ekle</button>`);
-  /* S7 §25: yuklenmis sozlesme belgesinden yapisal kayit - yeniden yukleme yok. */
-  if(d.doc_type==='sozlesme'&&!tum.some(l=>l.contract_id)&&(tip==='is'||tip==='kurum'))
+  /* S7 §25: yuklenmis sozlesme belgesinden yapisal kayit - yeniden yukleme yok.
+     S7.1 §19: gunluk akis belge-oncelikli; kalemleri elle yeniden yazdirmak
+     normal ekibe SUNULMAZ. Yetenek admin icin ikincil olarak durur. */
+  if(isAdmin()&&d.doc_type==='sozlesme'&&!tum.some(l=>l.contract_id)&&(tip==='is'||tip==='kurum'))
     items.push(`<button type="button" role="menuitem" onclick="puMenuKapat();sozForm({docId:${docId},jobId:${tip==='is'?ctxId:0},custId:${tip==='is'?(orgId||0):ctxId}})">Sözleşme kaydı oluştur</button>`);
   if(kaldirabilir) items.push(`<button type="button" role="menuitem" class="sil" onclick="belgeBaglamdanKaldir(${docId},${linkId},'${tip}')">${tip==='is'?'Bu işten kaldır':'Kurumdan kaldır'}</button>`);
   if(!items.length){ toast('Bu belge için yapılabilecek bir işlem yok.'); return; }
@@ -4045,7 +4203,7 @@ function workTimelineCiz(){
   box.innerHTML=(ui._workEntries||[]).map(e=>{
     const sys=e.source==='system';
     const aks=e.action_status;
-    return `<div class="list-item" style="${sys?'opacity:.72':''}">
+    return `<div class="list-item" data-e="${e.id}" style="${sys?'opacity:.72':''}">
       <div class="nm">${String(e.body||'').trim()?esc(e.body):'<span class="muted">Dosya paylaşıldı</span>'}${ekSeridi(e.document_links)}</div>
       <div class="meta">
         ${esc(trAnTarih(e.occurred_at))}${e.created_by_team_id&&tm[e.created_by_team_id]?' · '+esc(tm[e.created_by_team_id]):''}
@@ -4075,12 +4233,6 @@ async function workTakip(id,takipEt){
   if(r===null)return;
   toast(takipEt?'Takibe alındı.':'Takip bırakıldı.');
   workAc(id);
-}
-async function workLifeDegis(id){
-  const ls=gv('wLife'), cr=gv('wClose');
-  await guard(()=>api('job_lifecycle',{id,lifecycle_status:ls,closed_reason:cr}),'Durum değiştirilemedi');
-  /* S4.4: sistem hareketi artik VERITABANI tetikleyicisinden gelir (trg_jobs_hareket). */
-  toast('Durum güncellendi.'); workAc(id);
 }
 function entryForm(id,jobId,aksiyon){
   const x=(ui._workEntries||[]).find(e=>e.id===id)||{};
@@ -4418,7 +4570,7 @@ async function jobSave(){
   /* Kısa oluşturma formunda mecra/tedarikçi/tarih alanları HİÇ YOKTUR;
      düzenleme formunda vardır. Yokken `undefined` göndermek yerine alanı
      hiç eklemiyoruz, böylece mevcut değerler ezilmez. */
-  const row={id:+gv('jid')||0,title:gv('jt'),status:gv('js')||'temas_takip',
+  const row={id:+gv('jid')||0,title:gv('jt').replace(/\s+/g,' ').trim(),status:gv('js')||'temas_takip',
     customer_id:cid, primary_contact_id:num(gv('jkisi')),
     is_urgent:!!(document.getElementById('jAcil')||{}).checked};
   if(document.getElementById('jn'))   row.note=gv('jn');
@@ -4684,6 +4836,10 @@ function opEkVarsayilan(t){
 }
 function opEkTurGuncelle(){ if(EK.op) Object.assign(EK.op,opEkVarsayilan(gv('opT'))); }
 async function opForm(id,jobId){
+  /* S7.1 §26: YENI kayit cok satirli formdan acilir. Olusturulduktan sonra
+     her operasyon bagimsiz bir `work_operations` satiridir ve asagidaki tek
+     kayit formuyla duzenlenir (§34) - kalici bir "toplu" kavrami yoktur. */
+  if(!id) return opTopluForm(jobId);
   /* S6: Work detayindan aciliyorsa ONCE o isin taze listesi okunur; aksi
      halde daha once acilmis Baski & Montaj ekraninin bayat listesi (ekleri
      eksik) kullanilabilirdi. */
@@ -4800,6 +4956,188 @@ async function opSave(){
   closeModal(); toast('Kaydedildi.');
   if(ui.section==='operasyon') renderSection(); else workAc(jid);
 }
+/* ============ TOPLU BASKI / MONTAJ GIRISI (S7.1 §26-§34) ==============
+   Tek oturumda ayni Work icin N operasyon. Ust kisim ORTAK baglam (is,
+   uygulayan, tarih, durum, not, ortak dosya); satirlar degisen alanlar
+   (tur, pozisyon, aciklama, adet, olcu, serbest yer, maliyet).
+   Kayit `operations_batch_create` RPC'siyle TEK islemdir: ya tum satirlar
+   (+ ortak dosyanin her satira baglantisi) yazilir ya hicbiri. Dosya
+   fiziksel olarak BIR kez yuklenir; N baglanti satiri alir.
+   Pozisyon dizisi tek satirda SAKLANMAZ: her pozisyon kendi satiri. */
+const OPB_TUR=[['baski','Baskı'],['montaj','Montaj'],['sokum','Söküm']];
+async function opTopluForm(jobId){
+  const veri=await guard(()=>Promise.all([api('jobs_list'),api('customers_list'),sozUnitYukle()]),'Form açılamadı');
+  if(!veri) return;
+  const [jobs,custs]=veri;
+  const jid=jobId||((history.state&&history.state.v==='work'&&ui._work)?ui._work.id:0)||0;
+  ui._opb={sec:new Set(),satir:[opbYeniSatir('baski')],ara:''};
+  ekYeni('opb',opEkVarsayilan('baski'));
+  const aktifIsler=(jobs||[]).filter(j=>j.lifecycle_status!=='kapandi'||String(j.id)===String(jid));
+  modal(`<h3 style="margin:0 0 4px">Yeni Baskı / Montaj Kaydı</h3>
+    <p class="muted" style="font-size:12.5px;margin:0 0 12px">Birden çok yüzey ve iş türü tek seferde girilir; her satır ayrı bir kayıt olur.</p>
+    <div class="opb-ort">
+      <div class="field"><label class="flabel" for="opbJob">İş *</label>
+        <select class="inp" id="opbJob">${jid?'':'<option value="">— iş seçin —</option>'}
+          ${aktifIsler.map(j=>`<option value="${j.id}" ${String(jid)===String(j.id)?'selected':''}>${esc(j.title)}</option>`).join('')}</select></div>
+      <div class="field"><label class="flabel" for="opbSup">Uygulayan / tedarikçi</label>
+        <select class="inp" id="opbSup"><option value="">— yok —</option>${(custs||[]).slice(0,800).map(x=>`<option value="${x.id}">${esc(x.firma||('#'+x.id))}</option>`).join('')}</select></div>
+      <div class="field"><label class="flabel" for="opbDate">Planlanan tarih</label><input class="inp" type="date" id="opbDate"></div>
+      <div class="field"><label class="flabel" for="opbSt">Durum</label>
+        <select class="inp" id="opbSt">${OPSTAT.map(t=>`<option value="${t[0]}" ${t[0]==='planned'?'selected':''}>${t[1]}</option>`).join('')}</select></div>
+    </div>
+
+    <details class="opb-pk" open>
+      <summary>Pozisyonlardan satır üret <span class="chip" id="opbSecSay">0 seçili</span></summary>
+      <div class="opb-pk-h">
+        <input class="inp inp-sm" id="opbAra" placeholder="Pozisyon ara — P1, Megalight, M1…" aria-label="Pozisyon ara" oninput="opbAraDegis()">
+        <span class="opb-pk-t" role="group" aria-label="Üretilecek tür">${OPB_TUR.map(([v,l])=>`<label><input type="checkbox" class="opbT" value="${v}" ${v==='baski'?'checked':''}> ${l}</label>`).join('')}</span>
+        <button type="button" class="btn btn-outline btn-sm" onclick="opbUret()">Satır üret</button>
+      </div>
+      <div class="opb-pk-l" id="opbPkL"></div>
+    </details>
+
+    <div class="tc-h" style="margin-top:12px">Satırlar <span class="chip" id="opbSay"></span></div>
+    <div class="opb-rows" id="opbRows"></div>
+    <div style="display:flex;gap:8px;align-items:center;margin:6px 0 12px">
+      <button type="button" class="btn btn-outline btn-sm" onclick="opbSatirEkle()">${ic('plus',15)} Satır ekle</button>
+      <span class="fhint" id="opbOzet" style="margin:0 0 0 auto"></span></div>
+
+    <div class="field"><label class="flabel" for="opbNote">Genel not (tüm satırlara)</label>
+      <input class="inp" id="opbNote" placeholder="ör. Vinil germe, gece montajı"></div>
+    <div class="field"><span class="flabel">Ortak dosyalar — baskı provası, ölçü belgesi (tek dosya, tüm satırlara bağlanır)</span>
+      ${ekAlan('opb')}</div>
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button class="btn btn-ghost btn-sm" onclick="closeModal()">Vazgeç</button>
+      <button class="btn btn-primary btn-sm" id="opbKaydetB" onclick="opbKaydet()">Kaydet</button></div>`);
+  const m=document.getElementById('modal'); if(m) m.classList.add('mdl-gen');
+  opbPkCiz(); opbSatirCiz();
+}
+let _opbSay=0;
+function opbYeniSatir(t,unit){ return {k:'r'+(++_opbSay),operation_type:t||'baski',unit_id:unit||'',description:'',quantity:'',dimensions:'',location_text:'',cost:''}; }
+const opbBos=s=>!s.unit_id&&!String(s.description||'').trim()&&!String(s.location_text||'').trim()
+  &&s.quantity===''&&!String(s.dimensions||'').trim()&&s.cost==='';
+const opbUnitAd=u=>u?`${u.name}${u.urun?' · '+u.urun:''}`:'';
+function opbPkCiz(){
+  const box=document.getElementById('opbPkL'); if(!box||!ui._opb) return;
+  const q=(ui._opb.ara||'').toLocaleLowerCase('tr').trim();
+  const L=(ui._sozUnitList||[]).filter(u=>!q||[u.name,u.urun,u.mecra,u.konum].join(' ').toLocaleLowerCase('tr').includes(q));
+  const gr={}; L.forEach(u=>{ const k=u.mecra||'—'; (gr[k]=gr[k]||[]).push(u); });
+  box.innerHTML=Object.keys(gr).length?Object.entries(gr).map(([k,us])=>`<div class="opb-pk-g">
+      <div class="opb-pk-gh">${esc(k)} <button type="button" class="btn-link" onclick="opbGrupSec(${esc(JSON.stringify(us.map(u=>u.id)))})">tümü</button></div>
+      <div class="opb-pk-gl">${us.map(u=>`<label class="opb-pk-i ${ui._opb.sec.has(u.id)?'on':''}" title="${esc([u.mecra,u.urun,u.name,u.olcu].filter(Boolean).join(' · '))}">
+        <input type="checkbox" ${ui._opb.sec.has(u.id)?'checked':''} onchange="opbSec(${u.id},this.checked)">
+        <b>${esc(u.name)}</b><em>${esc(u.urun||'')}</em></label>`).join('')}</div></div>`).join('')
+    :'<p class="tc-bos">Eşleşen pozisyon yok.</p>';
+  const s=document.getElementById('opbSecSay'); if(s) s.textContent=ui._opb.sec.size+' seçili';
+}
+function opbAraDegis(){ ui._opb.ara=gv('opbAra'); opbPkCiz(); }
+function opbSec(id,on){ if(on) ui._opb.sec.add(id); else ui._opb.sec.delete(id); opbPkCiz(); }
+function opbGrupSec(ids){ const hepsi=ids.every(i=>ui._opb.sec.has(i));
+  ids.forEach(i=>hepsi?ui._opb.sec.delete(i):ui._opb.sec.add(i)); opbPkCiz(); }
+function opbOku(){
+  document.querySelectorAll('#opbRows .opb-r').forEach(r=>{
+    const s=ui._opb.satir.find(x=>x.k===r.dataset.k); if(!s) return;
+    r.querySelectorAll('[data-f]').forEach(e=>{ s[e.dataset.f]=e.value; });
+  });
+}
+/* Secili pozisyonlar x secili turler -> satir. Ayni pozisyon+tur zaten
+   varsa tekrar eklenmez; hic doldurulmamis bos satirlar yer acar. */
+function opbUret(){
+  opbOku();
+  const turler=[...document.querySelectorAll('.opbT:checked')].map(x=>x.value);
+  if(!ui._opb.sec.size){ mpAlert('Önce listeden pozisyon seçin.','Pozisyon'); return; }
+  if(!turler.length){ mpAlert('En az bir tür seçin (Baskı, Montaj ya da Söküm).','Tür'); return; }
+  const U=ui._sozUnits||{};
+  const sirali=[...ui._opb.sec].sort((a,b)=>String((U[a]||{}).name).localeCompare(String((U[b]||{}).name),'tr',{numeric:true}));
+  let eklenen=0;
+  ui._opb.satir=ui._opb.satir.filter(s=>!opbBos(s));
+  turler.forEach(t=>sirali.forEach(uid=>{
+    if(ui._opb.satir.some(s=>String(s.unit_id)===String(uid)&&s.operation_type===t)) return;
+    const s=opbYeniSatir(t,uid); const u=U[uid]; if(u&&u.olcu) s.dimensions=u.olcu;
+    ui._opb.satir.push(s); eklenen++; }));
+  ui._opb.sec.clear(); opbPkCiz(); opbSatirCiz();
+  toast(eklenen?eklenen+' satır eklendi.':'Seçilen pozisyonlar zaten satırlarda.');
+}
+function opbSatirEkle(){ opbOku(); const son=ui._opb.satir[ui._opb.satir.length-1];
+  ui._opb.satir.push(opbYeniSatir(son?son.operation_type:'baski')); opbSatirCiz();
+  const r=[...document.querySelectorAll('#opbRows .opb-r')].pop(); if(r){ const e=r.querySelector('[data-f="unit_id"]'); if(e) e.focus(); } }
+function opbSatirSil(k){ opbOku(); ui._opb.satir=ui._opb.satir.filter(x=>x.k!==k); opbSatirCiz(); }
+function opbSatirCiz(){
+  const box=document.getElementById('opbRows'); if(!box) return;
+  const L=ui._sozUnitList||[];
+  const gr={}; L.forEach(u=>{ const k=u.mecra||'—'; (gr[k]=gr[k]||[]).push(u); });
+  const uOpt=sel=>`<option value="">— pozisyon yok —</option>`+Object.entries(gr).map(([k,us])=>
+    `<optgroup label="${esc(k)}">${us.map(u=>`<option value="${u.id}" ${String(sel)===String(u.id)?'selected':''}>${esc(opbUnitAd(u))}</option>`).join('')}</optgroup>`).join('');
+  box.innerHTML=ui._opb.satir.length?ui._opb.satir.map((s,ix)=>`<div class="opb-r ${s._hata?'hata':''}" data-k="${s.k}">
+      <span class="opb-n" aria-hidden="true">${ix+1}</span>
+      <select class="inp inp-sm" data-f="operation_type" aria-label="Satır ${ix+1} tür" onchange="opbOzet()">${OPB_TUR.concat(s.operation_type==='diger'?[['diger','Diğer']]:[]).map(t=>`<option value="${t[0]}" ${s.operation_type===t[0]?'selected':''}>${t[1]}</option>`).join('')}</select>
+      <select class="inp inp-sm opb-u" data-f="unit_id" aria-label="Satır ${ix+1} pozisyon">${uOpt(s.unit_id)}</select>
+      <input class="inp inp-sm opb-d" data-f="description" aria-label="Satır ${ix+1} açıklama" placeholder="Açıklama" value="${esc(s.description)}">
+      <input class="inp inp-sm" data-f="quantity" type="number" min="0.01" step="0.01" aria-label="Satır ${ix+1} adet" placeholder="Adet" value="${esc(s.quantity)}">
+      <input class="inp inp-sm" data-f="dimensions" aria-label="Satır ${ix+1} ölçü" placeholder="Ölçü" value="${esc(s.dimensions)}">
+      <input class="inp inp-sm" data-f="location_text" aria-label="Satır ${ix+1} serbest yer" placeholder="Yer (serbest)" value="${esc(s.location_text)}">
+      <input class="inp inp-sm" data-f="cost" type="number" min="0" step="0.01" aria-label="Satır ${ix+1} maliyet" placeholder="Maliyet ₺" value="${esc(s.cost)}">
+      <button type="button" class="ek-x" aria-label="Satır ${ix+1} çıkar" onclick="opbSatirSil('${s.k}')">✕</button>
+      ${s._hata?`<div class="opb-e" role="alert">${esc(s._hata)}</div>`:''}
+    </div>`).join('')
+    :'<p class="tc-bos">Satır yok. Pozisyon seçip “Satır üret” ya da “Satır ekle”.</p>';
+  opbOzet();
+}
+function opbOzet(){
+  opbOku();
+  const n=ui._opb.satir.length, say={};
+  ui._opb.satir.forEach(s=>{ say[s.operation_type]=(say[s.operation_type]||0)+1; });
+  const e=document.getElementById('opbSay'); if(e) e.textContent=String(n);
+  const o=document.getElementById('opbOzet');
+  if(o) o.textContent=n?`${n} kayıt oluşacak: `+OPB_TUR.concat([['diger','Diğer']]).filter(t=>say[t[0]]).map(t=>`${t[1]} ×${say[t[0]]}`).join(', '):'';
+}
+/* Istemci dogrulamasi sunucudakiyle ayni kurallari satir numarasiyla
+   gosterir; sunucu yine son soz sahibidir (RPC ayni kontrolleri yapar). */
+function opbDogrula(){
+  let ilk=null;
+  ui._opb.satir.forEach((s,ix)=>{
+    let h=null; const q=s.quantity===''?null:+s.quantity, c=s.cost===''?null:+s.cost;
+    if(!s.unit_id&&!String(s.description).trim()&&!String(s.location_text).trim()) h='Pozisyon, yer ya da açıklama girilmeli.';
+    else if(q!=null&&!(q>0)) h='Adet sıfırdan büyük olmalı.';
+    else if(c!=null&&!(c>=0)) h='Maliyet negatif olamaz.';
+    s._hata=h; if(h&&!ilk) ilk=`Satır ${ix+1}: ${h}`;
+  });
+  return ilk;
+}
+async function opbKaydet(){
+  opbOku();
+  const jid=+gv('opbJob');
+  if(!jid){ mpAlert('İş seçimi zorunlu.','Baskı / Montaj'); return; }
+  if(!ui._opb.satir.length){ mpAlert('En az bir satır ekleyin.','Baskı / Montaj'); return; }
+  const hata=opbDogrula(); opbSatirCiz();
+  if(hata){ mpAlert(hata+' Hiçbir kayıt oluşturulmadı.','Baskı / Montaj');
+    const r=document.querySelector('#opbRows .opb-r.hata'); if(r) r.scrollIntoView({block:'center'}); return; }
+  if(ekTurEksik('opb')){ mpAlert('Eklenen her dosya için belge türünü seçin.','Dosya'); return; }
+  const num=v=>v===''||v==null?null:+v;
+  const ort={supplier_org_id:+gv('opbSup')||null, planned_date:gv('opbDate')||null,
+             status:gv('opbSt')||'planned', note:(gv('opbNote')||'').trim()||null};
+  const rows=ui._opb.satir.map(s=>({...ort, operation_type:s.operation_type, unit_id:+s.unit_id||null,
+    description:String(s.description).trim()||null, quantity:num(s.quantity),
+    dimensions:String(s.dimensions).trim()||null, location_text:String(s.location_text).trim()||null,
+    cost:num(s.cost)}));
+  modalBusy(true,'Kaydediliyor…');
+  /* Once dosyalar (varsa) depolamaya; sonra TEK islem: satirlar + baglantilar. */
+  if(!await ekYukle('opb')){ modalBusy(false); mpAlert('Bazı dosyalar yüklenemedi. Hiçbir kayıt oluşturulmadı; tekrar deneyin.','Dosya'); return; }
+  const docs=ekGovde('opb',[]);
+  let r=null;
+  try{ r=await api('operations_batch',{job_id:jid,rows,docs}); }
+  catch(err){
+    await ekGeriAl('opb','Kaydedilemedi.');
+    modalBusy(false);
+    mpAlert(((err&&err.message)||String(err))+' — Hiçbir kayıt oluşturulmadı.','Baskı / Montaj'); return; }
+  ekBekleyen('opb').forEach(i=>{ i.kaydedildi=true; });
+  modalBusy(false); closeModal();
+  const ids=(r&&r.ids)||[];
+  toast(ids.length>1?ids.length+' kayıt eklendi.':'Kayıt eklendi.');
+  if(ui.section==='operasyon'&&!(history.state&&history.state.v==='work')) renderSection();
+  else workAc(jid,{bolum:'op',opId:ids[0]||null});
+}
+
 /* Modal icinden ise/guncellemeye gecis. Ikisi de kaydedilmemis form
    icerigini birakip gider; bu yuzden yalniz KAYITLI bir operasyonda
    gosterilir (opForm'da id&&jid kosulu). */
@@ -5061,7 +5399,7 @@ function hrDurum(){
   let d; try{ d=JSON.parse(sessionStorage.getItem('mp_hareket')||'null'); }catch(e){ d=null; }
   d={...HR_DEF,...(d||{})};
   d.p=Math.max(1,+d.p||1);
-  if(!['','isler','operasyon','muhasebe'].includes(d.tur)) d.tur='';
+  if(!['',...Object.keys(HR_GRUP)].includes(d.tur)) d.tur='';
   return d;
 }
 function hrYaz(d){ try{ sessionStorage.setItem('mp_hareket',JSON.stringify(d)); }catch(e){} }
@@ -5069,8 +5407,31 @@ function hrGor(g){ hrYaz({...hrDurum(),gor:g}); renderSection(); }
 function hrTur(t){ hrYaz({...hrDurum(),tur:t,p:1}); renderSection(); }   /* filtre -> 1. sayfa */
 function hrSayfa(p){ hrYaz({...hrDurum(),p:Math.max(1,p)}); renderSection();
   const b=document.querySelector('.pnl-a .card'); if(b) b.scrollIntoView({block:'start'}); }
-const HR_TUR=[['','Tümü'],['isler','İşler'],['operasyon','Operasyon'],['muhasebe','Muhasebe']];
-const HR_ROZET={work_created:'Yeni iş',work_phase:'Aşama',work_lifecycle:'Durum',work_contract:'Sözleşme',
+/* S7.1 §35-§37 — sistem hareketi taksonomisi. Her `system_kind` TAM OLARAK
+   bir kategoriye duser (Tümü hepsini gosterir). Tablo basina sekme YOK;
+   yapisal sozlesme olaylari ayri bir "Ticari" sekmesi acmaz - is akisi
+   belge-oncelikli oldugu icin Belgeler altinda. Legacy NULL tur yalniz Tümü. */
+const HR_GRUP={
+  isler:['work_created','work_renamed','work_phase','work_lifecycle','quote_revised','quote_approved'],
+  operasyon:['operation_created','operation_status'],
+  muhasebe:['work_accounting'],
+  belgeler:['document_added','contract_created','contract_signed','contract_cancelled','work_contract']};
+const HR_TUR=[['','Tümü'],['isler','İşler'],['operasyon','Operasyon'],['muhasebe','Muhasebe'],['belgeler','Belgeler']];
+/* Olay -> Work Detail'de acilacak baglam. Yalniz YAPISAL alanlar okunur. */
+function hareketHedef(h){
+  const k=h.system_kind||'';
+  if(k==='operation_created'||k==='operation_status') return {bolum:'op',opId:h.work_operation_id||null};
+  if(k==='work_accounting') return {bolum:'muhasebe'};
+  if(k==='document_added') return {bolum:'belge',docId:h.document_id||null};
+  if(k.startsWith('contract_')||k.startsWith('quote_')||k==='work_contract') return {bolum:'ticari'};
+  if(k==='work_lifecycle') return {bolum:'durum'};
+  return {bolum:'faz'};
+}
+function hareketAc(id){
+  const h=(ui._hrSatir||{})[id]; if(!h||!h.job_id) return;
+  workAc(h.job_id,{...hareketHedef(h),entryId:h.id});
+}
+const HR_ROZET={work_created:'Yeni iş',work_renamed:'İş adı',work_phase:'Aşama',work_lifecycle:'Durum',work_contract:'Sözleşme',
   work_accounting:'Muhasebe',operation_created:'Operasyon',operation_status:'Operasyon',
   quote_revised:'Teklif',quote_approved:'Teklif',document_added:'Belge',
   contract_created:'Sözleşme',contract_signed:'Sözleşme',contract_cancelled:'Sözleşme'};
@@ -5095,7 +5456,12 @@ function hareketGovde(veri,hg,jm,cm,tm){
     const org=orgId?(cm[orgId]||''):'';
     const orgGoster=org&&!(j&&orgBaslikTekrari(j.title,org));
     const aktor=h.created_by_team_id&&tm[h.created_by_team_id]?tm[h.created_by_team_id]:null;
-    return `<article class="pu hr">
+    /* S7.1 §39: satir bir baglanti - olayin anlasilacagi yere gider. Ic
+       chip'ler kendi hedefine gider ve satir tiklamasini tetiklemez. */
+    const git=!!h.job_id;
+    const hedefAd={op:'operasyonu',belge:'belgeyi',muhasebe:'muhasebe bilgisini',ticari:'ticari bölümü',durum:'işin durumunu',faz:'işi'}[hareketHedef(h).bolum];
+    return `<article class="pu hr ${git?'hr-git':''}" ${git?`role="link" tabindex="0" title="${esc(hedefAd?'İlgili '+hedefAd+' aç':'Aç')}"
+        onclick="hareketAc(${h.id})" onkeydown="if(event.key==='Enter')hareketAc(${h.id})"`:''}>
       <div class="pu-h">
         <div class="pu-hl">
           <b class="${aktor?'':'hr-oto'}">${aktor?esc(aktor):'Sistem'}</b>
@@ -5103,13 +5469,14 @@ function hareketGovde(veri,hg,jm,cm,tm){
           <span class="hr-k">${esc(HR_ROZET[h.system_kind]||'Hareket')}</span>
         </div>
         ${(j||orgGoster)?`<div class="pu-hr">
-          ${j&&h.job_id?`<button type="button" class="pu-chip is" onclick="workAc(${h.job_id})" title="${esc(j.title)}">${esc(orgKisa(j.title,40))}</button>`:''}
-          ${orgGoster?`<button type="button" class="pu-chip org" onclick="orgAc(${orgId})" title="${esc(org)}">${esc(orgKisa(org,26))}</button>`:''}
+          ${j&&h.job_id?`<button type="button" class="pu-chip is" onclick="event.stopPropagation();workAc(${h.job_id})" title="${esc(j.title)}">${esc(orgKisa(j.title,40))}</button>`:''}
+          ${orgGoster?`<button type="button" class="pu-chip org" onclick="event.stopPropagation();orgAc(${orgId})" title="${esc(org)}">${esc(orgKisa(org,26))}</button>`:''}
         </div>`:''}
       </div>
-      <p class="hr-t">${esc(h.body)}</p>
+      <p class="hr-t">${esc(h.body)}${git?'<span class="hr-git-o" aria-hidden="true"> ›</span>':''}</p>
     </article>`;
   };
+  ui._hrSatir={}; satirlar.forEach(h=>ui._hrSatir[h.id]=h);
   /* Saklanan sayfa, veri azaldigi icin artik yoksa bos ekran "hareket yok"
      gibi okunmasin: 1. sayfaya donus sunulur. */
   const liste=satirlar.length?satirlar.map(satir).join('')
