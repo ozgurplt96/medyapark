@@ -34,6 +34,11 @@ seeds/*
 # logic only - no company data.
 !seeds/98_ps3_affiliation_backfill.sql
 
+# PS8: media occupancy_mode for the M1 LED area + deterministic legacy
+# exact-period consolidation, replayed after the company-data seed. No
+# company data.
+!seeds/98_ps8_media_backfill.sql
+
 # Eski düzen (seeds/ öncesi) — geri gelmesin
 seed.sql
 seed_local_auth.sql
