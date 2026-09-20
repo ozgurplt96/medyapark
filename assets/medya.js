@@ -91,11 +91,27 @@ function mdModel(o){
   return M;
 }
 function mdEszamanli(a){ return !!a&&a.occupancy_mode==='concurrent'; }
+/* Eski modelleme alanı (S8.1 §8). Kayıt ve geçmiş için MODELDE kalır —
+   kurum geçmişi, kayıt detayı ve dışa aktarım onu okumaya devam eder —
+   ama operasyonel çalışma yüzeyinde (Bugün / Yıl / seçim) listelenmez. */
+function mdArsiv(a){ return !!a&&a.legacy_archived===true; }
 /* Dar hücre etiketi: kurumun ilk anlamlı kelime(ler)i ("ACIBADEM",
-   "ADN LEZZET"). Yalnız GÖRÜNTÜLEME; tam unvan title/detayda kalır. */
+   "ADN LEZZET"). Yalnız GÖRÜNTÜLEME; tam unvan title/detayda kalır.
+   Kurum bilinmiyorsa BOŞ döner: eski aylık kayıtların çoğunda kurum yok
+   ve her hücreye "kurum yok" yazmak matrisi okunmaz hale getiriyordu
+   (S8.1 §15). Hücrenin kesik çerçevesi ve title'ı zaten bunu söyler. */
 function mdOrgEtiket(ad){ const w=orgKisa(ad||'',40).split(/\s+/).filter(Boolean);
-  if(!w.length) return 'kurum yok'; let k=w[0]; if(k.length<5&&w[1]) k+=' '+w[1];
+  if(!w.length) return ''; let k=w[0]; if(k.length<5&&w[1]) k+=' '+w[1];
   return k.length>13?k.slice(0,12)+'…':k; }
+
+/* ---------- Yüz kimliği: kod yalnız KENDİ alanında benzersizdir ----------
+   M1'de Megalight P1–P12 ve Raket P1–P29 aynı `Pxx-A/B` kodlamasını
+   kullanır; `P3-A` üç ayrı alanda birden vardır (Megalight, Raket, LED).
+   Alan başlığının altında kod tek başına doğrudur, fakat alan bağlamının
+   DIŞINDA gösterilen her kod aile adıyla nitelenir (S8.1 §7). */
+function mdAile(M,a){ return (a&&(M.pm[a.product_id]||a.name))||''; }
+function mdYuzAdi(M,u){ if(!u) return '';
+  const aile=mdAile(M,M.altById[u.alt_mecra_id]); return aile?`${aile} ${u.name}`:String(u.name||''); }
 
 /* Kaydın bugünkü zamansal durumu — SAKLANMAZ, tarihten türetilir. */
 function mdKapsarMi(r,gun){ return r.block_start<=gun&&(r.block_end==null||r.block_end>=gun); }
@@ -190,9 +206,29 @@ function mdSure(a){ return a&&a.creative_seconds?`${a.creative_seconds} sn`:''; 
    ========================================================== */
 const MD_DEF={gor:'bugun',site:null,alan:'',kurum:'',is:'',durum:'',q:'',yil:null};
 function mdDurum(){ let d={}; try{ d=JSON.parse(sessionStorage.getItem('mp_medya')||'{}')||{}; }catch(e){}
-  return {...MD_DEF,...d}; }
+  /* `acik` her çağrıda YENİ nesne: paylaşılan bir varsayılanı mutasyona
+     açmak oturum boyunca sızan durum yaratırdı. */
+  return {...MD_DEF,...d,acik:(d.acik&&typeof d.acik==='object'&&!Array.isArray(d.acik))?{...d.acik}:{}}; }
 function mdDurumYaz(d){ try{ sessionStorage.setItem('mp_medya',JSON.stringify(d)); }catch(e){} }
 function mdFiltreli(st){ return !!(st.kurum||st.is); }
+
+/* ---------- Grup aç / kapa (S8.1 §11) ----------
+   Ağır grup KAPALIYKEN gövdesi hiç ÜRETİLMEZ; CSS ile gizlenmez.
+   M1'de bu, açılışta 82 satır + 984 matris hücresi yerine üç başlık
+   demektir. Durum oturum boyunca hatırlanır. */
+function mdGrupKey(a){ return 'g'+a.id; }
+/* Etkin durum = KULLANICININ açık kararı varsa o, yoksa varsayılan.
+   İki ayrı kaynak gerekiyor: yalnız "açık olanlar" listesi tutulsaydı,
+   varsayılan olarak açılmış bir grubu kapatmak onu listeye EKLER ve
+   durumu tersine çevirirdi. */
+function mdAcikMi(st,a,vars){ const k=mdGrupKey(a), m=st.acik||{};
+  return Object.prototype.hasOwnProperty.call(m,k)?!!m[k]:!!vars; }
+function mdGrupAc(key,su){ const st=mdDurum();
+  st.acik={...(st.acik||{}),[key]:!su}; mdDurumYaz(st); mdCiz(); }
+
+/* Bu çizimde GERÇEKTEN render edilen yüz kimlikleri. Seçim çubuğu
+   yalnız buradan beslenir; görünmeyen hiçbir yüz "seçili" sayılmaz. */
+let _mdGoruntu=new Set();
 
 /* Mecralar'a git: yüzeye göre doğru rota (dashGo ile aynı kural). */
 function medyaGit(ek){
@@ -226,10 +262,13 @@ async function listeler(c,o){
   /* Kapsam: alan (site) seçimi bilinçlidir. Kurum/İş filtresi alanlar
      arası bir sorudur ("bu kurum hangi mecralarda?"), o yüzden alan
      seçimi o durumda "Tümü" olabilir. */
-  const siteler=M.mecs.filter(m=>(M.altByMec[m.id]||[]).some(a=>(M.unitsByAlt[a.id]||[]).length||mdEszamanli(a))
+  const siteler=M.mecs.filter(m=>(M.altByMec[m.id]||[]).some(a=>!mdArsiv(a)&&((M.unitsByAlt[a.id]||[]).length||mdEszamanli(a)))
                                  ||(M.orphanByMec[m.id]||[]).length);
-  if(!mdFiltreli(st)&&(st.site==null||!siteler.some(m=>String(m.id)===String(st.site))))
-    st.site=siteler.length?siteler[0].id:null;
+  /* Site-first (S8.1 §9): mecra seçilmeden dev bir global envanter
+     DÖKÜLMEZ. Seçim oturum boyunca hatırlanır; hatırlanan mecra artık
+     geçerli değilse seçiciye dönülür — ilk mecra sessizce seçilmez. */
+  if(st.site!=null&&!siteler.some(m=>String(m.id)===String(st.site))) st.site=null;
+  const secili=st.site!=null||mdFiltreli(st);
   if(!st.yil) st.yil=new Date().getFullYear();
   mdDurumYaz(st);
   ui._mSec=ui._mSec||new Set();
@@ -255,18 +294,15 @@ async function listeler(c,o){
       <button class="btn btn-ghost btn-sm" onclick="mdDisaAktar()">${ic('download',15)} Excel'e Aktar</button>
       ${isAdmin()?`<button class="btn btn-ghost btn-sm" onclick="bookImport()" title="Eski tablolardan ay bazlı kayıt aktarımı — kesin dönemli yerleşim oluşturmaz">${ic('upload',15)} Eski ay kaydı al</button>`:''}
     </div></div>
-    <div class="md-site" role="group" aria-label="Mecra alanı">
-      ${mdFiltreli(st)?`<button type="button" class="md-sp ${st.site==null?'on':''}" aria-pressed="${st.site==null}" onclick="mdSet({site:null})">Tüm alanlar</button>`:''}
+    <div class="md-site" role="group" aria-label="Mecra">
+      ${secili?`<button type="button" class="md-sp md-sp-all ${st.site==null?'on':''}" aria-pressed="${st.site==null}"
+          onclick="mdSet({site:null})">‹ Tüm mecralar</button>`:''}
       ${siteler.map(m=>`<button type="button" class="md-sp ${String(st.site)===String(m.id)?'on':''}" aria-pressed="${String(st.site)===String(m.id)}"
           onclick="mdSet({site:${m.id},alan:''})">${esc(m.name)}</button>`).join('')}
     </div>
-    <div class="sec-card fbar md-fbar">
+    ${secili?`<div class="sec-card fbar md-fbar">
       <div class="fbar-row">
         <input class="inp" id="mdQ" placeholder="Ara: pozisyon, kurum veya iş…" value="${esc(st.q)}" oninput="mdAra(this.value)" aria-label="Ara">
-        <select class="inp" id="mdAlan" onchange="mdSet({alan:this.value})" aria-label="Alan / tür">
-          <option value="">Tüm alanlar / türler</option>
-          ${(st.site!=null?(M.altByMec[st.site]||[]):M.alts).filter(a=>(M.unitsByAlt[a.id]||[]).length||mdEszamanli(a))
-            .map(a=>`<option value="${a.id}" ${String(st.alan)===String(a.id)?'selected':''}>${esc(a.name)}${M.pm[a.product_id]?' · '+esc(M.pm[a.product_id]):''}</option>`).join('')}</select>
         <select class="inp" id="mdKurum" onchange="mdSet({kurum:this.value,site:this.value?null:mdDurum().site})" aria-label="Kurum">
           <option value="">Tüm kurumlar</option>
           ${kurumOpt.map(k=>`<option value="${k.id}" ${String(st.kurum)===String(k.id)?'selected':''}>${esc(orgKisa(k.ad,40))}</option>`).join('')}</select>
@@ -278,7 +314,7 @@ async function listeler(c,o){
           ${[['bos','Boş'],['dolu','Dolu (kesin)'],['rezerve','Opsiyon'],['yakinda','Yakında boşalıyor'],['eski','Eski / ay bazlı']]
             .map(([k,l])=>`<option value="${k}" ${st.durum===k?'selected':''}>${l}</option>`).join('')}</select>
       </div>
-    </div>
+    </div>`:''}
     <div id="mdAfilt"></div>
     <div id="mdOdak"></div>
     <div id="mdGovde"></div>
@@ -318,7 +354,11 @@ function mdCiz(){
   const M=ui._M, st=mdDurum(), box=document.getElementById('mdGovde'); if(!M||!box) return;
   mdAfiltCiz(M,st);
   const gun=mdBugun();
+  /* Her çizim görünür yüz kümesini SIFIRDAN kurar; seçim çubuğu buna
+     göre uzlaştırılır (S8.1 §17). */
+  _mdGoruntu=new Set();
   if(mdFiltreli(st)) box.innerHTML=mdBaglamCiz(M,st,gun);
+  else if(st.site==null) box.innerHTML=mdSiteSec(M,st,gun);
   else if(st.gor==='yil') box.innerHTML=mdYilCiz(M,st);
   else box.innerHTML=mdBugunCiz(M,st,gun);
   mdSecimCiz();
@@ -384,17 +424,56 @@ function mdAraEslesir(M,r,q){
     .some(v=>String(v||'').toLocaleLowerCase('tr').includes(t));
 }
 
+/* ---------- MECRA SEÇİCİ: çalışma kapsamı önce gelir (S8.1 §9) --------
+   Global envanter dökümü yerine mecra listesi + her mecranın bugünkü
+   özeti. Özet, açmadan önce "burada iş var mı?" sorusunu cevaplar. */
+function mdSiteSec(M,st,gun){
+  const kart=m=>{
+    const alanlar=(M.altByMec[m.id]||[]).filter(a=>!mdArsiv(a));
+    const yetim=M.orphanByMec[m.id]||[];
+    let yuz=0,dolu=0,opsiyon=0,yakinda=0,led=0,ledA=0;
+    const parca=[];
+    alanlar.forEach(a=>{
+      if(mdEszamanli(a)){ led++; ledA+=mdYayinlar(M,a.id,gun).aktif.filter(r=>r.record_kind!=='legacy').length;
+        parca.push(`${esc(a.name)} <span class="muted">· eşzamanlı</span>`); return; }
+      const us=M.unitsByAlt[a.id]||[]; if(!us.length) return;
+      yuz+=us.length;
+      us.forEach(u=>{ const d=mdYuzeyDurum(M,u,gun);
+        if(d.kod==='dolu') dolu++; else if(d.kod==='rezerve') opsiyon++; else if(d.kod==='yakinda'){ yakinda++; if(d.taahhut==='rezerve') opsiyon++; else dolu++; } });
+      parca.push(`${esc(mdAile(M,a))} <span class="muted">· ${us.length} yüz</span>`);
+    });
+    if(yetim.length){ yuz+=yetim.length; parca.push(`Diğer pozisyonlar <span class="muted">· ${yetim.length} yüz</span>`); }
+    const bos=yuz-dolu-opsiyon;
+    const ozet=[yuz?`${dolu} dolu`:'',opsiyon?`${opsiyon} opsiyon`:'',yuz?`${bos} boş`:'',
+      yakinda?`<span class="md-yk">${yakinda} yakında boşalıyor</span>`:'',
+      led?(ledA?`${ledA} aktif yayın`:'yayın yok'):''].filter(Boolean).join(' · ');
+    return `<button type="button" class="md-sk" onclick="mdSet({site:${m.id},alan:''})">
+      <span class="md-sk-t">${esc(m.name)}</span>
+      <span class="md-sk-g">${parca.join(' &nbsp;·&nbsp; ')||'<span class="muted">alan tanımlı değil</span>'}</span>
+      <span class="md-sk-o">${ozet||'<span class="muted">kayıt yok</span>'}</span></button>`;
+  };
+  const siteler=M.mecs.filter(m=>(M.altByMec[m.id]||[]).some(a=>!mdArsiv(a)&&((M.unitsByAlt[a.id]||[]).length||mdEszamanli(a)))
+                                 ||(M.orphanByMec[m.id]||[]).length);
+  if(!siteler.length) return '<div class="sec-card"><p class="empty">Tanımlı mecra yok.</p></div>';
+  return `<p class="md-sk-h">Çalışmak istediğiniz mecrayı seçin.</p>
+    <div class="md-skl">${siteler.map(kart).join('')}</div>`;
+}
+
 /* ---------- BUGÜN: alan → alan grubu → yüzeyler / kampanyalar (B25) ---- */
 function mdBugunCiz(M,st,gun){
   const m=M.mecById[st.site]; if(!m) return '<div class="sec-card"><p class="empty">Mecra alanı seçin.</p></div>';
   const q=String(st.q||'').toLocaleLowerCase('tr').trim();
-  const alanlar=[...(M.altByMec[m.id]||[])];
+  const alanlar=[...(M.altByMec[m.id]||[])].filter(a=>!mdArsiv(a));
   const yetim=M.orphanByMec[m.id]||[];
   if(yetim.length) alanlar.push({id:'x'+m.id,name:'Diğer pozisyonlar',_sahte:true,mecra_id:m.id});
+  const tekGrup=alanlar.length===1, arayis=!!(q||st.durum);
   let html='', topSay=0;
   alanlar.forEach(a=>{
     if(st.alan&&String(st.alan)!==String(a.id)) return;
-    if(mdEszamanli(a)){ if(st.durum&&st.durum!=='eski') return; html+=mdLedKart(M,a,gun,q); topSay++; return; }
+    /* Varsayılan açık olma kuralı — mdVarsayilanAcik (aşağıda). */
+    const vars=mdVarsayilanAcik(M,a,{tek:tekGrup,arayis,odak:ui._mOdak});
+    const acik=mdAcikMi(st,a,vars);
+    if(mdEszamanli(a)){ if(st.durum&&st.durum!=='eski') return; html+=mdLedKart(M,a,gun,q,acik); topSay++; return; }
     const us=a._sahte?yetim:(M.unitsByAlt[a.id]||[]);
     if(!us.length) return;
     const satirlar=[]; const say={bos:0,dolu:0,rezerve:0,yakinda:0,pasif:0};
@@ -415,17 +494,53 @@ function mdBugunCiz(M,st,gun){
     });
     if(!satirlar.length&&(st.durum||q)) return;
     topSay+=satirlar.length;
-    html+=mdStatikBolum(M,a,us,satirlar,say);
+    html+=mdStatikBolum(M,a,us,satirlar,say,acik);
   });
   const baslik=`<div class="md-okunma"><span>${esc(m.name)} · <b>${esc(mdGunDe(gun).replace(/'.*$/,''))}</b> itibarıyla</span>
     <span class="muted">veri okunma ${String(M.okunma.getHours()).padStart(2,'0')}:${String(M.okunma.getMinutes()).padStart(2,'0')}</span></div>`;
   return baslik+(html||`<div class="sec-card"><p class="empty">Bu filtreye uyan yüzey ya da yayın yok.</p></div>`);
 }
 
-function mdStatikBolum(M,a,us,satirlar,say){
+/* ---------- Grup varsayılan açık mı? (S8.1 §11) ----------
+   Kural sade tutulur: kapalı başlar, çünkü özet satırı zaten "burada iş
+   var mı?" sorusunu cevaplar ve M1 açılışta 82 satır dökmez. Yalnız
+   kullanıcının zaten o gruba baktığı belli olan durumlarda açılır. */
+function mdVarsayilanAcik(M,a,o){
+  o=o||{};
+  if(o.tek) return true;                               // tek grup varsa gizlemenin anlamı yok
+  if(o.arayis) return true;                            // arama/durum filtresi: kullanıcı avlanıyor
+  if(o.odak){                                          // Hareketler'den derin bağlantı
+    const r=(M.recs||[]).find(x=>x.placement_id===o.odak);
+    if(r){ if(String(r.alt_mecra_id)===String(a.id)) return true;
+      const u=M.unitById[r.unit_id]; if(u&&String(u.alt_mecra_id)===String(a.id)) return true; }
+  }
+  return false;
+}
+
+function mdStatikBolum(M,a,us,satirlar,say,acik){
   const urun=M.pm[a.product_id]||'';
   const secSay=satirlar.filter(x=>ui._mSec.has(x.u.id)).length;
-  const acik=satirlar.filter(x=>x.u.active!==false&&x.d.kod!=='pasif').map(x=>x.u.id);
+  const secilebilir=satirlar.filter(x=>x.u.active!==false&&x.d.kod!=='pasif').map(x=>x.u.id);
+  const key=mdGrupKey(a);
+  const ozet=[say.dolu?`${say.dolu} dolu`:'',say.rezerve?`${say.rezerve} opsiyon`:'',
+    say.yakinda?`<span class="md-yk">${say.yakinda} yakında boşalıyor</span>`:'',`${say.bos} boş`,say.pasif?`${say.pasif} pasif`:'']
+    .filter(Boolean).join(' · ');
+  const baslik=`<header class="md-ah">
+      <button type="button" class="md-gt" aria-expanded="${acik}" onclick="mdGrupAc('${key}',${acik})">
+        <span class="md-gcv" aria-hidden="true">${acik?'▾':'▸'}</span>
+        <span class="md-gh">${esc(urun||a.name)}</span>
+        <span class="md-as">${esc(urun?a.name:'')}${urun?' · ':''}${us.length} yüz</span>
+        <span class="md-oz">${ozet}</span>
+        ${satirlar.length!==us.length?`<span class="md-oz md-eslesen">${satirlar.length} eşleşen</span>`:''}
+      </button>
+      <span class="md-ah-r">
+        ${acik&&secilebilir.length?`<button type="button" class="btn-link" onclick="mdTumunuSec([${secilebilir.join(',')}],${secSay<secilebilir.length})">${secSay<secilebilir.length?'Tümünü seç':'Seçimi kaldır'}</button>`:''}
+        ${acik&&isAdmin()&&!a._sahte?`<button class="btn btn-outline btn-sm" onclick="lAddPos(${a.id},${a.mecra_id},${a.product_id||'null'})" title="Envanter: yeni pozisyon (yönetici)">+ Pozisyon</button>`:''}
+      </span>
+    </header>`;
+  /* KAPALIYKEN gövde hiç üretilmez ve yüzler görünür kümeye girmez. */
+  if(!acik) return `<section class="sec-card md-alan md-kapali" data-a="${a.id}">${baslik}</section>`;
+  satirlar.forEach(x=>_mdGoruntu.add(x.u.id));
   /* A/B yüzleri AYRI satırdır (P3-A ≠ P3-B); ortak taban görsel olarak
      gruplanır ama yüzler asla birleştirilmez (B35). */
   let onceki=null;
@@ -445,19 +560,7 @@ function mdStatikBolum(M,a,us,satirlar,say){
       <td onclick="mYuzeyAc(${u.id})"><span class="${d.kesin||d.kod==='bos'?'':'muted'} ${d.kod==='yakinda'?'md-yk':''} ${d.kod==='bos'&&d.sonraki?'md-yakl':''}">${esc(d.alt||'')}</span></td>
     </tr>`;
   }).join('');
-  const ozet=[say.dolu?`${say.dolu} dolu`:'',say.rezerve?`${say.rezerve} opsiyon`:'',
-    say.yakinda?`<span class="md-yk">${say.yakinda} yakında boşalıyor</span>`:'',`${say.bos} boş`,say.pasif?`${say.pasif} pasif`:'']
-    .filter(Boolean).join(' · ');
-  return `<section class="sec-card md-alan" data-a="${a.id}">
-    <header class="md-ah">
-      <h4>${esc(urun||a.name)}</h4>
-      <span class="md-as">${esc(urun?a.name:'')}${urun?' · ':''}${us.length} yüz</span>
-      <span class="md-oz">${ozet}</span>
-      <span class="md-ah-r">
-        ${acik.length?`<button type="button" class="btn-link" onclick="mdTumunuSec([${acik.join(',')}],${secSay<acik.length})">${secSay<acik.length?'Tümünü seç':'Seçimi kaldır'}</button>`:''}
-        ${isAdmin()&&!a._sahte?`<button class="btn btn-outline btn-sm" onclick="lAddPos(${a.id},${a.mecra_id},${a.product_id||'null'})" title="Envanter: yeni pozisyon (yönetici)">+ Pozisyon</button>`:''}
-      </span>
-    </header>
+  return `<section class="sec-card md-alan" data-a="${a.id}">${baslik}
     <div class="tbl-wrap"><table class="tbl rowlink md-tbl"><thead><tr>
       <th class="md-cb" aria-label="Seç"></th><th style="width:92px">Pozisyon</th><th style="width:150px">Durum</th>
       <th>Kurum</th><th>İş</th><th style="width:170px">Dönem</th><th style="width:200px">Ne zaman boş</th></tr></thead>
@@ -466,7 +569,7 @@ function mdStatikBolum(M,a,us,satirlar,say){
 }
 
 /* ---------- LED kartı: eşzamanlı yayın (B38) ---------- */
-function mdLedKart(M,a,gun,q){
+function mdLedKart(M,a,gun,q,acik){
   const y=mdYayinlar(M,a.id,gun);
   const esle=r=>!q||[r.customer_name,r.work_title].join(' ').toLocaleLowerCase('tr').includes(q);
   const kanonOnce=(p,q)=>(p.record_kind==='legacy')-(q.record_kind==='legacy')||String(p.block_start).localeCompare(String(q.block_start));
@@ -479,14 +582,20 @@ function mdLedKart(M,a,gun,q){
       <span class="md-kmp-s">${r.record_kind==='legacy'?'<span class="md-st md-st-eski">ay bazlı eski kayıt</span>'
         :(r.commitment==='reserved'?'<span class="md-st md-st-rezerve">Opsiyon</span>':'')}${a.creative_seconds&&r.record_kind!=='legacy'?`<span class="md-sn">${a.creative_seconds} sn</span>`:''}</span>
     </li>`;
-  return `<section class="sec-card md-alan md-led" data-a="${a.id}">
-    <header class="md-ah">
-      <h4>${esc(a.name)}</h4>
-      <span class="md-tag">Eşzamanlı yayın${a.creative_seconds?` · kreatif ${a.creative_seconds} sn`:''}</span>
+  const key=mdGrupKey(a);
+  const ozet=`${yeni.length?`<b>${yeni.length} aktif yayın</b>`:'Aktif yayın yok'}${aktif.length>yeni.length?` · ${aktif.length-yeni.length} ay bazlı eski kayıt`:''}${yak.length?` · ${yak.length} yaklaşan`:''}`;
+  const baslik=`<header class="md-ah">
+      <button type="button" class="md-gt" aria-expanded="${acik}" onclick="mdGrupAc('${key}',${acik})">
+        <span class="md-gcv" aria-hidden="true">${acik?'▾':'▸'}</span>
+        <span class="md-gh">${esc(a.name)}</span>
+        <span class="md-tag">Eşzamanlı yayın${a.creative_seconds?` · kreatif ${a.creative_seconds} sn`:''}</span>
+        <span class="md-oz">${ozet}</span>
+      </button>
       <span class="md-ah-r"><button class="btn btn-sm act act-work" onclick="mForm({hedefler:[{alt_mecra_id:${a.id}}]})">${ic('plus',15)} Yayın Ekle</button></span>
-    </header>
-    <p class="md-led-n">${yeni.length?`<b>${yeni.length} aktif yayın</b>`:'Aktif yayın yok'}${aktif.length>yeni.length?` · ${aktif.length-yeni.length} ay bazlı eski kayıt`:''}</p>
-    ${aktif.length?`<ul class="md-kmpl">${aktif.map(satir).join('')}</ul>`:''}
+    </header>`;
+  if(!acik) return `<section class="sec-card md-alan md-led md-kapali" data-a="${a.id}">${baslik}</section>`;
+  return `<section class="sec-card md-alan md-led" data-a="${a.id}">${baslik}
+    ${aktif.length?`<ul class="md-kmpl">${aktif.map(satir).join('')}</ul>`:'<p class="md-led-n">Aktif yayın yok.</p>'}
     ${yak.length?`<div class="md-alt-b">Yaklaşan</div><ul class="md-kmpl">${yak.slice(0,6).map(satir).join('')}</ul>
       ${yak.length>6?`<p class="muted" style="font-size:12px;margin:6px 0 0">+${yak.length-6} yaklaşan yayın · Yıl görünümünde</p>`:''}`:''}
     <p class="md-not">Aynı anda birden çok reklamveren yayında olabilir. Kapasite, slot ya da frekans kuralı tanımlı değildir.</p>
@@ -505,25 +614,32 @@ function mdYilCiz(M,st,filtre){
   const kFiltre=r=>(!filtre.kurum||String(r.customer_id)===String(filtre.kurum))
                  &&(!filtre.is||String(r.work_id)===String(filtre.is))
                  &&(!q||mdAraEslesir(M,r,q));
+  /* Kurum/İş bağlamında sonuç kümesi zaten küçüktür — orada gruplar
+     açık gelir. Serbest Yıl görünümünde ağır matris yalnız AÇIK grup
+     için üretilir (S8.1 §14). */
+  const daralt=!!(filtre.kurum||filtre.is||q);
   let html='';
   siteler.forEach(m=>{
-    const alanlar=[...(M.altByMec[m.id]||[])];
+    const alanlar=[...(M.altByMec[m.id]||[])].filter(a=>!mdArsiv(a));
     const yetim=M.orphanByMec[m.id]||[];
     if(yetim.length) alanlar.push({id:'x'+m.id,name:'Diğer pozisyonlar',_sahte:true,mecra_id:m.id});
+    const tekGrup=alanlar.length===1;
     let ic_='';
     alanlar.forEach(a=>{
       if(st.alan&&String(st.alan)!==String(a.id)) return;
+      const vars=mdVarsayilanAcik(M,a,{tek:tekGrup,arayis:daralt,odak:ui._mOdak});
+      const acik=mdAcikMi(st,a,vars);
       if(mdEszamanli(a)){
         const l=(M.byArea[a.id]||[]).filter(r=>r.commitment!=='cancelled'&&r.block_start<=ye&&(r.block_end==null||r.block_end>=yb)).filter(kFiltre);
-        if(!l.length&&(filtre.kurum||filtre.is||q)) return;
-        ic_+=mdLedYil(M,a,l,y,aylar); return;
+        if(!l.length&&daralt) return;
+        ic_+=mdLedYil(M,a,l,y,aylar,acik); return;
       }
       const us=a._sahte?yetim:(M.unitsByAlt[a.id]||[]);
       const satirlar=us.map(u=>({u,l:(M.byUnit[u.id]||[]).filter(r=>r.commitment!=='cancelled'
           &&r.block_start<=ye&&(r.block_end==null||r.block_end>=yb))}))
-        .filter(x=>!(filtre.kurum||filtre.is||q)||x.l.some(kFiltre)||(q&&String(x.u.name).toLocaleLowerCase('tr').includes(q)));
+        .filter(x=>!daralt||x.l.some(kFiltre)||(q&&String(x.u.name).toLocaleLowerCase('tr').includes(q)));
       if(!satirlar.length) return;
-      ic_+=mdStatikYil(M,a,satirlar,aylar,buYm,kFiltre,filtre);
+      ic_+=mdStatikYil(M,a,satirlar,aylar,buYm,kFiltre,filtre,acik,y);
     });
     if(!ic_) return;
     html+=`<div class="md-yil-site"><h3 class="md-yil-t">${esc(m.name)}</h3>${ic_}</div>`;
@@ -531,8 +647,23 @@ function mdYilCiz(M,st,filtre){
   return html||`<div class="sec-card"><p class="empty">${y} için bu kapsamda kayıt yok.</p></div>`;
 }
 
-function mdStatikYil(M,a,satirlar,aylar,buYm,kFiltre,filtre){
+function mdStatikYil(M,a,satirlar,aylar,buYm,kFiltre,filtre,acik,yil){
   const urun=M.pm[a.product_id]||'';
+  const key=mdGrupKey(a);
+  const kayitSay=satirlar.reduce((n,x)=>n+x.l.length,0);
+  const baslik=`<header class="md-ah">
+      <button type="button" class="md-gt" aria-expanded="${acik}" onclick="mdGrupAc('${key}',${acik})">
+        <span class="md-gcv" aria-hidden="true">${acik?'▾':'▸'}</span>
+        <span class="md-gh">${esc(urun||a.name)}</span>
+        <span class="md-as">${esc(urun?a.name:'')}${urun?' · ':''}${satirlar.length} yüz</span>
+        <span class="md-oz">${kayitSay?`${yil||''} yılında ${kayitSay} kayıt`:`${yil||''} yılında kayıt yok`}</span>
+      </button>
+      ${acik?`<span class="md-ah-r md-lej"><span class="md-yk-c st-kes"><span>Kesin</span></span><span class="md-yk-c st-rez"><span>Opsiyon</span></span>
+        <span class="md-yk-c st-eski"><span>Eski / ay bazlı</span></span><span class="muted">17→ başlangıç · →02 bitiş günü</span></span>`:''}
+    </header>`;
+  /* 58 yüzlük Raket matrisi KAPALIYKEN hiç kurulmaz — 696 hücrelik DOM
+     üretip CSS ile gizlemek §14'ün tam olarak yasakladığı şeydi. */
+  if(!acik) return `<section class="sec-card md-alan md-kapali" data-a="${a.id}">${baslik}</section>`;
   let onceki=null;
   const bas=`<div class="md-yr md-yh"><div class="md-yl">Pozisyon</div>${aylar.map((ym,i)=>
       `<div class="md-ym ${ym<buYm?'gecmis':''} ${ym===buYm?'bu':''}">${AY_KISA[i]}</div>`).join('')}</div>`;
@@ -549,23 +680,23 @@ function mdStatikYil(M,a,satirlar,aylar,buYm,kFiltre,filtre){
         const sag=be&&be<ae&&mdYm(be)===ym?`→${mdGun(be).getDate()}`:'';
         const soluk=(filtre.kurum||filtre.is)&&!kFiltre(r);
         const bas_=`${r.customer_name||'kurum belirtilmemiş'} · ${r.work_title||'iş bağlı değil'} · ${mdDonem(r)} · ${eski?'ay bazlı eski kayıt':(r.record_kind==='legacy'?'eski kayıt':MD_TAAHHUT[r.commitment])}`;
+        /* Kurum bilinmiyorsa hücreye metin YAZILMAZ; kesik çerçeve ve
+           title zaten "eski kayıt, kurum belirtilmemiş" der (§15). */
+        const etiket=mdOrgEtiket(r.customer_name);
         return `<button type="button" class="md-yk-c ${eski||r.record_kind==='legacy'?'st-eski':r.commitment==='reserved'?'st-rez':'st-kes'} ${soluk?'soluk':''}"
-          title="${esc(bas_)}" onclick="${r.placement_id?`mKayitAc(${r.placement_id})`:`mEskiAc(${r.booking_id})`}"><span>${esc(mdOrgEtiket(r.customer_name))}</span>${(sol||sag)?`<i>${sol}${sol&&sag?' ':''}${sag}</i>`:''}</button>`;
+          title="${esc(bas_)}" onclick="${r.placement_id?`mKayitAc(${r.placement_id})`:`mEskiAc(${r.booking_id})`}">${etiket?`<span>${esc(etiket)}</span>`:''}${(sol||sag)?`<i>${sol}${sol&&sag?' ':''}${sag}</i>`:''}</button>`;
       }).join('')+(k.length>2?`<span class="md-yk-f">+${k.length-2}</span>`:'');
       return `<div class="md-yc ${ym<buYm?'gecmis':''} ${ym===buYm?'bu':''}">${cips}</div>`;
     }).join('');
     return `<div class="md-yr ${yeni?'md-g':''}" data-u="${u.id}"><div class="md-yl" onclick="mYuzeyAc(${u.id})" title="${esc(u.name)}">
       <b>${esc(yeni?taban:'')}</b>${yuzlu?`<span class="md-yuz">${esc(p.surf)}</span>`:''}${u.active===false?'<span class="md-pas">pasif</span>':''}</div>${hucreler}</div>`;
   }).join('');
-  return `<section class="sec-card md-alan" data-a="${a.id}"><header class="md-ah"><h4>${esc(urun||a.name)}</h4>
-      <span class="md-as">${esc(urun?a.name:'')}${urun?' · ':''}${satirlar.length} yüz</span>
-      <span class="md-ah-r md-lej"><span class="md-yk-c st-kes"><span>Kesin</span></span><span class="md-yk-c st-rez"><span>Opsiyon</span></span>
-        <span class="md-yk-c st-eski"><span>Eski / ay bazlı</span></span><span class="muted">17→ başlangıç · →02 bitiş günü</span></span></header>
+  return `<section class="sec-card md-alan" data-a="${a.id}">${baslik}
     <div class="md-yil-w"><div class="md-yil">${bas}${govde}</div></div></section>`;
 }
 
 /* LED Yıl: "kim, ne zaman yayında?" — örtüşme görünür biçimde serbesttir. */
-function mdLedYil(M,a,l,y,aylar){
+function mdLedYil(M,a,l,y,aylar,acik){
   const gunSay=(y%4===0&&(y%100!==0||y%400===0))?366:365;
   const yb=`${y}-01-01`;
   const gunNo=iso=>Math.round((mdGun(iso)-mdGun(yb))/864e5);
@@ -591,10 +722,17 @@ function mdLedYil(M,a,l,y,aylar){
           ${gen>9?`<span>${esc(mdOrgEtiket(r.customer_name))}</span>`:''}</button>
       </div></div>`;
   };
-  return `<section class="sec-card md-alan md-led" data-a="${a.id}"><header class="md-ah"><h4>${esc(a.name)}</h4>
-      <span class="md-tag">Eşzamanlı kampanya çizelgesi${a.creative_seconds?` · kreatif ${a.creative_seconds} sn`:''}</span>
-      <span class="md-as">${sirali.length} kayıt</span>
-      <span class="md-ah-r"><button class="btn btn-sm act act-work" onclick="mForm({hedefler:[{alt_mecra_id:${a.id}}]})">${ic('plus',15)} Yayın Ekle</button></span></header>
+  const key=mdGrupKey(a);
+  const baslik=`<header class="md-ah">
+      <button type="button" class="md-gt" aria-expanded="${acik}" onclick="mdGrupAc('${key}',${acik})">
+        <span class="md-gcv" aria-hidden="true">${acik?'▾':'▸'}</span>
+        <span class="md-gh">${esc(a.name)}</span>
+        <span class="md-tag">Eşzamanlı kampanya çizelgesi${a.creative_seconds?` · kreatif ${a.creative_seconds} sn`:''}</span>
+        <span class="md-oz">${y} yılında ${sirali.length} kayıt</span>
+      </button>
+      <span class="md-ah-r"><button class="btn btn-sm act act-work" onclick="mForm({hedefler:[{alt_mecra_id:${a.id}}]})">${ic('plus',15)} Yayın Ekle</button></span></header>`;
+  if(!acik) return `<section class="sec-card md-alan md-led md-kapali" data-a="${a.id}">${baslik}</section>`;
+  return `<section class="sec-card md-alan md-led" data-a="${a.id}">${baslik}
     <div class="md-tl">
       <div class="md-tlr md-tlh"><div class="md-tll">Kurum · iş</div>
         <div class="md-tlt" style="grid-template-columns:${kol}">${aylar.map((ym,i)=>`<i>${AY_KISA[i]}</i>`).join('')}
@@ -611,17 +749,30 @@ function mdSec(uid,on){ if(on) ui._mSec.add(uid); else ui._mSec.delete(uid);
   const tr=document.querySelector(`tr[data-u="${uid}"]`); if(tr) tr.classList.toggle('md-sel',on);
   mdSecimCiz(); }
 function mdTumunuSec(ids,on){ ids.forEach(i=>on?ui._mSec.add(i):ui._mSec.delete(i)); mdCiz(); }
+/* Seçim çubuğu — TEK doğruluk kaynağı bu çizimde render edilen yüzlerdir
+   (S8.1 §17). Önceki davranışta `ui._mSec` küresel bir Set'ti ve hiçbir
+   kapsam değişiminde uzlaştırılmıyordu: Çukurova'da S05–S08 seçip M1'e
+   geçince çubuk hâlâ "S05, S06, S07, S08 seçildi" diyordu ve o kodlar
+   ekranda hiçbir yerde yoktu. Artık görünmeyen yüz seçili KALAMAZ.
+
+   Adlar aile adıyla nitelenir: `P3-A` alan bağlamı dışında tek başına
+   benzersiz değildir (M1'de üç ayrı alanda birden vardır). */
 function mdSecimCiz(){
   const b=document.getElementById('mdSecim'); if(!b) return;
-  const n=ui._mSec?ui._mSec.size:0;
+  const M=ui._M; ui._mSec=ui._mSec||new Set();
+  [...ui._mSec].forEach(id=>{ if(!_mdGoruntu.has(id)) ui._mSec.delete(id); });
+  const n=ui._mSec.size;
   b.hidden=!n;
   if(!n){ b.innerHTML=''; return; }
-  const M=ui._M;
-  const adlar=[...ui._mSec].map(id=>(M.unitById[id]||{}).name).filter(Boolean);
-  b.innerHTML=`<span><b>${n} yüz seçildi</b> <span class="muted">${esc(adlar.slice(0,6).join(', '))}${adlar.length>6?' …':''}</span></span>
+  const adlar=[...ui._mSec].map(id=>mdYuzAdi(M,M.unitById[id])).filter(Boolean);
+  b.innerHTML=`<span><b>${n} yüz seçildi</b> <span class="muted">${esc(adlar.slice(0,4).join(', '))}${adlar.length>4?` +${adlar.length-4}`:''}</span></span>
     <button class="btn btn-ghost btn-sm" onclick="ui._mSec.clear();mdCiz()">Seçimi temizle</button>
-    <button class="btn btn-primary btn-sm" onclick="mForm({hedefler:[...ui._mSec].map(id=>({unit_id:id}))})">${ic('plus',15)} Yerleşim oluştur</button>`;
+    <button class="btn btn-outline btn-sm" onclick="mdSecimAc('reserved')">${ic('plus',15)} Opsiyon</button>
+    <button class="btn btn-primary btn-sm" onclick="mdSecimAc('confirmed')">${ic('plus',15)} Rezervasyon</button>`;
 }
+/* İş dilinde eylem (S8.1 §13). Model adı teknik kalır; düğme ekibin
+   kelimesini kullanır ve aynı `mForm` / `media_create` yolundan geçer. */
+function mdSecimAc(taah){ mForm({hedefler:[...ui._mSec].map(id=>({unit_id:id})),taah}); }
 
 /* ==========================================================
    YERLEŞİM / KAMPANYA FORMU (tek form: oluştur + düzenle)
@@ -643,7 +794,11 @@ async function mForm(o){
     .sort((a,b)=>String(a.title).localeCompare(String(b.title),'tr'));
   ui._mf={hedefler,esz,kayit:r,devral:false,onIs:o.isId||null};
   const vars=r?r.work_id:(o.isId||'');
-  modal(`<h3 style="margin:0 0 4px">${r?(esz?'Yayını düzenle':'Yerleşimi düzenle'):(esz?'Yeni LED yayını':'Yeni yerleşim')}</h3>
+  /* Açılıştaki taahhüt: düzenlemede kaydın kendisi, oluşturmada çağıran
+     iş dili eylemi (+ Rezervasyon / + Opsiyon), yoksa Opsiyon. */
+  const taahOn=r?r.commitment:(o.taah||'reserved');
+  const yeniBaslik=esz?'Yeni LED yayını':(o.taah==='confirmed'?'Yeni rezervasyon':o.taah==='reserved'?'Yeni opsiyon':'Yeni yerleşim');
+  modal(`<h3 style="margin:0 0 4px">${r?(esz?'Yayını düzenle':'Yerleşimi düzenle'):yeniBaslik}</h3>
     <p class="muted" style="margin:0 0 12px;font-size:12.5px">${esz
       ?'Eşzamanlı yayın: aynı dönemde başka reklamverenler de yayında olabilir.'
       :'Her seçili yüz için AYRI bir kayıt oluşturulur; biri çakışırsa hiçbiri kaydedilmez.'}</p>
@@ -668,9 +823,9 @@ async function mForm(o){
     </div>
     ${esz?'':`<div class="field"><span class="flabel">Durum</span>
       <div class="ws-switch inline" role="radiogroup" aria-label="Durum" id="mfTaah">
-        <button type="button" data-v="reserved" class="${(!r||r.commitment==='reserved')?'on':''}" onclick="mfTaah(this)">Opsiyon</button>
-        <button type="button" data-v="confirmed" class="${r&&r.commitment==='confirmed'?'on':''}" onclick="mfTaah(this)">Kesin</button></div>
-      <p class="fhint" style="margin:4px 0 0">Opsiyon ve kesin kayıt yüzü aynı şekilde bloklar; iptal edilen kayıt bloklamaz.</p></div>`}
+        <button type="button" data-v="reserved" class="${taahOn==='reserved'?'on':''}" onclick="mfTaah(this)">Opsiyon</button>
+        <button type="button" data-v="confirmed" class="${taahOn==='confirmed'?'on':''}" onclick="mfTaah(this)">Rezervasyon</button></div>
+      <p class="fhint" style="margin:4px 0 0">Opsiyon ve rezervasyon yüzü aynı şekilde bloklar; iptal edilen kayıt bloklamaz.</p></div>`}
     <div class="field"><label class="flabel" for="mfSoz">Sözleşme kalemi <span class="muted">(opsiyonel)</span></label>
       <select class="inp" id="mfSoz"><option value="">Bağlı değil</option></select>
       <p class="fhint" style="margin:4px 0 0">Yalnız yapısal sözleşme kalemi varsa. Belge eklenmiş olması gerekmez.</p></div>
@@ -833,7 +988,8 @@ async function mYuzeyAc(uid){
       <span class="fhint" style="margin:0">Kısa bakım otomatik pasife almaz (BR-M03).</span></div>`:''}
     <div class="md-mf-b"><span style="flex:1"></span>
       <button class="btn btn-ghost btn-sm" onclick="closeModal()">Kapat</button>
-      ${u.active!==false?`<button class="btn btn-primary btn-sm" onclick="mForm({hedefler:[{unit_id:${uid}}]})">${ic('plus',15)} Yerleşim</button>`:''}</div>`);
+      ${u.active!==false?`<button class="btn btn-outline btn-sm" onclick="mForm({hedefler:[{unit_id:${uid}}],taah:'reserved'})">${ic('plus',15)} Opsiyon</button>
+      <button class="btn btn-primary btn-sm" onclick="mForm({hedefler:[{unit_id:${uid}}],taah:'confirmed'})">${ic('plus',15)} Rezervasyon</button>`:''}</div>`);
 }
 async function mYuzeyAktif(uid,aktif){
   const r=await guard(()=>api('unit_save',{id:uid,active:aktif,inactive_note:aktif?null:'Panelden elle pasife alındı'}),'Pozisyon durumu değiştirilemedi');

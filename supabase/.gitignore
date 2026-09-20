@@ -39,6 +39,11 @@ seeds/*
 # company data.
 !seeds/98_ps8_media_backfill.sql
 
+# PS8.1: Çukurova Kulübü eski alan modellemesi (Raket LED -> eşzamanlı,
+# S01-S15 slot alanı -> legacy_archived), şirket verisi seed'inden sonra
+# tekrar oynatılır. Yapısal karar; şirket verisi yok.
+!seeds/98_zz_ps81_media_legacy_areas.sql
+
 # Eski düzen (seeds/ öncesi) — geri gelmesin
 seed.sql
 seed_local_auth.sql

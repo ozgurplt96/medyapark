@@ -804,7 +804,7 @@ async function api(action, body){
        kayıt). Yazma: yalnız güvenilir RPC'ler (toplu, ya hep ya hiç).
        Eski `booking_toggle` / `bookings_all` / `booking_list` KALDIRILDI. */
     case 'media_areas':{ const {data,error}=await sb.from('alt_mecralar')
-        .select('id,mecra_id,name,product_id,occupancy_mode,creative_seconds,hidden,sort').order('sort').order('id');
+        .select('id,mecra_id,name,product_id,occupancy_mode,creative_seconds,hidden,legacy_archived,sort').order('sort').order('id');
       if(error)throw error; return ok(data); }
     case 'media_scope':{
       /* Paylaşılan kapsam sorgusu (Raporlar V2 aynı filtreleri kullanır).
