@@ -204,10 +204,7 @@ function mdSure(a){ return a&&a.creative_seconds?`${a.creative_seconds} sn`:''; 
 /* ==========================================================
    DURUM (sessionStorage — S4.1 konvansiyonu, ikinci depo YOK)
    ========================================================== */
-/* S8.2 — Halil'in Doluluk / Kiralama çerçevesi geri getirildi: `site` artık
-   "mecra süzgeci"dir (null = tüm mecralar), varsayılan görünüm Yıl ızgarası.
-   `tur` = mecra türü süzgeci (S2 keşfedilebilirlik). */
-const MD_DEF={gor:'yil',site:null,alan:'',kurum:'',is:'',durum:'',tur:'',q:'',yil:null};
+const MD_DEF={gor:'bugun',site:null,alan:'',kurum:'',is:'',durum:'',q:'',yil:null};
 function mdDurum(){ let d={}; try{ d=JSON.parse(sessionStorage.getItem('mp_medya')||'{}')||{}; }catch(e){}
   /* `acik` her çağrıda YENİ nesne: paylaşılan bir varsayılanı mutasyona
      açmak oturum boyunca sızan durum yaratırdı. */
@@ -228,18 +225,6 @@ function mdAcikMi(st,a,vars){ const k=mdGrupKey(a), m=st.acik||{};
   return Object.prototype.hasOwnProperty.call(m,k)?!!m[k]:!!vars; }
 function mdGrupAc(key,su){ const st=mdDurum();
   st.acik={...(st.acik||{}),[key]:!su}; mdDurumYaz(st); mdCiz(); }
-
-/* Mecra kartı (Halil'in `details.lgrp` çerçevesi) aynı açık-karar deposunu
-   kullanır: anahtar 'm<mecra_id>', alan grubu 'g<alt_mecra_id>'. Kart
-   KAPALIYKEN gövdesi hiç üretilmez. */
-function mdKartKey(m){ return 'm'+m.id; }
-function mdKartAcik(st,m,vars){ const k=mdKartKey(m), a=st.acik||{};
-  return Object.prototype.hasOwnProperty.call(a,k)?!!a[k]:!!vars; }
-/* "Tümünü aç / kapat" (Halil): tüm mecra kartları ve alan grupları. */
-function mdTumAc(ac){ const M=ui._M; if(!M) return; const st=mdDurum(); const k={...(st.acik||{})};
-  M.mecs.forEach(m=>{ k[mdKartKey(m)]=ac; k['gx'+m.id]=ac;
-    (M.altByMec[m.id]||[]).forEach(a=>{ k[mdGrupKey(a)]=ac; }); });
-  st.acik=k; mdDurumYaz(st); mdCiz(); }
 
 /* Bu çizimde GERÇEKTEN render edilen yüz kimlikleri. Seçim çubuğu
    yalnız buradan beslenir; görünmeyen hiçbir yüz "seçili" sayılmaz. */
@@ -276,22 +261,22 @@ async function listeler(c,o){
   /* `onbellek`: yalnız kapsam/görünüm değişti — veri yeniden okunmaz. */
   const M=(o&&o.onbellek&&ui._M)?ui._M:await mdYukle();
   const st=mdDurum();
-  const siteler=mdSiteler(M);
-  /* Hatırlanan mecra süzgeci artık geçerli değilse sessizce "tüm mecralar". */
+  /* Kapsam: alan (site) seçimi bilinçlidir. Kurum/İş filtresi alanlar
+     arası bir sorudur ("bu kurum hangi mecralarda?"), o yüzden alan
+     seçimi o durumda "Tümü" olabilir. */
+  const siteler=M.mecs.filter(m=>(M.altByMec[m.id]||[]).some(a=>!mdArsiv(a)&&((M.unitsByAlt[a.id]||[]).length||mdEszamanli(a)))
+                                 ||(M.orphanByMec[m.id]||[]).length);
+  /* Site-first (S8.1 §9): mecra seçilmeden dev bir global envanter
+     DÖKÜLMEZ. Seçim oturum boyunca hatırlanır; hatırlanan mecra artık
+     geçerli değilse seçiciye dönülür — ilk mecra sessizce seçilmez. */
   if(st.site!=null&&!siteler.some(m=>String(m.id)===String(st.site))) st.site=null;
+  const secili=st.site!=null||mdFiltreli(st);
   if(!st.yil) st.yil=new Date().getFullYear();
-  const g=st.gor==='bugun'?'bugun':'yil';
-  /* Durum süzgeci görünüme göre anlam taşır (yıl: hangi aylar; bugün: bugünkü
-     durum); görünüm değişince mdGor sıfırlar, geçersiz değer burada düşer. */
-  const DURUM=g==='yil'
-    ?[['dolu','Dolu ayı olanlar'],['rezerve','Opsiyon ayı olanlar'],['doluveya','Dolu veya opsiyon'],['bos',`Tamamen boş (${st.yil})`]]
-    :[['bos','Boş'],['dolu','Dolu (kesin)'],['rezerve','Opsiyon'],['yakinda','Yakında boşalıyor'],['eski','Eski / ay bazlı']];
-  if(st.durum&&!DURUM.some(d=>d[0]===st.durum)) st.durum='';
   mdDurumYaz(st);
   ui._mSec=ui._mSec||new Set();
 
-  /* Kurum / İş seçenekleri YALNIZ medya kaydı olanlardan gelir: soru "hangi
-     mecraları kullanıyor", 531 kurumluk bir liste değil. */
+  /* Filtre seçenekleri YALNIZ medya kaydı olan kurum / işlerden gelir:
+     soru "hangi mecraları kullanıyor", 531 kurumluk bir liste değil. */
   const kSay={}, iSay={};
   M.recs.filter(r=>r.commitment!=='cancelled'&&r.customer_id!=null).forEach(r=>{
     kSay[r.customer_id]=(kSay[r.customer_id]||0)+1; if(r.work_id) iSay[r.work_id]=(iSay[r.work_id]||0)+1; });
@@ -299,42 +284,39 @@ async function listeler(c,o){
     .sort((a,b)=>a.ad.localeCompare(b.ad,'tr'));
   const isOpt=Object.keys(iSay).map(id=>({id,ad:(M.jmap[id]||{}).title||('İş #'+id)}))
     .sort((a,b)=>a.ad.localeCompare(b.ad,'tr'));
-  const turOpt=mdTurSecenekleri(M);
 
-  c.innerHTML=`<div class="sec-head md-head"><h3>Doluluk / Kiralama</h3>
+  const g=st.gor==='yil'?'yil':'bugun';
+  c.innerHTML=`<div class="sec-head md-head"><div><h3>Doluluk</h3>
+      <p class="sub">Statik yüzeyler kesin dönemle, LED yayınları eşzamanlı kampanya olarak yönetilir.</p></div>
     <div class="md-head-r">
-      <button class="btn btn-ghost btn-sm" onclick="mdDisaAktar()" title="Excel'e Aktar" aria-label="Excel'e Aktar">${ic('download',15)}<span class="md-tx"> Excel'e Aktar</span></button>
-      ${isAdmin()?`<button class="btn btn-ghost btn-sm" onclick="bookImport()" title="Eski tablolardan ay bazlı kayıt aktarımı — kesin dönemli yerleşim oluşturmaz">${ic('upload',15)}<span class="md-tx"> Eski ay kaydı al</span></button>`:''}
       <div class="ws-switch inline" role="group" aria-label="Doluluk görünümü">
         <button type="button" class="${g==='bugun'?'on':''}" aria-pressed="${g==='bugun'}" onclick="mdGor('bugun')">Bugün</button>
-        <button type="button" class="${g==='yil'?'on':''}" aria-pressed="${g==='yil'}" onclick="mdGor('yil')">Yıl ızgarası</button></div>
-      <div class="year-nav" style="margin:0" ${g==='bugun'?'hidden':''}><button onclick="mdYil(-1)" aria-label="Önceki yıl">‹</button><span class="yr">${st.yil}</span><button onclick="mdYil(1)" aria-label="Sonraki yıl">›</button></div>
+        <button type="button" class="${g==='yil'?'on':''}" aria-pressed="${g==='yil'}" onclick="mdGor('yil')">Yıl</button></div>
+      ${g==='yil'?`<div class="year-nav" style="margin:0"><button onclick="mdYil(-1)" aria-label="Önceki yıl">‹</button><span class="yr">${st.yil}</span><button onclick="mdYil(1)" aria-label="Sonraki yıl">›</button></div>`:''}
+      <button class="btn btn-ghost btn-sm" onclick="mdDisaAktar()">${ic('download',15)} Excel'e Aktar</button>
+      ${isAdmin()?`<button class="btn btn-ghost btn-sm" onclick="bookImport()" title="Eski tablolardan ay bazlı kayıt aktarımı — kesin dönemli yerleşim oluşturmaz">${ic('upload',15)} Eski ay kaydı al</button>`:''}
     </div></div>
-    <div id="mdTaze"></div>
-    <div class="banner">Mecra kartını açın, hücreye tıklayın: kayıt açılır; boş bir aya tıklayarak o ay için opsiyon ya da rezervasyon başlatabilirsiniz. Çift yüzlü pozisyonlarda (M1 megalight ve raketleri) her ayın altında iki kutu vardır: soldaki A (ön yüz), sağdaki B (arka yüz). LED yayınları eşzamanlıdır; ayrı çizelgede gösterilir. Ziyaretçi firma adını görmez, yalnızca durumu görür.</div>
-    <div class="sec-card fbar md-fbar">
+    <div class="md-site" role="group" aria-label="Mecra">
+      ${secili?`<button type="button" class="md-sp md-sp-all ${st.site==null?'on':''}" aria-pressed="${st.site==null}"
+          onclick="mdSet({site:null})">‹ Tüm mecralar</button>`:''}
+      ${siteler.map(m=>`<button type="button" class="md-sp ${String(st.site)===String(m.id)?'on':''}" aria-pressed="${String(st.site)===String(m.id)}"
+          onclick="mdSet({site:${m.id},alan:''})">${esc(m.name)}</button>`).join('')}
+    </div>
+    ${secili?`<div class="sec-card fbar md-fbar">
       <div class="fbar-row">
-        <input class="inp" id="mdQ" placeholder="Ara: pozisyon, kurum, iş…" value="${esc(st.q)}" oninput="mdAra(this.value)" aria-label="Ara">
-        <select class="inp" id="mdMec" onchange="mdSet({site:this.value||null,alan:''})" aria-label="Mecra">
-          <option value="">Tüm mecralar</option>
-          ${siteler.map(m=>`<option value="${m.id}" ${String(st.site)===String(m.id)?'selected':''}>${esc(m.name)}</option>`).join('')}</select>
-        <select class="inp" id="mdDurumF" onchange="mdSet({durum:this.value})" aria-label="Durum">
-          <option value="">Tüm durumlar</option>
-          ${DURUM.map(([k,l])=>`<option value="${k}" ${st.durum===k?'selected':''}>${esc(l)}</option>`).join('')}</select>
-        <select class="inp" id="mdTur" onchange="mdSet({tur:this.value})" aria-label="Mecra türü">
-          <option value="">Tüm türler</option>
-          ${turOpt.map(t=>`<option value="${t.id}" ${String(st.tur)===String(t.id)?'selected':''}>${esc(t.ad)}</option>`).join('')}</select>
-        <select class="inp" id="mdKurum" onchange="mdSet({kurum:this.value})" aria-label="Kurum">
+        <input class="inp" id="mdQ" placeholder="Ara: pozisyon, kurum veya iş…" value="${esc(st.q)}" oninput="mdAra(this.value)" aria-label="Ara">
+        <select class="inp" id="mdKurum" onchange="mdSet({kurum:this.value,site:this.value?null:mdDurum().site})" aria-label="Kurum">
           <option value="">Tüm kurumlar</option>
           ${kurumOpt.map(k=>`<option value="${k.id}" ${String(st.kurum)===String(k.id)?'selected':''}>${esc(orgKisa(k.ad,40))}</option>`).join('')}</select>
-        <select class="inp" id="mdIs" onchange="mdSet({is:this.value})" aria-label="İş">
+        <select class="inp" id="mdIs" onchange="mdSet({is:this.value,site:this.value?null:mdDurum().site})" aria-label="İş">
           <option value="">Tüm işler</option>
           ${isOpt.map(k=>`<option value="${k.id}" ${String(st.is)===String(k.id)?'selected':''}>${esc(k.ad)}</option>`).join('')}</select>
-        <button class="btn btn-ghost btn-sm" onclick="mdTemizle()">Temizle</button>
+        <select class="inp" id="mdDurumF" onchange="mdSet({durum:this.value})" aria-label="Durum" ${g==='yil'?'hidden':''}>
+          <option value="">Tüm durumlar</option>
+          ${[['bos','Boş'],['dolu','Dolu (kesin)'],['rezerve','Opsiyon'],['yakinda','Yakında boşalıyor'],['eski','Eski / ay bazlı']]
+            .map(([k,l])=>`<option value="${k}" ${st.durum===k?'selected':''}>${l}</option>`).join('')}</select>
       </div>
-      <p class="muted" id="mdSayi" style="font-size:12px;margin:8px 2px 0"></p>
-    </div>
-    <div class="grp-all"><button type="button" onclick="mdTumAc(true)">Tümünü aç</button><span>·</span><button type="button" onclick="mdTumAc(false)">Tümünü kapat</button></div>
+    </div>`:''}
     <div id="mdAfilt"></div>
     <div id="mdOdak"></div>
     <div id="mdGovde"></div>
@@ -342,35 +324,7 @@ async function listeler(c,o){
   mdCiz();
 }
 
-/* Çalışma yüzeyinde listelenen mecralar: en az bir güncel (arşivsiz) alan ya da
-   yetim pozisyon taşıyanlar. */
-function mdSiteler(M){
-  return M.mecs.filter(m=>(M.altByMec[m.id]||[]).some(a=>!mdArsiv(a)&&((M.unitsByAlt[a.id]||[]).length||mdEszamanli(a)))
-                          ||(M.orphanByMec[m.id]||[]).length);
-}
-/* Bir yüzün ürünü: kendi product_id'si, yoksa alanınki (Halil). Eşzamanlı
-   alanda ürünü alan belirler. */
-function mdYuzUrun(u,a){ return (u&&u.product_id!=null)?u.product_id:(a&&a.product_id); }
-/* Mecra türü seçenekleri ve sayıları (S2 "LED Ekran (16)" keşfedilebilirliği).
-   Sayı statik türlerde YÜZ sayısıdır; LED gibi eşzamanlı türlerde YAYIN ALANI
-   sayısıdır — ekran/slot sayısı uydurulmaz. */
-function mdTurSecenekleri(M){
-  const say={}; const al=pid=>say[pid]=say[pid]||{yuz:0,yayin:0};
-  M.mecs.forEach(m=>{
-    (M.altByMec[m.id]||[]).filter(a=>!mdArsiv(a)).forEach(a=>{
-      if(mdEszamanli(a)){ if(a.product_id!=null) al(a.product_id).yayin++; return; }
-      (M.unitsByAlt[a.id]||[]).forEach(u=>{ const pid=mdYuzUrun(u,a); if(pid!=null) al(pid).yuz++; });
-    });
-    (M.orphanByMec[m.id]||[]).forEach(u=>{ if(u.product_id!=null) al(u.product_id).yuz++; });
-  });
-  return (M.prods||[]).filter(p=>say[p.id]).sort((a,b)=>String(a.name).localeCompare(String(b.name),'tr'))
-    .map(p=>{ const s=say[p.id]; const parca=[]; if(s.yuz) parca.push(String(s.yuz)); if(s.yayin) parca.push(s.yayin+' yayın alanı');
-      return {id:p.id,ad:`${p.name} (${parca.join(' + ')})`}; });
-}
-
-/* Görünüm değişince durum süzgeci sıfırlanır: aynı değer iki görünümde farklı
-   soru sorar (yıl: "hangi aylar dolu?", bugün: "şu an dolu mu?"). */
-function mdGor(v){ mdDurumYaz({...mdDurum(),gor:v,durum:''}); mdYenidenCiz(); }
+function mdGor(v){ mdDurumYaz({...mdDurum(),gor:v}); mdYenidenCiz(); }
 function mdYil(d){ const st=mdDurum(); st.yil=(st.yil||new Date().getFullYear())+d; mdDurumYaz(st); mdYenidenCiz(); }
 function mdSet(ek){ mdDurumYaz({...mdDurum(),...ek}); mdYenidenCiz(); }
 let _mdAraT=null;
@@ -382,18 +336,16 @@ function mdYenidenCiz(){
   const box=document.getElementById('mdGovde'); if(!box) return;
   return listeler(box.parentElement,{onbellek:true});
 }
-function mdTemizle(){ mdDurumYaz({...mdDurum(),site:null,kurum:'',is:'',durum:'',tur:'',q:'',alan:''}); mdYenidenCiz(); }
+function mdTemizle(){ mdDurumYaz({...mdDurum(),kurum:'',is:'',durum:'',q:'',alan:''}); mdYenidenCiz(); }
 
 /* Aktif filtre şeridi (S2 `.afilt` konvansiyonu) */
 function mdAfiltCiz(M,st){
   const box=document.getElementById('mdAfilt'); if(!box) return;
   const p=[];
-  if(st.site!=null) p.push(['Mecra',(M.mecById[st.site]||{}).name||'']);
-  if(st.tur) p.push(['Tür',(M.pm||{})[st.tur]||'']);
   if(st.kurum) p.push(['Kurum',orgKisa(M.cmap[st.kurum]||('#'+st.kurum),40)]);
   if(st.is) p.push(['İş',(M.jmap[st.is]||{}).title||('#'+st.is)]);
   if(st.alan) p.push(['Alan',(M.altById[st.alan]||{}).name||'']);
-  if(st.durum) p.push(['Durum',st.gor==='yil'?({dolu:'Dolu ayı olanlar',rezerve:'Opsiyon ayı olanlar',doluveya:'Dolu veya opsiyon',bos:'Tamamen boş'}[st.durum]||st.durum):(MD_KOD_ETIKET[st.durum]||st.durum)]);
+  if(st.durum&&st.gor!=='yil') p.push(['Durum',MD_KOD_ETIKET[st.durum]||st.durum]);
   if(st.q) p.push(['Arama',st.q]);
   box.innerHTML=p.length?`<div class="afilt"><span class="afilt-l">AKTİF FİLTRE</span>
     <span class="afilt-v">${p.map(([k,v])=>`${esc(k)}: <b>${esc(v)}</b>`).join(' · ')}</span>
@@ -404,30 +356,16 @@ function mdCiz(){
   const M=ui._M, st=mdDurum(), box=document.getElementById('mdGovde'); if(!M||!box) return;
   mdAfiltCiz(M,st);
   const gun=mdBugun();
-  mdTipGizle();                       // hücre yeniden çizilirken açık bilgi kartı kalmasın
   /* Her çizim görünür yüz kümesini SIFIRDAN kurar; seçim çubuğu buna
      göre uzlaştırılır (S8.1 §17). */
-  _mdGoruntu=new Set(); _mdLeg={ab:false,eski:false};
-  /* Bugün + kurum/iş = alanlar arası "bu kurum hangi mecralarda?" listesi.
-     Yıl ızgarasında kurum/iş aynı kartlar üzerinde satır süzgecidir. */
-  if(st.gor!=='yil'&&mdFiltreli(st)) box.innerHTML=mdBaglamCiz(M,st,gun);
-  else box.innerHTML=mdKartlar(M,st,gun);
-  mdTazeCiz(M,st,gun);
+  mdTipGizle();                       // hücre yeniden çizilirken açık bilgi kartı kalmasın
+  _mdGoruntu=new Set();
+  if(mdFiltreli(st)) box.innerHTML=mdBaglamCiz(M,st,gun);
+  else if(st.site==null) box.innerHTML=mdSiteSec(M,st,gun);
+  else if(st.gor==='yil') box.innerHTML=mdYilCiz(M,st);
+  else box.innerHTML=mdBugunCiz(M,st,gun);
   mdSecimCiz();
   mdOdakUygula();
-}
-/* Görünüm şeridi (Halil `lTazeBar`): hangi görünüm, hangi tarihe göre, veri ne
-   zaman okundu. `bookings`'te updated_at yok; kayıt düzeyinde tazelik iddia
-   edilmez — yalnız ekran düzeyinde okunma anı yazılır (S4 §20). */
-function mdTazeCiz(M,st,gun){
-  const box=document.getElementById('mdTaze'); if(!box) return;
-  const t=M.okunma instanceof Date?M.okunma:new Date();
-  const ss=String(t.getHours()).padStart(2,'0')+':'+String(t.getMinutes()).padStart(2,'0');
-  box.innerHTML=`<div class="afilt neutral"><span class="afilt-l">Görünüm</span>
-    <span class="afilt-v">${st.gor==='yil'
-      ?`Yıl ızgarası · <b>${esc(st.yil)}</b> aylık doluluk`
-      :`Bugün · <b>${esc(mdGunDe(gun).replace(/'.*$/,''))}</b> itibarıyla mevcut durum`}</span>
-    <span class="afilt-n">veri okunma ${esc(ss)}</span></div>`;
 }
 
 /* ---------- Kurum / İş sorusu: alanlar arası, gerçek ilişkiden (B27/B28) ---- */
@@ -438,14 +376,17 @@ function mdBaglamCiz(M,st,gun){
   const gecmisSay=mdKapsam(M,{kurum:st.kurum,is:st.is}).filter(r=>r.block_end!=null&&r.block_end<gun).length;
   const soru=st.is?`Bu iş şu anda hangi mecralarda?`:`Bu kurum şu anda hangi mecraları kullanıyor?`;
   const ozne=st.is?((M.jmap[st.is]||{}).title||''):orgKisa(M.cmap[st.kurum]||'',50);
+  if(st.gor==='yil'){
+    return `<p class="md-soru"><b>${esc(ozne)}</b> · ${esc(st.yil)} yılı</p>`+mdYilCiz(M,st,{kurum:st.kurum,is:st.is});
+  }
   if(!kayit.length) return `<div class="sec-card"><p class="md-soru">${esc(soru)}</p>
-    <p class="empty">${esc(ozne)} için şu anda ya da ileride mecra kaydı yok.${gecmisSay?` ${gecmisSay} geçmiş kayıt Yıl ızgarasında.`:''}</p></div>`;
+    <p class="empty">${esc(ozne)} için şu anda ya da ileride mecra kaydı yok.${gecmisSay?` ${gecmisSay} geçmiş kayıt Yıl görünümünde.`:''}</p></div>`;
   const grup={};
   kayit.forEach(r=>{ (grup[r.mecra_id]=grup[r.mecra_id]||[]).push(r); });
   const sira=Object.fromEntries(M.mecs.map((m,i)=>[m.id,i]));
   const guncel=kayit.filter(r=>mdKapsarMi(r,gun)).length;
   return `<div class="md-soru-k"><p class="md-soru">${esc(soru)}</p>
-      <p class="md-soru-s"><b>${esc(ozne)}</b> · ${guncel} güncel, ${kayit.length-guncel} yaklaşan kayıt${gecmisSay?` · ${gecmisSay} geçmiş kayıt Yıl ızgarasında`:''}</p></div>`
+      <p class="md-soru-s"><b>${esc(ozne)}</b> · ${guncel} güncel, ${kayit.length-guncel} yaklaşan kayıt${gecmisSay?` · ${gecmisSay} geçmiş kayıt Yıl görünümünde`:''}</p></div>`
    +Object.keys(grup).sort((a,b)=>(sira[a]??99)-(sira[b]??99)).map(mid=>{
     const l=grup[mid].sort((a,b)=>String(a.block_start).localeCompare(String(b.block_start)));
     return `<section class="sec-card md-alan"><header class="md-ah"><h4>${esc((M.mecById[mid]||{}).name||'')}</h4>
@@ -486,141 +427,81 @@ function mdAraEslesir(M,r,q){
     .some(v=>String(v||'').toLocaleLowerCase('tr').includes(t));
 }
 
-/* ==========================================================
-   MECRA KARTLARI — Halil'in Doluluk / Kiralama çerçevesi (S8.2)
-   Her mecra kapalı başlayan bir kart; gövdesi yalnız AÇIKKEN üretilir.
-   Kart içinde alanlar (S8.1 grupları) ve Yıl ızgarası / Bugün tablosu
-   görünür. Veri ve kurallar S8'dedir; burası yalnız görünümdür.
-   ========================================================== */
-/* Bir kaydın kurum / iş / arama süzgecine uyup uymadığı (LED ve ızgara için). */
-function mdKayitUygun(M,st,q){
-  return r=>(!q||mdAraEslesir(M,r,q))
-    &&(!st.kurum||String(r.customer_id)===String(st.kurum))
-    &&(!st.is||String(r.work_id)===String(st.is));
-}
-/* Derin bağlantı hedefi bu mecrada mı? (kart açılır) */
-function mdKartOdak(M,m,pid){
-  if(!pid) return false;
-  const r=(M.recs||[]).find(x=>x.placement_id===pid);
-  return !!r&&String(r.mecra_id)===String(m.id);
+/* ---------- MECRA SEÇİCİ: çalışma kapsamı önce gelir (S8.1 §9) --------
+   Global envanter dökümü yerine mecra listesi + her mecranın bugünkü
+   özeti. Özet, açmadan önce "burada iş var mı?" sorusunu cevaplar. */
+function mdSiteSec(M,st,gun){
+  const kart=m=>{
+    const alanlar=(M.altByMec[m.id]||[]).filter(a=>!mdArsiv(a));
+    const yetim=M.orphanByMec[m.id]||[];
+    let yuz=0,dolu=0,opsiyon=0,yakinda=0,led=0,ledA=0;
+    const parca=[];
+    alanlar.forEach(a=>{
+      if(mdEszamanli(a)){ led++; ledA+=mdYayinlar(M,a.id,gun).aktif.filter(r=>r.record_kind!=='legacy').length;
+        parca.push(`${esc(a.name)} <span class="muted">· eşzamanlı</span>`); return; }
+      const us=M.unitsByAlt[a.id]||[]; if(!us.length) return;
+      yuz+=us.length;
+      us.forEach(u=>{ const d=mdYuzeyDurum(M,u,gun);
+        if(d.kod==='dolu') dolu++; else if(d.kod==='rezerve') opsiyon++; else if(d.kod==='yakinda'){ yakinda++; if(d.taahhut==='rezerve') opsiyon++; else dolu++; } });
+      parca.push(`${esc(mdAile(M,a))} <span class="muted">· ${us.length} yüz</span>`);
+    });
+    if(yetim.length){ yuz+=yetim.length; parca.push(`Diğer pozisyonlar <span class="muted">· ${yetim.length} yüz</span>`); }
+    const bos=yuz-dolu-opsiyon;
+    const ozet=[yuz?`${dolu} dolu`:'',opsiyon?`${opsiyon} opsiyon`:'',yuz?`${bos} boş`:'',
+      yakinda?`<span class="md-yk">${yakinda} yakında boşalıyor</span>`:'',
+      led?(ledA?`${ledA} aktif yayın`:'yayın yok'):''].filter(Boolean).join(' · ');
+    return `<button type="button" class="md-sk" onclick="mdSet({site:${m.id},alan:''})">
+      <span class="md-sk-t">${esc(m.name)}</span>
+      <span class="md-sk-g">${parca.join(' &nbsp;·&nbsp; ')||'<span class="muted">alan tanımlı değil</span>'}</span>
+      <span class="md-sk-o">${ozet||'<span class="muted">kayıt yok</span>'}</span></button>`;
+  };
+  const siteler=M.mecs.filter(m=>(M.altByMec[m.id]||[]).some(a=>!mdArsiv(a)&&((M.unitsByAlt[a.id]||[]).length||mdEszamanli(a)))
+                                 ||(M.orphanByMec[m.id]||[]).length);
+  if(!siteler.length) return '<div class="sec-card"><p class="empty">Tanımlı mecra yok.</p></div>';
+  return `<p class="md-sk-h">Çalışmak istediğiniz mecrayı seçin.</p>
+    <div class="md-skl">${siteler.map(kart).join('')}</div>`;
 }
 
-function mdKartlar(M,st,gun){
-  const yil=st.gor==='yil';
-  const y=st.yil||new Date().getFullYear();
+/* ---------- BUGÜN: alan → alan grubu → yüzeyler / kampanyalar (B25) ---- */
+function mdBugunCiz(M,st,gun){
+  const m=M.mecById[st.site]; if(!m) return '<div class="sec-card"><p class="empty">Mecra alanı seçin.</p></div>';
   const q=String(st.q||'').toLocaleLowerCase('tr').trim();
-  const aktif=!!(q||st.durum||st.tur||st.kurum||st.is);
-  const siteler=mdSiteler(M).filter(m=>st.site==null||String(m.id)===String(st.site));
-  const hazir=siteler.map(m=>mdMecHazirla(M,st,m,gun,y,q,aktif)).filter(Boolean);
-  const say=document.getElementById('mdSayi');
-  if(say){ const poz=hazir.reduce((s,h)=>s+h.poz,0), yay=hazir.reduce((s,h)=>s+h.yayin,0);
-    say.textContent=aktif?`${[poz?`${poz} pozisyon`:'',yay?`${yay} yayın alanı`:''].filter(Boolean).join(' · ')} (${hazir.length} mecrada) gösteriliyor — filtre etkin`:''; }
-  if(!hazir.length) return `<div class="sec-card"><p class="empty">${aktif?'Filtrelerle eşleşen kayıt bulunamadı.':'Tanımlı mecra yok.'}</p></div>`;
-  return hazir.map(h=>{
-    /* Açık mı? Derin bağlantı hedefi > kullanıcının açık kararı > varsayılan:
-       Halil gibi kapalı başlar; süzgeç etkinken ya da tek mecra kaldığında açılır. */
-    const acik=mdKartOdak(M,h.m,ui._mOdak)||mdKartAcik(st,h.m,aktif||hazir.length===1);
-    return mdKart(M,st,h,acik,{gun,y,q,aktif,yil});
-  }).join('');
-}
-
-function mdKart(M,st,h,acik,o){
-  const m=h.m, key=mdKartKey(m);
-  /* Kapalıyken de "burada ne var?" sorusu cevaplanır (Halil özeti). */
-  const ozet=o.aktif
-    ?[h.poz?`${h.poz} eşleşen pozisyon`:'',h.yayin?`${h.yayin} yayın alanı`:''].filter(Boolean).join(' · ')
-    :[h.statikAlan?`${h.statikAlan} alan`:'',h.yuz?`${h.yuz} pozisyon`:'',h.ledAlan?`${h.ledAlan} yayın alanı`:''].filter(Boolean).join(' · ');
-  const bas=`<button type="button" class="md-mh" aria-expanded="${acik}" onclick="mdGrupAc('${key}',${acik})">
-      <span class="grp-t">${esc(m.name)}</span><span class="lgrp-m">${esc(ozet)}</span><i class="chev"></i></button>`;
-  if(!acik) return `<section class="sec-card md-mk" data-m="${m.id}">${bas}</section>`;
-  return `<section class="sec-card md-mk md-acik" data-m="${m.id}">${bas}<div class="md-mb">${mdMecGovde(M,st,h,o)}</div></section>`;
-}
-
-/* Bir mecranın süzgeçten geçen alanlarını hazırlar; süzgeç etkinken eşleşme
-   yoksa null (kart gizlenir). Ağır gövde BURADA üretilmez. */
-function mdMecHazirla(M,st,m,gun,y,q,aktif){
-  const yil=st.gor==='yil';
   const alanlar=[...(M.altByMec[m.id]||[])].filter(a=>!mdArsiv(a));
   const yetim=M.orphanByMec[m.id]||[];
   if(yetim.length) alanlar.push({id:'x'+m.id,name:'Diğer pozisyonlar',_sahte:true,mecra_id:m.id});
-  const uyg=mdKayitUygun(M,st,q);
-  const liste=[]; let poz=0,yayin=0,statikAlan=0,yuz=0,ledAlan=0;
+  const tekGrup=alanlar.length===1, arayis=!!(q||st.durum);
+  let html='', topSay=0;
   alanlar.forEach(a=>{
-    /* Kart özeti süzgeçsiz YAPIYI anlatır. */
-    if(mdEszamanli(a)) ledAlan++;
-    else { const u0=a._sahte?yetim:(M.unitsByAlt[a.id]||[]); if(u0.length){ statikAlan++; yuz+=u0.length; } }
     if(st.alan&&String(st.alan)!==String(a.id)) return;
-    if(mdEszamanli(a)){
-      /* "Dolu / Boş" LED'in dili değildir: durum süzgeci LED'e uygulanmaz. */
-      if(st.durum&&!(!yil&&st.durum==='eski')) return;
-      if(st.tur&&String(a.product_id)!==String(st.tur)) return;
-      if(q||st.kurum||st.is){
-        const havuz=(M.byArea[a.id]||[]).filter(r=>r.commitment!=='cancelled');
-        if(!havuz.some(uyg)) return; }
-      liste.push({a,led:true}); yayin++; return;
-    }
-    const us=a._sahte?yetim:(M.unitsByAlt[a.id]||[]); if(!us.length) return;
-    if(yil){
-      const gr=mdYilGruplari(M,st,m,a,us,y,q);
-      if(!gr.length&&aktif) return;
-      const n=gr.reduce((s,g)=>s+(g.A?1:0)+(g.B?1:0),0);
-      liste.push({a,us,gr,n}); poz+=n;
-    } else {
-      const {satirlar,say}=mdBugunSatirlar(M,st,a,us,gun,q);
-      if(!satirlar.length&&aktif) return;
-      liste.push({a,us,satirlar,say,n:satirlar.length}); poz+=satirlar.length;
-    }
+    /* Açık mı? Sıra: derin bağlantı hedefi > kullanıcının açık kararı >
+       varsayılan kural (mdVarsayilanAcik). */
+    const acik=mdOdakGrubu(M,a,ui._mOdak)||mdAcikMi(st,a,mdVarsayilanAcik(M,a,{tek:tekGrup,arayis}));
+    if(mdEszamanli(a)){ if(st.durum&&st.durum!=='eski') return; html+=mdLedKart(M,a,gun,q,acik); topSay++; return; }
+    const us=a._sahte?yetim:(M.unitsByAlt[a.id]||[]);
+    if(!us.length) return;
+    const satirlar=[]; const say={bos:0,dolu:0,rezerve:0,yakinda:0,pasif:0};
+    us.forEach(u=>{
+      const d=mdYuzeyDurum(M,u,gun);
+      say[d.kod]=(say[d.kod]||0)+1;
+      if(st.durum){
+        if(st.durum==='bos'&&d.kod!=='bos') return;
+        if(st.durum==='dolu'&&!(d.kod==='dolu'||(d.kod==='yakinda'&&d.taahhut==='dolu'))) return;
+        if(st.durum==='rezerve'&&d.taahhut!=='rezerve') return;
+        if(st.durum==='yakinda'&&d.kod!=='yakinda') return;
+        if(st.durum==='eski'&&!d.eski) return;
+      }
+      if(q){ const k=d.kayit;
+        const hay=[u.name,a.name,k&&k.customer_name,k&&k.work_title].join(' ').toLocaleLowerCase('tr');
+        if(!hay.includes(q)) return; }
+      satirlar.push({u,d});
+    });
+    if(!satirlar.length&&(st.durum||q)) return;
+    topSay+=satirlar.length;
+    html+=mdStatikBolum(M,a,us,satirlar,say,acik);
   });
-  if(aktif&&!liste.length) return null;
-  return {m,liste,poz,yayin,statikAlan,yuz,ledAlan,alanSayisi:alanlar.length};
-}
-
-/* Açık kartın gövdesi: alan bölümleri (+ Yıl'da tek ortak gösterge). */
-function mdMecGovde(M,st,h,o){
-  const {gun,y,q,aktif,yil}=o;
-  const tek=h.alanSayisi===1;
-  const aylar=Array.from({length:12},(_,i)=>`${y}-${pad(i+1)}`);
-  const html=h.liste.map(x=>{
-    const acik=mdOdakGrubu(M,x.a,ui._mOdak)||mdAcikMi(st,x.a,mdVarsayilanAcik(M,x.a,{tek,arayis:aktif}));
-    if(x.led){
-      if(!yil) return mdLedKart(M,x.a,gun,q,acik);
-      const yb=`${y}-01-01`, ye=`${y}-12-31`;
-      const l=(M.byArea[x.a.id]||[]).filter(r=>r.commitment!=='cancelled'&&r.block_start<=ye&&(r.block_end==null||r.block_end>=yb))
-        .filter(mdKayitUygun(M,st,q));
-      return mdLedYil(M,x.a,l,y,aylar,acik);
-    }
-    return yil?mdGridBolum(M,x.a,x.gr,y,acik):mdStatikBolum(M,x.a,x.us,x.satirlar,x.say,acik);
-  }).join('');
-  return (html||'<p class="muted">Bu filtreye uyan yüzey ya da yayın yok.</p>')
-    +((yil&&h.liste.some(x=>!x.led&&mdAcikMi(st,x.a,true)))?mdLegend():'');
-}
-
-/* Bugün: bir alanın yüzleri için durum + süzgeç (eski mdBugunCiz döngüsü). */
-function mdBugunSatirlar(M,st,a,us,gun,q){
-  const satirlar=[]; const say={bos:0,dolu:0,rezerve:0,yakinda:0,pasif:0};
-  us.forEach(u=>{
-    const d=mdYuzeyDurum(M,u,gun);
-    say[d.kod]=(say[d.kod]||0)+1;
-    if(st.tur&&String(mdYuzUrun(u,a))!==String(st.tur)) return;
-    if(st.durum){
-      if(st.durum==='bos'&&d.kod!=='bos') return;
-      if(st.durum==='dolu'&&!(d.kod==='dolu'||(d.kod==='yakinda'&&d.taahhut==='dolu'))) return;
-      if(st.durum==='rezerve'&&d.taahhut!=='rezerve') return;
-      if(st.durum==='yakinda'&&d.kod!=='yakinda') return;
-      if(st.durum==='eski'&&!d.eski) return;
-    }
-    if(q){ const k=d.kayit;
-      const hay=[u.name,a.name,k&&k.customer_name,k&&k.work_title].join(' ').toLocaleLowerCase('tr');
-      if(!hay.includes(q)) return; }
-    satirlar.push({u,d});
-  });
-  return {satirlar,say};
-}
-
-/* Alan başlığındaki ad: Halil gibi "alan adı · mecra türü". */
-function mdAlanAdi(M,a){
-  const urun=M.pm[a.product_id]||'';
-  return `<span class="md-gh">${esc(a.name)}</span>${urun?`<span class="md-as">· ${esc(urun)}</span>`:''}`;
+  const baslik=`<div class="md-okunma"><span>${esc(m.name)} · <b>${esc(mdGunDe(gun).replace(/'.*$/,''))}</b> itibarıyla</span>
+    <span class="muted">veri okunma ${String(M.okunma.getHours()).padStart(2,'0')}:${String(M.okunma.getMinutes()).padStart(2,'0')}</span></div>`;
+  return baslik+(html||`<div class="sec-card"><p class="empty">Bu filtreye uyan yüzey ya da yayın yok.</p></div>`);
 }
 
 /* ---------- Grup varsayılan açık mı? (S8.1 §11) ----------
@@ -654,6 +535,7 @@ function mdOdakGrubu(M,a,pid){
 }
 
 function mdStatikBolum(M,a,us,satirlar,say,acik){
+  const urun=M.pm[a.product_id]||'';
   const secSay=satirlar.filter(x=>ui._mSec.has(x.u.id)).length;
   const secilebilir=satirlar.filter(x=>x.u.active!==false&&x.d.kod!=='pasif').map(x=>x.u.id);
   const key=mdGrupKey(a);
@@ -663,8 +545,8 @@ function mdStatikBolum(M,a,us,satirlar,say,acik){
   const baslik=`<header class="md-ah">
       <button type="button" class="md-gt" aria-expanded="${acik}" onclick="mdGrupAc('${key}',${acik})">
         <span class="md-gcv" aria-hidden="true">${acik?'▾':'▸'}</span>
-        ${mdAlanAdi(M,a)}
-        <span class="md-as">${us.length} yüz</span>
+        <span class="md-gh">${esc(urun||a.name)}</span>
+        <span class="md-as">${esc(urun?a.name:'')}${urun?' · ':''}${us.length} yüz</span>
         <span class="md-oz">${ozet}</span>
         ${satirlar.length!==us.length?`<span class="md-oz md-eslesen">${satirlar.length} eşleşen</span>`:''}
       </button>
@@ -732,57 +614,67 @@ function mdLedKart(M,a,gun,q,acik){
   return `<section class="sec-card md-alan md-led" data-a="${a.id}">${baslik}
     ${aktif.length?`<ul class="md-kmpl">${aktif.map(satir).join('')}</ul>`:'<p class="md-led-n">Aktif yayın yok.</p>'}
     ${yak.length?`<div class="md-alt-b">Yaklaşan</div><ul class="md-kmpl">${yak.slice(0,6).map(satir).join('')}</ul>
-      ${yak.length>6?`<p class="muted" style="font-size:12px;margin:6px 0 0">+${yak.length-6} yaklaşan yayın · Yıl ızgarasında</p>`:''}`:''}
+      ${yak.length>6?`<p class="muted" style="font-size:12px;margin:6px 0 0">+${yak.length-6} yaklaşan yayın · Yıl görünümünde</p>`:''}`:''}
     <p class="md-not">Aynı anda birden çok reklamveren yayında olabilir. Kapasite, slot ya da frekans kuralı tanımlı değildir.</p>
   </section>`;
 }
 
-/* ==========================================================
-   YIL IZGARASI — Halil'in hücre ızgarası (S8.2)
-   Aynı görsel dil: pozisyon başına TEK satır, A ve B yüzü ayın altında iki
-   kutu; yeşil Boş / kırmızı Dolu / turuncu Opsiyon; 3 harfli kurum kodu.
-   Fark: hücre artık aylık `bookings` değil KESİN DÖNEMLİ yerleşimden
-   türetilir. Ay içinde kısmi dönem alttaki ince çubukla, ay bazlı eski kayıt
-   kesik çerçeveyle, birden çok kayıt köşe noktasıyla gösterilir; kesin
-   tarihler üzerine gelince ve tıklayınca görünür. Gün UYDURULMAZ.
-   ========================================================== */
-function mdYilKayitlar(M,u,y){
+/* ---------- YIL: statik matris (M1 çıtası) + LED zaman çizelgesi ---- */
+function mdYilCiz(M,st,filtre){
+  filtre=filtre||{};
+  const y=st.yil||new Date().getFullYear();
+  const gun=mdBugun(), buYm=mdYm(gun);
+  const aylar=Array.from({length:12},(_,i)=>`${y}-${pad(i+1)}`);
   const yb=`${y}-01-01`, ye=`${y}-12-31`;
-  return (M.byUnit[u.id]||[]).filter(r=>r.commitment!=='cancelled'&&r.block_start<=ye&&(r.block_end==null||r.block_end>=yb));
+  const siteler=st.site!=null?[M.mecById[st.site]].filter(Boolean):M.mecs;
+  const q=String(st.q||'').toLocaleLowerCase('tr').trim();
+  const kFiltre=r=>(!filtre.kurum||String(r.customer_id)===String(filtre.kurum))
+                 &&(!filtre.is||String(r.work_id)===String(filtre.is))
+                 &&(!q||mdAraEslesir(M,r,q));
+  /* Kurum/İş bağlamında sonuç kümesi zaten küçüktür — orada gruplar
+     açık gelir. Serbest Yıl görünümünde ağır matris yalnız AÇIK grup
+     için üretilir (S8.1 §14). */
+  const daralt=!!(filtre.kurum||filtre.is||q);
+  let html='';
+  siteler.forEach(m=>{
+    const alanlar=[...(M.altByMec[m.id]||[])].filter(a=>!mdArsiv(a));
+    const yetim=M.orphanByMec[m.id]||[];
+    if(yetim.length) alanlar.push({id:'x'+m.id,name:'Diğer pozisyonlar',_sahte:true,mecra_id:m.id});
+    const tekGrup=alanlar.length===1;
+    let ic_='';
+    alanlar.forEach(a=>{
+      if(st.alan&&String(st.alan)!==String(a.id)) return;
+      const acik=mdOdakGrubu(M,a,ui._mOdak)||mdAcikMi(st,a,mdVarsayilanAcik(M,a,{tek:tekGrup,arayis:daralt}));
+      if(mdEszamanli(a)){
+        const l=(M.byArea[a.id]||[]).filter(r=>r.commitment!=='cancelled'&&r.block_start<=ye&&(r.block_end==null||r.block_end>=yb)).filter(kFiltre);
+        if(!l.length&&daralt) return;
+        ic_+=mdLedYil(M,a,l,y,aylar,acik); return;
+      }
+      const us=a._sahte?yetim:(M.unitsByAlt[a.id]||[]);
+      const satirlar=us.map(u=>({u,l:(M.byUnit[u.id]||[]).filter(r=>r.commitment!=='cancelled'
+          &&r.block_start<=ye&&(r.block_end==null||r.block_end>=yb))}))
+        .filter(x=>!daralt||x.l.some(kFiltre)||(q&&String(x.u.name).toLocaleLowerCase('tr').includes(q)));
+      if(!satirlar.length) return;
+      ic_+=mdStatikYil(M,a,satirlar,aylar,buYm,kFiltre,filtre,acik,y);
+    });
+    if(!ic_) return;
+    html+=`<div class="md-yil-site"><h3 class="md-yil-t">${esc(m.name)}</h3>${ic_}</div>`;
+  });
+  return html||`<div class="sec-card"><p class="empty">${y} için bu kapsamda kayıt yok.</p></div>`;
 }
+
+/* ---------- Yıl: Halil'in hücre ızgarası (yalnız GÖRSEL katman) ----------
+   Kapsam S8.1'dedir: yalnız seçili mecra ve AÇIK grup. Aynı görsel dil:
+   pozisyon başına TEK satır, A ve B yüzü ayın altında iki kutu; yeşil Boş /
+   kırmızı Dolu / turuncu Opsiyon; 3 harfli kurum kodu. Hücre kesin dönemli
+   yerleşimden türer: ay içi kısmi dönem alttaki ince çubuk, ay bazlı eski
+   kayıt kesik çerçeve, aynı ayda çoklu kayıt köşe noktası; kesin tarih ve İş
+   üzerine gelince görünür. Gün UYDURULMAZ. */
 function mdAyKayitlari(M,u,ym){
   const ab=`${ym}-01`, ae=mdAySonu(ab);
   return (M.byUnit[u.id]||[]).filter(r=>r.commitment!=='cancelled'&&r.block_start<=ae&&(r.block_end==null||r.block_end>=ab));
 }
-/* Bir A/B grubunun yıl içindeki durum / kurum / iş kümesi (Halil `lGrupBilgi`). */
-function mdGrupBilgi(M,g,y){
-  const b={dolu:false,opsiyon:false,kur:new Set(),is:new Set(),metin:[]};
-  [g.A,g.B].forEach(u=>{ if(!u) return;
-    mdYilKayitlar(M,u,y).forEach(r=>{
-      if(r.commitment==='confirmed') b.dolu=true; else b.opsiyon=true;
-      if(r.customer_id!=null) b.kur.add(String(r.customer_id));
-      if(r.work_id!=null) b.is.add(String(r.work_id));
-      b.metin.push(r.customer_name||'',r.work_title||''); }); });
-  return b;
-}
-/* Süzgeçten geçen A/B grupları. Ürün önce yüzün kendisinden okunur (Halil). */
-function mdYilGruplari(M,st,m,a,us,y,q){
-  const uygun=g=>{
-    const b=mdGrupBilgi(M,g,y);
-    if(q){ const hay=[g.base,a.name,m.name,...b.metin].join(' ').toLocaleLowerCase('tr'); if(!hay.includes(q)) return false; }
-    if(st.durum==='dolu'&&!b.dolu) return false;
-    if(st.durum==='rezerve'&&!b.opsiyon) return false;
-    if(st.durum==='doluveya'&&!(b.dolu||b.opsiyon)) return false;
-    if(st.durum==='bos'&&(b.dolu||b.opsiyon)) return false;
-    if(st.kurum&&!b.kur.has(String(st.kurum))) return false;
-    if(st.is&&!b.is.has(String(st.is))) return false;
-    if(st.tur&&String(mdYuzUrun(g.A||g.B,a))!==String(st.tur)) return false;
-    return true; };
-  return groupUnits(us).filter(uygun);
-}
-
-/* Tek hücre: bir yüzün bir aylık durumu. */
-function mdCell(M,u,ym,solo){
+function mdCell(M,u,ym,solo,soluk){
   if(!u) return `<span class="rcell yok" title="Bu yüzey tanımlı değil">–</span>`;
   const l=mdAyKayitlari(M,u,ym);
   const yuzlu=/[\s._-][AB]$/i.test(String(u.name||''));
@@ -803,25 +695,22 @@ function mdCell(M,u,ym,solo){
       const b0=be&&be<ae&&mdYm(be)===ym?mdGun(be).getDate()/gunSay:1;
       if(a0>0||b0<1){ ek+=' kis'; stl=` style="--a:${(a0*100).toFixed(1)}%;--b:${(b0*100).toFixed(1)}%"`; }
     }
+    if(soluk&&!l.some(soluk)) ek+=' soluk';
   } else if(u.active===false){ sinif='yok'; kod='–'; durumAd='Pasif'; }
   const etiket=`${u.name} · ${mdYmAdi(ym)} · ${durumAd}${l.length&&l[0].customer_name?' · '+orgKisa(l[0].customer_name,30):''}`;
   return `<button type="button" class="rcell ${sinif}${ek}"${stl} data-u="${u.id}" data-ym="${ym}" aria-label="${esc(etiket)}"
     onclick="mdCellAc(${u.id},'${ym}')" onmouseenter="mdTip(this)" onmouseleave="mdTipGizle()" onfocus="mdTip(this)" onblur="mdTipGizle()"><i>${esc(kod)}</i></button>`;
 }
-/* Hücre tıklaması: tek kayıt → kaydı aç; birden çok → yüz detayı; boş ay →
-   o ay için yeni yerleşim formu (Halil'in "aya tıkla" davranışı, artık kesin
-   dönemli forma açılır). Silme/ezme YOK; form Kurum + İş ister. */
+/* Tıklama S8.1 ile aynı: tek kayıt → kaydı aç; aksi halde yüz detayı (orada
+   Opsiyon / Rezervasyon başlatılır). Izgarada YENİ etkileşim yok. */
 function mdCellAc(uid,ym){
   const M=ui._M; if(!M) return; const u=M.unitById[uid]||{};
   const l=mdAyKayitlari(M,u,ym);
   mdTipGizle();
   if(l.length===1){ const r=l[0]; if(r.placement_id) return mKayitAc(r.placement_id); return mEskiAc(r.booking_id); }
-  if(l.length>1||u.active===false) return mYuzeyAc(uid);
-  const ab=`${ym}-01`;
-  mForm({hedefler:[{unit_id:uid}],bas:ab,bit:mdAySonu(ab),taah:'reserved'});
+  mYuzeyAc(uid);
 }
-
-/* Üzerine gelince bilgi kartı (Halil `lTip`; gün ve İş bilgisiyle). */
+/* Üzerine gelince bilgi kartı (Halil `lTip`; kesin tarih ve İş ile). */
 let _mdTipEl=null;
 function mdTip(el){
   const M=ui._M; if(!M||!el) return;
@@ -843,33 +732,6 @@ function mdTip(el){
   _mdTipEl.style.left=left+'px'; _mdTipEl.style.top=top+'px';
 }
 function mdTipGizle(){ if(_mdTipEl) _mdTipEl.style.display='none'; }
-
-/* Bir statik alanın ızgara bölümü: S8.1 grup başlığı (aç/kapa, hatırlanır) +
-   Halil satırları. Kapalıyken satırlar hiç üretilmez. */
-function mdGridBolum(M,a,gr,y,acik){
-  const key=mdGrupKey(a);
-  const yuz=gr.reduce((s,g)=>s+(g.A?1:0)+(g.B?1:0),0);
-  const kayit=gr.reduce((s,g)=>s+[g.A,g.B].filter(Boolean).reduce((t,u)=>t+mdYilKayitlar(M,u,y).length,0),0);
-  const baslik=`<header class="md-ah">
-      <button type="button" class="md-gt" aria-expanded="${acik}" onclick="mdGrupAc('${key}',${acik})">
-        <span class="md-gcv" aria-hidden="true">${acik?'▾':'▸'}</span>${mdAlanAdi(M,a)}
-        <span class="md-as">${yuz} pozisyon</span>
-        <span class="md-oz">${y} yılında ${kayit?kayit+' kayıt':'kayıt yok'}</span>
-      </button>
-      ${acik&&isAdmin()&&!a._sahte?`<span class="md-ah-r"><button class="btn btn-outline btn-sm" onclick="lAddPos(${a.id},${a.mecra_id},${a.product_id||'null'})" title="Envanter: yeni pozisyon (yönetici)">+ Pozisyon</button></span>`:''}
-    </header>`;
-  if(!acik) return `<section class="md-alan md-kapali" data-a="${a.id}">${baslik}</section>`;
-  const aylar=Array.from({length:12},(_,i)=>`${y}-${pad(i+1)}`);
-  const monHead=MONTHS_SHORT.map(mo=>`<div class="rg-m rg-mh"><span>${mo}</span></div>`).join('');
-  const rows=gr.map(g=>{
-    if(g.B) _mdLeg.ab=true;
-    const cells=aylar.map(ym=>`<div class="rg-m">${g.B
-      ?mdCell(M,g.A,ym,false)+mdCell(M,g.B,ym,false)
-      :mdCell(M,g.A||g.B,ym,true)}</div>`).join('');
-    return `<div class="rg-row" data-b="${esc(g.base)}"><div class="rg-lbl" title="${esc(g.base)}">${esc(g.base)}</div>${cells}</div>`; }).join('');
-  return `<section class="md-alan" data-a="${a.id}">${baslik}
-    <div class="rtwrap"><div class="rgrid"><div class="rg-row rg-head"><div class="rg-lbl">Pozisyon</div>${monHead}</div>${rows}</div></div></section>`;
-}
 /* Gösterge (Halil): yüzler, durumlar; yalnız gerçekten kullanılanlar. */
 function mdLegend(){
   return `<div class="rg-legend">
@@ -877,6 +739,37 @@ function mdLegend(){
     <span><i class="sw bos"></i>Boş</span><span><i class="sw dolu"></i>Dolu</span><span><i class="sw rezerve"></i>Opsiyon</span>
     ${_mdLeg.eski?'<span><i class="sw eski"></i>Ay bazlı eski kayıt</span>':''}
     <span class="lg-not">Alttaki çubuk: ay içinde kısmi dönem · köşe noktası: aynı ayda birden çok kayıt</span></div>`;
+}
+
+function mdStatikYil(M,a,satirlar,aylar,buYm,kFiltre,filtre,acik,yil){
+  const urun=M.pm[a.product_id]||'';
+  const key=mdGrupKey(a);
+  const kayitSay=satirlar.reduce((n,x)=>n+x.l.length,0);
+  const baslik=`<header class="md-ah">
+      <button type="button" class="md-gt" aria-expanded="${acik}" onclick="mdGrupAc('${key}',${acik})">
+        <span class="md-gcv" aria-hidden="true">${acik?'▾':'▸'}</span>
+        <span class="md-gh">${esc(urun||a.name)}</span>
+        <span class="md-as">${esc(urun?a.name:'')}${urun?' · ':''}${satirlar.length} yüz</span>
+        <span class="md-oz">${kayitSay?`${yil||''} yılında ${kayitSay} kayıt`:`${yil||''} yılında kayıt yok`}</span>
+      </button>
+    </header>`;
+  /* Kapalı grubun ızgarası HİÇ kurulmaz (S8.1 §14). */
+  if(!acik) return `<section class="sec-card md-alan md-kapali" data-a="${a.id}">${baslik}</section>`;
+  /* Pozisyon başına tek satır: süzgeçten geçen yüzün A/B eşi de gösterilir. */
+  const secili=new Set(satirlar.map(x=>x.u.id));
+  const us=a._sahte?(M.orphanByMec[a.mecra_id]||[]):(M.unitsByAlt[a.id]||[]);
+  const gr=groupUnits(us).filter(g=>[g.A,g.B].some(u=>u&&secili.has(u.id)));
+  const soluk=(filtre.kurum||filtre.is)?kFiltre:null;
+  _mdLeg={ab:false,eski:false};
+  const monHead=MONTHS_SHORT.map(mo=>`<div class="rg-m rg-mh"><span>${mo}</span></div>`).join('');
+  const rows=gr.map(g=>{
+    if(g.B) _mdLeg.ab=true;
+    const cells=aylar.map(ym=>`<div class="rg-m">${g.B
+      ?mdCell(M,g.A,ym,false,soluk)+mdCell(M,g.B,ym,false,soluk)
+      :mdCell(M,g.A||g.B,ym,true,soluk)}</div>`).join('');
+    return `<div class="rg-row" data-b="${esc(g.base)}"><div class="rg-lbl" title="${esc(g.base)}">${esc(g.base)}</div>${cells}</div>`; }).join('');
+  return `<section class="sec-card md-alan" data-a="${a.id}">${baslik}
+    <div class="rtwrap"><div class="rgrid"><div class="rg-row rg-head"><div class="rg-lbl">Pozisyon</div>${monHead}</div>${rows}</div></div>${mdLegend()}</section>`;
 }
 
 /* LED Yıl: "kim, ne zaman yayında?" — örtüşme görünür biçimde serbesttir. */
@@ -1142,7 +1035,7 @@ async function mKayitAc(pid){
       <span>Kaydeden</span><b class="muted">${esc(tm[r.created_by_team_id]||'—')} · ${esc(r.created_at?psZaman(r.created_at):'')}</b>
     </div>
     <div class="md-mf-b">
-      <button class="btn btn-ghost btn-sm" onclick="closeModal();medyaGit({gor:'bugun',site:${r.mecra_id},kurum:'',is:'',durum:'',tur:'',q:'',alan:''});ui._mOdak=${pid}">Mecralarda göster</button>
+      <button class="btn btn-ghost btn-sm" onclick="closeModal();medyaGit({gor:'bugun',site:${r.mecra_id},kurum:'',is:'',durum:'',q:'',alan:''});ui._mOdak=${pid}">Mecralarda göster</button>
       <span style="flex:1"></span>
       ${r.commitment!=='cancelled'?`<button class="btn btn-outline btn-sm" onclick="mForm({kayit:ui._M.recs.find(x=>x.placement_id===${pid})})">Düzenle</button>`:''}
       <button class="btn btn-ghost btn-sm" onclick="closeModal()">Kapat</button></div>`);
@@ -1219,7 +1112,7 @@ async function medyaOdak(pid){
   const r=M.recs.find(x=>x.placement_id===pid);
   if(!r){ mpAlert('Bu mecra kaydı artık yok.'); return; }
   ui._mOdak=pid;
-  medyaGit({gor:'bugun',site:r.mecra_id,alan:'',kurum:'',is:'',durum:'',tur:'',q:''});
+  medyaGit({gor:'bugun',site:r.mecra_id,alan:'',kurum:'',is:'',durum:'',q:''});
 }
 function mdOdakUygula(){
   const pid=ui._mOdak; if(!pid) return; ui._mOdak=null;
@@ -1227,7 +1120,7 @@ function mdOdakUygula(){
   /* Derin bağlantının açtığı grup "son ilgili grup"tur: odak şeridi
      kapatılıp başka mecraya gidildiğinde geri dönüşte yeniden kapanmasın. */
   const altId=r.alt_mecra_id!=null?r.alt_mecra_id:(M.unitById[r.unit_id]||{}).alt_mecra_id;
-  if(altId!=null){ const st=mdDurum(); st.acik[mdGrupKey({id:altId})]=true; st.acik[mdKartKey({id:r.mecra_id})]=true; mdDurumYaz(st); }
+  if(altId!=null){ const st=mdDurum(); st.acik[mdGrupKey({id:altId})]=true; mdDurumYaz(st); }
   const hedefEl=document.querySelector(`[data-p="${pid}"]`)
     ||(r.unit_id?document.querySelector(`tr[data-u="${r.unit_id}"]`):null)
     ||document.querySelector(`[data-a="${r.alt_mecra_id}"]`);
@@ -1250,8 +1143,8 @@ function medyaBolumu(l,o){
   const guncel=(l||[]).filter(r=>r.commitment!=='cancelled'&&(r.block_end==null||r.block_end>=gun))
     .sort((a,b)=>String(a.block_start).localeCompare(String(b.block_start)));
   const gecmis=(l||[]).filter(r=>r.commitment!=='cancelled'&&r.block_end!=null&&r.block_end<gun).length;
-  const git=o.is?`medyaGit({is:'${o.is}',kurum:'',site:null,gor:'bugun',durum:'',tur:'',q:'',alan:''})`
-                :`medyaGit({kurum:'${o.kurum}',is:'',site:null,gor:'bugun',durum:'',tur:'',q:'',alan:''})`;
+  const git=o.is?`medyaGit({is:'${o.is}',kurum:'',site:null,gor:'bugun',durum:'',q:'',alan:''})`
+                :`medyaGit({kurum:'${o.kurum}',is:'',site:null,gor:'bugun',durum:'',q:'',alan:''})`;
   if(!guncel.length) return `<p class="w-quiet" id="${o.id}"><span class="muted">${o.is?'Bu işin':'Bu kurumun'} güncel ya da yaklaşan mecra kaydı yok${gecmis?` (${gecmis} geçmiş kayıt)`:''}.</span>
       <button class="btn-link" onclick="${git}">Mecralarda görüntüle</button></p>`;
   const satir=r=>{
@@ -1266,7 +1159,7 @@ function medyaBolumu(l,o){
       <button class="btn btn-ghost btn-sm" onclick="${git}">Mecralarda görüntüle ›</button></div>
     ${guncel.slice(0,10).map(satir).join('')}
     ${guncel.length>10?`<p class="muted" style="font-size:12px;margin:6px 0 0">+${guncel.length-10} kayıt · Mecralarda görüntüle</p>`:''}
-    ${gecmis?`<p class="muted" style="font-size:12px;margin:8px 0 0">${gecmis} geçmiş kayıt Yıl ızgarasında.</p>`:''}
+    ${gecmis?`<p class="muted" style="font-size:12px;margin:8px 0 0">${gecmis} geçmiş kayıt Yıl görünümünde.</p>`:''}
   </div>`;
 }
 
