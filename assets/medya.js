@@ -470,9 +470,9 @@ function mdBugunCiz(M,st,gun){
   let html='', topSay=0;
   alanlar.forEach(a=>{
     if(st.alan&&String(st.alan)!==String(a.id)) return;
-    /* Varsayılan açık olma kuralı — mdVarsayilanAcik (aşağıda). */
-    const vars=mdVarsayilanAcik(M,a,{tek:tekGrup,arayis,odak:ui._mOdak});
-    const acik=mdAcikMi(st,a,vars);
+    /* Açık mı? Sıra: derin bağlantı hedefi > kullanıcının açık kararı >
+       varsayılan kural (mdVarsayilanAcik). */
+    const acik=mdOdakGrubu(M,a,ui._mOdak)||mdAcikMi(st,a,mdVarsayilanAcik(M,a,{tek:tekGrup,arayis}));
     if(mdEszamanli(a)){ if(st.durum&&st.durum!=='eski') return; html+=mdLedKart(M,a,gun,q,acik); topSay++; return; }
     const us=a._sahte?yetim:(M.unitsByAlt[a.id]||[]);
     if(!us.length) return;
@@ -502,19 +502,33 @@ function mdBugunCiz(M,st,gun){
 }
 
 /* ---------- Grup varsayılan açık mı? (S8.1 §11) ----------
-   Kural sade tutulur: kapalı başlar, çünkü özet satırı zaten "burada iş
-   var mı?" sorusunu cevaplar ve M1 açılışta 82 satır dökmez. Yalnız
-   kullanıcının zaten o gruba baktığı belli olan durumlarda açılır. */
+   Kural sade tutulur: KULLANICI HENÜZ KARAR VERMEDİYSE kapalı başlar, çünkü
+   özet satırı zaten "burada iş var mı?" sorusunu cevaplar ve M1 açılışta 82
+   satır dökmez. Yalnız kullanıcının zaten o gruba baktığı belli olan
+   durumlarda açılır.
+
+   Hatırlama: kullanıcının açık kararı `st.acik[grupAnahtarı]`da oturum
+   boyunca durur ve varsayılanı EZER. Anahtar alt_mecra id'sidir; bir alan
+   tam bir mecraya ait olduğundan durum yapısal olarak MECRA BAŞINADIR
+   (M1'de açtığın grup, OSB'ye gidip dönünce açık kalır; OSB'nin durumu
+   M1'e karışmaz). Seçim bu durumla BİRLİKTE saklanmaz: seçim yalnız o
+   çizimde görünen yüzlerdir (mdSecimCiz) ve mecra değişince temizlenir. */
 function mdVarsayilanAcik(M,a,o){
   o=o||{};
   if(o.tek) return true;                               // tek grup varsa gizlemenin anlamı yok
   if(o.arayis) return true;                            // arama/durum filtresi: kullanıcı avlanıyor
-  if(o.odak){                                          // Hareketler'den derin bağlantı
-    const r=(M.recs||[]).find(x=>x.placement_id===o.odak);
-    if(r){ if(String(r.alt_mecra_id)===String(a.id)) return true;
-      const u=M.unitById[r.unit_id]; if(u&&String(u.alt_mecra_id)===String(a.id)) return true; }
-  }
   return false;
+}
+/* Derin bağlantı (Hareketler → Mecralar, "Mecralarda göster") hedef grubu
+   HER ZAMAN açar: kullanıcı o grubu daha önce kapatmış olsa bile hedef satır
+   görünür olmalıdır. Açık karar bunu geçemez; kural kullanıcı kararının
+   ÜSTÜNDE değerlendirilir ve mdOdakUygula sonucu hatırlatır. */
+function mdOdakGrubu(M,a,pid){
+  if(!pid) return false;
+  const r=(M.recs||[]).find(x=>x.placement_id===pid); if(!r) return false;
+  if(String(r.alt_mecra_id)===String(a.id)) return true;
+  const u=M.unitById[r.unit_id];
+  return !!(u&&String(u.alt_mecra_id)===String(a.id));
 }
 
 function mdStatikBolum(M,a,us,satirlar,say,acik){
@@ -627,8 +641,7 @@ function mdYilCiz(M,st,filtre){
     let ic_='';
     alanlar.forEach(a=>{
       if(st.alan&&String(st.alan)!==String(a.id)) return;
-      const vars=mdVarsayilanAcik(M,a,{tek:tekGrup,arayis:daralt,odak:ui._mOdak});
-      const acik=mdAcikMi(st,a,vars);
+      const acik=mdOdakGrubu(M,a,ui._mOdak)||mdAcikMi(st,a,mdVarsayilanAcik(M,a,{tek:tekGrup,arayis:daralt}));
       if(mdEszamanli(a)){
         const l=(M.byArea[a.id]||[]).filter(r=>r.commitment!=='cancelled'&&r.block_start<=ye&&(r.block_end==null||r.block_end>=yb)).filter(kFiltre);
         if(!l.length&&daralt) return;
@@ -1040,6 +1053,10 @@ async function medyaOdak(pid){
 function mdOdakUygula(){
   const pid=ui._mOdak; if(!pid) return; ui._mOdak=null;
   const M=ui._M; const r=M&&M.recs.find(x=>x.placement_id===pid); if(!r) return;
+  /* Derin bağlantının açtığı grup "son ilgili grup"tur: odak şeridi
+     kapatılıp başka mecraya gidildiğinde geri dönüşte yeniden kapanmasın. */
+  const altId=r.alt_mecra_id!=null?r.alt_mecra_id:(M.unitById[r.unit_id]||{}).alt_mecra_id;
+  if(altId!=null){ const st=mdDurum(); st.acik[mdGrupKey({id:altId})]=true; mdDurumYaz(st); }
   const hedefEl=document.querySelector(`[data-p="${pid}"]`)
     ||(r.unit_id?document.querySelector(`tr[data-u="${r.unit_id}"]`):null)
     ||document.querySelector(`[data-a="${r.alt_mecra_id}"]`);
