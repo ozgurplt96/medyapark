@@ -2099,6 +2099,15 @@ section.md-odak{box-shadow:0 0 0 2px var(--c-warn);}
   /* Dar ekranda grup başlığı tek sütuna iner; özet satırı başlığın
      altında kalır ve bağlamsal eylem erişilebilir olmayı sürdürür. */
   .md-skl{grid-template-columns:1fr;}
+  /* Kontrol duvarı yok (S8.1 §19): mecra çipleri tek satırda yatay
+     kayar, açıklama satırı gizlenir, arama tam genişlik, üç seçici iki
+     sütuna sığar. Grup özetleri ilk ekranda görünür kalır. */
+  .md-site{flex-wrap:nowrap;overflow-x:auto;margin-bottom:8px;padding-bottom:4px;scrollbar-width:none;}
+  .md-site::-webkit-scrollbar{display:none;}
+  .md-sp{flex:0 0 auto;white-space:nowrap;}
+  .md-head .sub{display:none;}
+  .md-fbar .fbar-row{grid-template-columns:1fr 1fr;}
+  .md-fbar #mdQ{grid-column:1/-1;}
   .md-gt{flex-direction:column;align-items:flex-start;gap:2px;width:100%;}
   .md-gcv{align-self:flex-start;}
   .md-yil-w{max-height:none;}
