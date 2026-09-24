@@ -51,6 +51,12 @@ seeds/*
 # allowlist'te DEĞİLDİR — o yalnız local demo verisidir.
 !seeds/98_zzz_ps9_media_inventory.sql
 
+# PS9 kapanış: sentetik envanter iskeleti (temiz klonda 4 lokasyon +
+# 104 statik yüz) ve senaryo fixture'i. İkisi de ŞİRKET VERİSİ İÇERMEZ;
+# taşınabilirliğin özel dosyalara bağlı kalmaması için commit edilir.
+!seeds/98_zzzz_ps9_synthetic_inventory.sql
+!seeds/99_zzzz_ps9_media_demo.sql
+
 # Eski düzen (seeds/ öncesi) — geri gelmesin
 seed.sql
 seed_local_auth.sql

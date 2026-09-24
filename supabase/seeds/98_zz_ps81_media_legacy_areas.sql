@@ -71,7 +71,14 @@ begin
   raise notice 'PS8.1 seed: Raket LED eşzamanlı=%, slot alanı arşivli=%, korunan slot yüzü=%, korunan eski kayıt=%',
     v_led, v_ars, v_unit, v_book;
 
-  if v_unit = 0 then
+  -- PS9 kapanış §1 — taşınabilirlik düzeltmesi.
+  -- Bu assert'in amacı "arşivleme veri SİLMEMELİDİR" kuralını korumaktır
+  -- ve yalnız alan GERÇEKTEN VARSA anlamlıdır. Şirket verisi seed'i
+  -- (`20_company_data.sql`) Git dışı olduğu için temiz bir klonda
+  -- `Kulüp LED Yayın Slotları` alanı hiç yoktur; koşulsuz assert orada
+  -- boşluğa ateş ediyor ve `db reset`i kırıyordu. Artık önce alanın
+  -- varlığı sorulur; kural alan varken aynen geçerlidir.
+  if v_ars > 0 and v_unit = 0 then
     raise exception 'PS8.1 seed: eski slot yüzleri kayboldu — arşivleme veri SİLMEMELİDİR.';
   end if;
 end $$;
