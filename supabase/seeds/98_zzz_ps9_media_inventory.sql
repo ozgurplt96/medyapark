@@ -269,38 +269,16 @@ begin
 end $$;
 
 -- ---------------------------------------------------------------------
--- 7) Doğrulama — kontrol toplamı ve sessiz kayma koruması
+-- 7) Bilgilendirme
+--
+-- KESİN 104 doğrulaması BU DOSYADA DEĞİL, `98_zzzz_ps9_synthetic_inventory.sql`
+-- sonundadır. Gerekçe: şirket verisi seed'i Git dışıdır; temiz bir klonda
+-- bu dosya hiçbir lokasyon bulamaz ve burada yapılan sert bir assert
+-- `db reset`i kırardı. Doğrulama iki yolun BİRLEŞTİĞİ noktada yapılır.
 -- ---------------------------------------------------------------------
 do $$
-declare r record; v_top int := 0; v_bek int;
+declare v int;
 begin
-  for r in
-    select m.name,
-           count(*) filter (where u.active and a.occupancy_mode = 'exclusive'
-                              and not a.legacy_archived) as statik
-      from public.mecralar m
-      join public.alt_mecralar a on a.mecra_id = m.id
-      left join public.units u on u.alt_mecra_id = a.id
-     where m.operational
-     group by m.name order by m.name
-  loop
-    raise notice 'PS9 seed: % -> % aktif statik yüz', r.name, r.statik;
-    v_top := v_top + r.statik;
-  end loop;
-
-  raise notice 'PS9 seed: TOPLAM aktif statik yüz = % (beklenen 104)', v_top;
-  if v_top <> 104 then
-    raise exception 'PS9 seed: statik yüz kontrol toplamı % — 104 bekleniyordu.', v_top;
-  end if;
-
-  select count(*) into v_bek from public.mecralar where not operational;
-  raise notice 'PS9 seed: kapsam dışı mecra = % (kayıtları korunur)', v_bek;
-
-  -- Kapsam dışı lokasyonların envanteri SİLİNMEMİŞ olmalı.
-  select count(*) into v_bek from public.units u join public.mecralar m on m.id = u.mecra_id
-   where not m.operational;
-  if v_bek = 0 then
-    raise exception 'PS9 seed: kapsam dışı envanter kayboldu — kapsam SİLME DEĞİLDİR.';
-  end if;
-  raise notice 'PS9 seed: kapsam dışı korunan yüz = %', v_bek;
+  select count(*) into v from public.mecralar where operational;
+  raise notice 'PS9 düzeltme: kapsam içi lokasyon = % (kesin doğrulama sonraki seed''de)', v;
 end $$;

@@ -2202,3 +2202,13 @@ button.rcell{border:0;padding:0;font-family:inherit;position:relative;}
   .mtl-kt{gap:8px;}
   .mtl-kt .year-nav .yr{font-size:12.5px;}
 }
+
+/* PS9 kapanış: süresi dolmuş opsiyon uyarısı + envanter ekleme önizleme */
+.md-ops-uyari{display:flex;flex-direction:column;gap:6px;margin:0 0 14px;padding:11px 13px;
+  border-radius:10px;background:rgba(240,136,62,.10);box-shadow:inset 0 0 0 1px rgba(240,136,62,.42);}
+.md-ops-uyari>b{font-size:13.5px;color:#7a3b00;}
+.md-ops-uyari>span{font-size:12.5px;line-height:1.5;color:var(--c-ink2,#6e6e73);}
+.md-ops-uyari .md-ops-b{display:flex;gap:8px;flex-wrap:wrap;margin-top:4px;}
+.md-onizle{margin:2px 0 10px;font-size:12.5px;color:var(--c-ink2,#6e6e73);
+  display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+.md-onizle .chip.md-cak{background:rgba(229,72,77,.12);color:#b3272b;}

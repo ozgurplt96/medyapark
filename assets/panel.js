@@ -799,6 +799,16 @@ async function api(action, body){
     case 'alt_list':{ const {data,error}=await sb.from('alt_mecralar').select('*').eq('mecra_id',q.mecra_id).order('sort').order('id'); if(error)throw error; return ok(data); }
     case 'alt_save': { const r=await saveRow('alt_mecralar',body); logYaz(act,body); return ok(r); }
     case 'unit_list':{ const {data,error}=await sb.from('units').select('*').eq('alt_mecra_id',q.alt_id).order('sort').order('id'); if(error)throw error; return ok(data); }
+    /* PS9 kapanış §3: A/B çifti TEK ifadede yazılır — PostgREST toplu
+       insert'i tek INSERT'tir, yani ya ikisi de ya hiçbiri. Yarım
+       envanter (yalnız A yüzü) bırakmanın yolu yoktur. RLS satır
+       başına uygulanır: `s07_units_write` yönetici olmayanı reddeder. */
+    case 'units_create':{
+      const rows=Array.isArray(body.rows)?body.rows:[];
+      if(!rows.length) throw new Error('Eklenecek pozisyon yok.');
+      if(rows.length>2) throw new Error('Tek seferde en fazla iki yüz eklenebilir.');
+      const {data,error}=await sb.from('units').insert(rows).select('id,name');
+      if(error)throw error; logYaz(act,body); return ok(data); }
     /* ---- S8 Mecralar ----
        Okuma: TEK normalleştirilmiş yüzey `media_schedule` (yerleşim + eski
        kayıt). Yazma: yalnız güvenilir RPC'ler (toplu, ya hep ya hiç).
@@ -7817,7 +7827,12 @@ function bookImport(){
     }});
 }
 
-async function lAddPos(altId,mid,pid){ const nm=prompt('Pozisyon adı (ör. P1-A):','P'); if(nm===null)return; await api('unit_save',{alt_mecra_id:altId,mecra_id:mid,product_id:pid,name:(nm||'Yeni Pozisyon')}); renderSection(); }
+/* lAddPos: PS9 kapanış §3 ile `prompt()` tek satırından gerçek bir
+   forma çevrildi. Eski sürüm mecra/ürün kimliğini ÇAĞIRANDAN alıyordu,
+   A/B yüz yapısını bilmiyordu, dijital ekranı statik yüzeyden ayırmıyordu
+   ve mükerrer kodu hiç kontrol etmiyordu. Uygulaması `assets/medya.js`
+   içindedir (mecra alanıdır); bu ad yalnız geriye dönük çağrı yüzeyidir. */
+async function lAddPos(altId){ return mdPozEkle(altId); }
 
 /* ---------- MÜŞTERİLER ---------- */
 async function musteriler(c){
