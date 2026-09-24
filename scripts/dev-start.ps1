@@ -92,6 +92,17 @@ if (-not $NoServe) {
         # also exposes a LAN URL such as http://192.168.x.x:5500 - that hostname
         # is not recognised as local, so the app would route to PRODUCTION
         # Supabase. Loopback-only binding removes that path entirely.
+        #
+        # Caching: `serve` is configured by repo-root `serve.json` to send
+        # `Cache-Control: no-cache`. Reason - by default it sends an ETag but
+        # NO Cache-Control, so Chrome applies heuristic freshness and can serve
+        # admin.html straight from disk WITHOUT asking the server. Measured:
+        # two consecutive /admin requests produced no network request at all.
+        # Because the `assets/*.js?v=NNN` cache-bust numbers live INSIDE
+        # admin.html, a stale admin.html also pins stale asset versions - the
+        # user keeps seeing the old UI even on a normal reload, and it never
+        # self-corrects. `no-cache` means "revalidate", not "do not store":
+        # unchanged versioned assets still return 304.
         Start-Process -FilePath 'powershell.exe' `
             -ArgumentList '-NoExit', '-NoProfile', '-Command',
                           "Set-Location '$repo'; npx --yes serve . -l tcp://127.0.0.1:$Port" `
