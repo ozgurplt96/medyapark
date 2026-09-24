@@ -848,11 +848,30 @@ async function api(action, body){
       const ors=[q.job_id?`job_id.eq.${q.job_id}`:'',q.customer_id?`customer_id.eq.${q.customer_id}`:''].filter(Boolean);
       if(!ors.length) return ok([]);
       const {data,error}=await sb.from('contracts')
-        .select('id,title,reference_no,status,contract_items(id,description,item_type,start_date,end_date)')
+        .select('id,title,reference_no,status,contract_items(id,description,item_type,mecra_id,unit_id,start_date,end_date)')
         .or(ors.join(',')).neq('status','cancelled').order('id',{ascending:false});
       if(error)throw error;
-      const out=[]; (data||[]).forEach(c=>(c.contract_items||[]).forEach(k=>out.push({id:k.id,
-        etiket:`${c.title||c.reference_no||('Sözleşme #'+c.id)} · ${k.description||k.item_type||'kalem'}${k.start_date?` · ${k.start_date}${k.end_date?'–'+k.end_date:''}`:''}`})));
+      /* PS9 gorsel kabul §6 — is/kurum eslesmesi UYGUNLUK icin yeterli
+         DEGIL. Ekran goruntusunde "Yeni LED yayini" formunda statik bir
+         Megalight kalemi (P3-A) secilebilir gorunuyordu. Kalem ayrica:
+           · hedef YUZEY/ALAN ile uyumlu olmali (kalem bir unit ya da
+             mecra isaret ediyorsa hedefin disina baglanamaz),
+           · DONEM ile ortusmeli.
+         Uygunsuz kalem SECILEBILIR ONERI olarak sunulmaz. Ayni kural
+         sunucuda `media_placements_create/update` icinde de zorlanir. */
+      const tUnit=q.unit_id?+q.unit_id:null, tArea=q.alt_mecra_id?+q.alt_mecra_id:null;
+      const tMecra=q.mecra_id?+q.mecra_id:null;
+      const bas=q.start_date||'', bit=q.end_date||'';
+      const out=[];
+      (data||[]).forEach(c=>(c.contract_items||[]).forEach(k=>{
+        if(k.unit_id!=null&&tUnit!=null&&k.unit_id!==tUnit) return;
+        if(k.unit_id!=null&&tUnit==null) return;          // yuzey kalemi, LED alanina baglanamaz
+        if(k.mecra_id!=null&&tMecra!=null&&k.mecra_id!==tMecra) return;
+        if(bas&&k.end_date&&k.end_date<bas) return;       // donem ortusmuyor
+        if(bit&&k.start_date&&k.start_date>bit) return;
+        out.push({id:k.id,
+          etiket:`${c.title||c.reference_no||('Sözleşme #'+c.id)} · ${k.description||k.item_type||'kalem'}${k.start_date?` · ${k.start_date}${k.end_date?'–'+k.end_date:''}`:''}`});
+      }));
       return ok(out); }
     case 'customers_min':{ const rows=await rapHepsi(()=>sb.from('customers').select('id,firma').order('id'));
       return ok(rows); }
@@ -5633,26 +5652,24 @@ async function workspaceHome(c){
   if(st.org)   suz=suz.filter(e=>{ const j=jm[e.job_id];
                  return String(j?j.customer_id:e.customer_id)===String(st.org); });
   if(st.kisi)  suz=suz.filter(e=>(ilgiMap[e.id]||[]).some(t=>String(t)===String(st.kisi)));
-  /* PS9 §9 — iki HIZLI filtre ve aralarinda VEYA.
-     Onceki davranis `benim`i dikkat ikilisiyle VE'liyordu, yani ikisi
-     birden acikken ekran "yalnizca BENIM acillerim"i gosteriyordu.
-     Istenen kume bu degil: benimle ilgili kayitlar ARTI diger
-     acil/geciken kayitlar. Ikisine birden uyan kayit tek kez cikar
-     (tek gecisli filtre, birlestirme yok).
+  /* PS9 gorsel kabul §7 — KULLANICI KARARI DEGISTI.
+     Onceki surum iki filtre ARASINDA da VEYA kullaniyordu; yeni karar
+     KESISIM:
 
-     Is / kurum / kisi / arama bu grubun ETRAFINDA VE olarak kalir ve
-     yukarida zaten uygulandi. Hic hizli filtre secili degilse tum
-     yetkili kapsam gorunur. Yetki sinirlari her durumda RLS'tedir. */
+       Acil/Geciken   = acil VEYA gecikmis          (grup ICINDE VEYA)
+       Benimle ilgili = etiketlendiklerim VEYA takip ettigim isler
+       Ikisi de acik  = (benimle ilgili) VE (acil/geciken)
+       Yalniz biri    = yalniz o grubun kosulu
+       Ikisi de kapali= secili kapsamin tum kayitlari
+
+     Is / kurum / kisi / arama daraltici olmaya devam eder ve yukarida
+     zaten uygulandi. Yetki sinirlari her durumda RLS'tedir. */
   const dikkatSecili=!!(st.acil||st.gec);
   const dikkatMi=e=>(st.acil&&!!e.is_urgent)
     /* Tamamlanmis kayit sirf termini gectigi icin gecikmis SAYILMAZ. */
     ||(st.gec&&e.action_status==='open'&&gecmis(e.due_at));
-  if(dikkatSecili||st.benim){
-    suz=suz.filter(e=>{
-      if(dikkatSecili&&st.benim) return dikkatMi(e)||e._benim;   // VEYA
-      return dikkatSecili?dikkatMi(e):e._benim;
-    });
-  }
+  if(dikkatSecili) suz=suz.filter(dikkatMi);
+  if(st.benim)     suz=suz.filter(e=>e._benim);
   const filtreAktif=!!(st.job||st.org||st.kisi||st.acil||st.gec||st.benim);
   /* Suzme SAYFALAMADAN ONCE biter (§4): sayfa sayisi filtrelenmis
      kumeden hesaplanir, ham kumeden degil. */
@@ -5884,8 +5901,8 @@ async function workspaceHome(c){
   if(st.job)   ozet.push('İş: '+esc((jm[st.job]||{}).title||('#'+st.job)));
   if(st.org)   ozet.push('Kurum: '+esc(cm[st.org]||('#'+st.org)));
   if(st.kisi)  ozet.push('İlgili: '+esc(tm[st.kisi]||('#'+st.kisi)));
-  /* PS9 §9: aynı birleşik kümeyi gösteren her yer aynı adı kullanır. */
-  if(dikkatSecili&&st.benim) ozet.push('Benimle ilgili VEYA Acil/Geciken');
+  /* Iki filtre KESISIR (§7): ozet de bunu soyler. */
+  if(dikkatSecili&&st.benim) ozet.push('Benimle ilgili VE Acil/Geciken');
   else if(dikkatSecili)      ozet.push('Acil/Geciken');
   else if(st.benim)          ozet.push('Benimle ilgili');
 

@@ -57,6 +57,12 @@ seeds/*
 !seeds/98_zzzz_ps9_synthetic_inventory.sql
 !seeds/99_zzzz_ps9_media_demo.sql
 
+# PS9 gorsel kabul: aktif kullanilan sistemi temsil eden kullanim
+# fixture'i. Deterministik, idempotent, SIRKET VERISI ICERMEZ (kurumlari
+# ve isleri mevcutlardan secer ya da acikca "(demo)" etiketli sentetik
+# uretir).
+!seeds/99_zzzzz_ps9_media_usage.sql
+
 # Eski düzen (seeds/ öncesi) — geri gelmesin
 seed.sql
 seed_local_auth.sql
