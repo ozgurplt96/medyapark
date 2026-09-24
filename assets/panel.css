@@ -2088,3 +2088,117 @@ button.rcell{border:0;padding:0;font-family:inherit;position:relative;}
 }
 .md-dl .btn-link{color:var(--c-ink);font-weight:600;text-decoration:underline;text-decoration-color:var(--c-line);text-underline-offset:3px;padding:0;}
 .md-dl .btn-link:hover{text-decoration-color:var(--c-accent);color:var(--c-accent-d);}
+
+/* ==========================================================
+   PS9 — DOLULUK ZAMAN ÇİZELGESİ (.mtl-*)
+   Ay hücresi ızgarası (.rgrid/.rcell) yerine SÜREKLİ tarih ekseni.
+   Eski ızgara sınıfları Halil'in başka ekranlarında kullanıldığı için
+   KALDIRILMADI; bu blok ayrı bir ad alanıdır.
+   ========================================================== */
+.mtl-wrap{overflow-x:auto;overflow-y:visible;padding-bottom:4px;}
+.mtl{min-width:640px;}
+
+/* Satır: solda sabit etiket sütunu, sağda oransal ay ızgarası. */
+.mtl-row{display:flex;align-items:stretch;gap:10px;margin-bottom:5px;}
+.mtl-row:last-child{margin-bottom:0;}
+
+/* Kaydırmada görünür kalan pozisyon adı (§5). */
+.mtl-lbl{flex:0 0 118px;width:118px;display:flex;align-items:center;gap:6px;
+  position:sticky;left:0;z-index:3;background:var(--c-card,#fff);
+  font-size:13px;font-weight:700;color:var(--c-ink,#1d1d1f);min-width:0;}
+.mtl-lbl-w{flex-basis:168px;width:168px;flex-direction:column;align-items:flex-start;gap:1px;justify-content:center;}
+.mtl-ad{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;}
+.mtl-alt{font-size:11.5px;font-weight:500;color:var(--c-ink3,#86868b);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;}
+.mtl-cb{flex:0 0 auto;margin:0;cursor:pointer;}
+
+/* İz: ay sütunları gün sayısıyla ORANTILI (Şubat dardır). */
+.mtl-trk{position:relative;flex:1 1 auto;display:grid;min-width:0;}
+.mtl-gl{border-left:1px solid var(--c-line,#e6e8eb);min-height:100%;}
+.mtl-gl:first-child{border-left:0;}
+.mtl-gl.bu{background:rgba(31,111,235,.045);}
+
+/* Bugün: dikey çizgi — konumu tarihten gelir, ay ortasına yuvarlanmaz. */
+.mtl-bugun-l{position:absolute;top:0;bottom:0;width:2px;background:#1f6feb;opacity:.75;z-index:2;pointer-events:none;}
+.mtl-bugun{position:absolute;top:0;bottom:0;width:2px;background:#1f6feb;z-index:2;}
+.mtl-bugun i{position:absolute;top:-2px;left:3px;font-style:normal;font-size:10px;font-weight:800;
+  letter-spacing:.03em;color:#1f6feb;white-space:nowrap;}
+
+/* Başlık satırı: kaydırmada görünür kalan ay adları (§5). */
+.mtl-head{position:sticky;top:0;z-index:4;background:var(--c-card,#fff);padding-bottom:4px;margin-bottom:8px;
+  border-bottom:1px solid var(--c-line,#e6e8eb);}
+.mtl-head .mtl-lbl{z-index:5;font-size:11.5px;font-weight:700;letter-spacing:.04em;
+  text-transform:uppercase;color:var(--c-ink3,#86868b);}
+.mtl-mh{display:flex;align-items:baseline;justify-content:center;gap:3px;padding:3px 0;
+  border-left:1px solid var(--c-line,#e6e8eb);font-size:11.5px;font-weight:700;color:var(--c-ink2,#6e6e73);}
+.mtl-mh:first-child{border-left:0;}
+.mtl-mh em{font-style:normal;font-size:10px;font-weight:600;color:var(--c-ink3,#86868b);}
+.mtl-mh.bu{color:#1f6feb;background:rgba(31,111,235,.07);border-radius:5px 5px 0 0;}
+
+/* Şeritler: A ve B AYRI yatay şerittir ve ayın TAM genişliğini kullanır. */
+.mtl-lanes{position:absolute;inset:0;display:flex;flex-direction:column;gap:2px;padding:2px 0;z-index:1;}
+.mtl-sat{position:relative;flex:1 1 0;display:flex;align-items:stretch;min-height:13px;}
+/* A/B harfleri KENDİ dar sütununda: yapışkan etiket sütununun üstüne
+   binmez, şeritlerle tam hizalanır. */
+.mtl-ab{flex:0 0 13px;width:13px;display:flex;flex-direction:column;gap:2px;padding:2px 0;
+  position:sticky;left:118px;z-index:3;background:var(--c-card,#fff);}
+.mtl-ab i{flex:1 1 0;display:flex;align-items:center;justify-content:center;font-style:normal;
+  font-size:10px;font-weight:800;color:var(--c-ink3,#86868b);line-height:1;}
+
+/* Boş zemin: DOYGUNLUĞU DÜŞÜK yeşil — ekran parlak yeşil kutularla
+   dolmaz (§5), dolu dönemler öne çıkar. */
+.mtl-lane{position:relative;flex:1 1 auto;border-radius:4px;
+  background:rgba(63,185,80,.13);box-shadow:inset 0 0 0 1px rgba(63,185,80,.22);cursor:pointer;}
+.mtl-lane.mtl-yok{background:repeating-linear-gradient(45deg,#f4f5f7,#f4f5f7 4px,#eceef1 4px,#eceef1 8px);
+  box-shadow:none;cursor:default;}
+.mtl-lane.mtl-pasif{background:#f4f5f7;box-shadow:inset 0 0 0 1px #e6e8eb;}
+.mtl-pasif-t{position:absolute;left:6px;top:50%;transform:translateY(-50%);font-size:10px;
+  font-weight:700;color:#98a1ab;pointer-events:none;}
+
+/* Kayıt çubuğu: gerçek tarihte başlar/biter, ay sınırında KOPMAZ. */
+.mtl-bar{position:absolute;top:0;bottom:0;border:0;border-radius:4px;padding:0 5px;cursor:pointer;
+  display:flex;align-items:center;overflow:hidden;color:#fff;font:700 10.5px/1 inherit;
+  letter-spacing:.01em;z-index:2;}
+.mtl-bar span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.mtl-bar.kes{background:#e5484d;}
+.mtl-bar.ops{background:#f0883e;}
+/* Renk TEK taşıyıcı değil: opsiyon ayrıca eğik desenle ayrışır. */
+.mtl-bar.ops{background-image:repeating-linear-gradient(45deg,rgba(255,255,255,.22) 0 4px,transparent 4px 9px);}
+.mtl-bar.eski{background:#8e97a1;background-image:repeating-linear-gradient(45deg,rgba(255,255,255,.3) 0 3px,transparent 3px 7px);}
+/* Süresi geçmiş opsiyon: karar bekliyor — kalın kesikli çerçeve. */
+.mtl-bar.sur{box-shadow:inset 0 0 0 2px #7a3b00;}
+.mtl-bar.soluk{opacity:.28;}
+.mtl-bar:hover{filter:brightness(1.07);z-index:3;}
+.mtl-bar:focus-visible{outline:2px solid #1f6feb;outline-offset:1px;z-index:4;}
+
+/* Aynı müşterinin kesintisiz yenilemesi: parçalar BİTİŞİK görünür,
+   sözleşme sınırı ince ayraçla belirtilir. Veri BİRLEŞTİRİLMEZ. */
+.mtl-bar.bitisik{border-top-left-radius:0;border-bottom-left-radius:0;
+  box-shadow:inset 2px 0 0 0 rgba(255,255,255,.85);}
+
+/* Görünen aralığın dışına taşma işareti (yıl sınırı dahil). */
+.mtl-bar.tsol{border-top-left-radius:0;border-bottom-left-radius:0;
+  -webkit-mask-image:linear-gradient(90deg,transparent 0,#000 7px);mask-image:linear-gradient(90deg,transparent 0,#000 7px);}
+.mtl-bar.tsag::after{content:"›";position:absolute;right:2px;top:50%;transform:translateY(-50%);
+  font-size:13px;font-weight:900;opacity:.95;}
+
+/* Takvim kontrolleri */
+.mtl-kt{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+.mtl-gk{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--c-ink2,#6e6e73);cursor:pointer;white-space:nowrap;}
+.mtl-kmp .mtl-lane{background:transparent;box-shadow:none;cursor:default;}
+.md-ekran{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 10px;}
+.md-ekran .chip em{font-style:normal;font-weight:600;opacity:.7;margin-left:4px;}
+.rg-legend .sw.sur{background:#f0883e;box-shadow:inset 0 0 0 2px #7a3b00;}
+.rg-legend .sw.yen{background:#e5484d;box-shadow:inset 2px 0 0 0 #fff;}
+.rg-legend .sw.eski{background:#8e97a1;}
+
+@media (max-width:760px){
+  /* 12 ayı ZORLA küçültmek yerine takvim İÇİNDE yatay kaydırma (§6);
+     sayfanın tamamı taşmaz. */
+  .mtl{min-width:560px;}
+  .mtl-lbl{flex-basis:84px;width:84px;font-size:12px;}
+  .mtl-lbl-w{flex-basis:118px;width:118px;}
+  .mtl-ab{left:84px;}
+  .mtl-kt{gap:8px;}
+  .mtl-kt .year-nav .yr{font-size:12.5px;}
+}

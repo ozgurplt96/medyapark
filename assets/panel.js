@@ -5623,11 +5623,26 @@ async function workspaceHome(c){
   if(st.org)   suz=suz.filter(e=>{ const j=jm[e.job_id];
                  return String(j?j.customer_id:e.customer_id)===String(st.org); });
   if(st.kisi)  suz=suz.filter(e=>(ilgiMap[e.id]||[]).some(t=>String(t)===String(st.kisi)));
-  /* S5.1 §4: Isler/Liste ile AYNI kural - dikkat ikilisi birlikte
-     secilince VEYA; diger akis filtreleriyle VE. */
-  if(st.acil||st.gec) suz=suz.filter(e=>(st.acil&&!!e.is_urgent)||
-    (st.gec&&e.action_status==='open'&&gecmis(e.due_at)));
-  if(st.benim) suz=suz.filter(e=>e._benim);
+  /* PS9 §9 — iki HIZLI filtre ve aralarinda VEYA.
+     Onceki davranis `benim`i dikkat ikilisiyle VE'liyordu, yani ikisi
+     birden acikken ekran "yalnizca BENIM acillerim"i gosteriyordu.
+     Istenen kume bu degil: benimle ilgili kayitlar ARTI diger
+     acil/geciken kayitlar. Ikisine birden uyan kayit tek kez cikar
+     (tek gecisli filtre, birlestirme yok).
+
+     Is / kurum / kisi / arama bu grubun ETRAFINDA VE olarak kalir ve
+     yukarida zaten uygulandi. Hic hizli filtre secili degilse tum
+     yetkili kapsam gorunur. Yetki sinirlari her durumda RLS'tedir. */
+  const dikkatSecili=!!(st.acil||st.gec);
+  const dikkatMi=e=>(st.acil&&!!e.is_urgent)
+    /* Tamamlanmis kayit sirf termini gectigi icin gecikmis SAYILMAZ. */
+    ||(st.gec&&e.action_status==='open'&&gecmis(e.due_at));
+  if(dikkatSecili||st.benim){
+    suz=suz.filter(e=>{
+      if(dikkatSecili&&st.benim) return dikkatMi(e)||e._benim;   // VEYA
+      return dikkatSecili?dikkatMi(e):e._benim;
+    });
+  }
   const filtreAktif=!!(st.job||st.org||st.kisi||st.acil||st.gec||st.benim);
   /* Suzme SAYFALAMADAN ONCE biter (§4): sayfa sayisi filtrelenmis
      kumeden hesaplanir, ham kumeden degil. */
@@ -5859,10 +5874,10 @@ async function workspaceHome(c){
   if(st.job)   ozet.push('İş: '+esc((jm[st.job]||{}).title||('#'+st.job)));
   if(st.org)   ozet.push('Kurum: '+esc(cm[st.org]||('#'+st.org)));
   if(st.kisi)  ozet.push('İlgili: '+esc(tm[st.kisi]||('#'+st.kisi)));
-  if(st.acil&&st.gec) ozet.push('Acil veya Geciken');
-  else if(st.acil)    ozet.push('Acil');
-  else if(st.gec)     ozet.push('Geciken');
-  if(st.benim) ozet.push('Benimle ilgili');
+  /* PS9 §9: aynı birleşik kümeyi gösteren her yer aynı adı kullanır. */
+  if(dikkatSecili&&st.benim) ozet.push('Benimle ilgili VEYA Acil/Geciken');
+  else if(dikkatSecili)      ozet.push('Acil/Geciken');
+  else if(st.benim)          ozet.push('Benimle ilgili');
 
   c.innerHTML=`
     <div class="pnl-grid">
@@ -5892,11 +5907,17 @@ async function workspaceHome(c){
                 <option value="">Tüm ilgililer</option>${kisiOpt}</select>
             </div>
             <div class="pf-tog">
-              <button type="button" class="pf-t ${st.acil?'on':''}" aria-pressed="${st.acil}"
-                onclick="psFiltre({acil:${!st.acil}})">⚡ Acil</button>
-              <button type="button" class="pf-t ${st.gec?'on':''}" aria-pressed="${st.gec}"
-                onclick="psFiltre({gec:${!st.gec}})">⚠ Geciken</button>
+              ${/* PS9 §9: Acil ve Geciken TEK kontroldur. Ikisi zaten ayni
+                   soruyu soruyor ("dikkat gerekiyor mu?") ve ayri ayri
+                   sunuldugunda kullanici ucuncu bir kombinasyon
+                   ariyordu. Depolanan anahtarlar (`acil`,`gec`)
+                   DEGISMEDI: Isler/Liste ve `dikkatGoruntule()` ayni
+                   ikiliyi kullanmaya devam eder. */''}
+              <button type="button" class="pf-t ${dikkatSecili?'on':''}" aria-pressed="${dikkatSecili}"
+                title="Acil işaretli VEYA termini geçmiş açık aksiyonu olan güncellemeler"
+                onclick="psFiltre({acil:${!dikkatSecili},gec:${!dikkatSecili}})">⚡ Acil/Geciken</button>
               <button type="button" class="pf-t ${st.benim?'on':''}" aria-pressed="${st.benim}"
+                title="Etiketlendiğim güncellemeler veya takip ettiğim işlerin güncellemeleri"
                 onclick="psFiltre({benim:${!st.benim}})">Benimle ilgili</button>
               ${filtreAktif?`<button type="button" class="pf-x" onclick="psTemizle()"
                 title="Tüm filtreleri temizle">Temizle ✕</button>`:''}
