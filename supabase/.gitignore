@@ -44,6 +44,13 @@ seeds/*
 # tekrar oynatılır. Yapısal karar; şirket verisi yok.
 !seeds/98_zz_ps81_media_legacy_areas.sql
 
+# PS9: kesin mecra envanteri (operasyonel kapsam, Stadyum/Çukurova/Esas
+# yapısı, LED fiziksel ekranları), şirket verisi seed'inden sonra tekrar
+# oynatılır. Yapısal karar; şirket verisi YOK.
+# NOT: PS9 demo fixture'i (99_zzzz_ps9_media_demo.sql) BİLİNÇLİ olarak
+# allowlist'te DEĞİLDİR — o yalnız local demo verisidir.
+!seeds/98_zzz_ps9_media_inventory.sql
+
 # Eski düzen (seeds/ öncesi) — geri gelmesin
 seed.sql
 seed_local_auth.sql
