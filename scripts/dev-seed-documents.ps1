@@ -43,7 +43,10 @@ if ($api -notmatch '^https?://(127\.0\.0\.1|localhost)(:\d+)?$') {
 $varOlan = @(docker exec $db psql -U postgres -d postgres -Atc `
     "select name from storage.objects where bucket_id='documents' and name like 'a10d0000-0000-4000-8000-%'")
 
-$mime = @{ '.pdf' = 'application/pdf'; '.jpg' = 'image/jpeg'; '.png' = 'image/png' }
+$mime = @{ '.pdf' = 'application/pdf'; '.jpg' = 'image/jpeg'; '.png' = 'image/png'; '.csv' = 'text/csv'
+          '.xlsx' = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+          '.xls'  = 'application/vnd.ms-excel'
+          '.docx' = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' }
 $hdr  = @{ apikey = $st.SECRET_KEY; Authorization = "Bearer $($st.SECRET_KEY)" }
 $yuklenen = 0
 foreach ($m in (Import-Csv (Join-Path $dir 'manifest.tsv') -Delimiter "`t")) {

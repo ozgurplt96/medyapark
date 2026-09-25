@@ -70,6 +70,11 @@ seeds/*
 # scripts/dev-seed-documents.ps1 yükler.
 !seeds/99_zzzzzz_ps10_lifecycle_chains.sql
 
+# PS11: örnek verilerde gerçek kullanım dili (tohum işaretleri görünür
+# notlardan jobs.sort bandına; taşıma açıklamaları operasyon ekranından
+# kalkar). İdempotent, ŞİRKET VERİSİ İÇERMEZ.
+!seeds/99_zzzzzzz_ps11_kullanim_dili.sql
+
 # Eski düzen (seeds/ öncesi) — geri gelmesin
 seed.sql
 seed_local_auth.sql

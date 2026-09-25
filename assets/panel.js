@@ -130,6 +130,9 @@ const belgeAd=d=>(d&&(String(d.title||'').trim()||d.original_name))||'Belge';
 const belgeResimMi=d=>!!d&&d.provider==='supabase'&&/^image\//.test(d.mime_type||'');
 function belgeBoyut(n){ if(n==null)return''; if(n<1024)return n+' B';
   if(n<1048576)return Math.round(n/1024)+' KB'; return (n/1048576).toFixed(n<10485760?1:0)+' MB'; }
+/* S11 §6: dosya BİÇİMİ simgesi (renk grubu). Biçim kategori değildir. */
+function belgeTurSinif(d){ const e=(String((d&&d.original_name)||'').split('.').pop()||'').toLowerCase();
+  return /^(xlsx?|csv)$/.test(e)?'t-xls':/^docx?$/.test(e)?'t-doc':e==='pdf'?'t-pdf':/^(jpe?g|png|webp)$/.test(e)?'t-img':e==='txt'?'t-txt':''; }
 function belgeUzanti(d){
   if(d.provider==='external') return 'LİNK';
   const e=(String(d.original_name||'').split('.').pop()||'').toUpperCase();
@@ -246,7 +249,7 @@ function belgeCip(d){
   const ext=d.provider==='external';
   return `<button type="button" class="bl-doc" onclick="event.stopPropagation();belgeAc(${d.id})"
       title="${esc(belgeAd(d))}${ext?' — harici bağlantı':''}">
-      <span class="bl-ext ${ext?'dis':''}">${esc(belgeUzanti(d))}</span>
+      <span class="bl-ext ${ext?'dis':belgeTurSinif(d)}">${esc(belgeUzanti(d))}</span>
       <span class="bl-nm">${esc(belgeAd(d))}</span>${ext?'<span class="bl-dis" aria-hidden="true">↗</span>':''}</button>`;
 }
 
@@ -311,7 +314,7 @@ function ekListeHtml(kid){
   const e=EK[kid]; if(!e) return '';
   const mev=e.mevcut.map(m=>{ const d=belgeKaydet(m.doc); const sil=e.kaldir.has(m.link_id);
     return `<div class="ek-it ${sil?'sil':''}">
-      <span class="bl-ext ${d.provider==='external'?'dis':''}">${esc(belgeUzanti(d))}</span>
+      <span class="bl-ext ${d.provider==='external'?'dis':belgeTurSinif(d)}">${esc(belgeUzanti(d))}</span>
       <button type="button" class="ek-ad btn-link" onclick="belgeAc(${d.id})">${esc(belgeAd(d))}</button>
       <span class="ek-m">${esc(belgeTurLbl(d.doc_type))}${sil?' · kaldırılacak':''}</span>
       ${m.kaldirilabilir===false?'':`<button type="button" class="ek-x" onclick="ekMevcutKaldir('${kid}',${m.link_id})"
@@ -323,7 +326,7 @@ function ekListeHtml(kid){
     const tekrar=it.durum==='hata'&&!it.gecersiz;
     const uz=it.tip==='link'?'LİNK':((it.ad.split('.').pop()||'').toUpperCase().slice(0,4));
     return `<div class="ek-it ${it.durum==='hata'?'hata':''}">
-      <span class="bl-ext ${it.tip==='link'?'dis':''}">${esc(uz)}</span>
+      <span class="bl-ext ${it.tip==='link'?'dis':belgeTurSinif({original_name:it.ad})}">${esc(uz)}</span>
       <span class="ek-ad" title="${esc(it.ad)}">${esc(it.ad)}</span>
       <span class="ek-m">${it.tip==='link'?'harici bağlantı':esc(belgeBoyut(it.boyut))}</span>
       ${it.gecersiz?'':ekTurSec(kid,it)}
@@ -539,7 +542,7 @@ function yedekYukleAc(){
       <p style="font-size:13px;margin:12px 0 6px">Devam etmek için aşağıya <b>GERI YUKLE</b> yazın:</p>
       <input class="inp" id="bkOnay" placeholder="GERI YUKLE" autocomplete="off">
       <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
-        <button class="btn btn-ghost btn-sm" onclick="closeModal()">Vazgeç</button>
+        <button class="btn btn-ghost btn-sm" onclick="modalVazgec()">Vazgeç</button>
         <button class="btn btn-danger btn-sm" onclick="yedekGeriYukle()">Geri Yükle</button></div>`);
     window.__yedek=veri;
   };
@@ -691,7 +694,8 @@ function mpConfirm(msg,baslik,opt){ opt=opt||{};
 async function guard(fn, hataBasligi){
   try{ return await fn(); }
   catch(e){
-    const msg=(e&&(e.message||e.hint||e.details))||String(e);
+    const ham=(e&&(e.message||e.hint||e.details))||String(e);
+    const msg=/Failed to fetch|NetworkError|Load failed/i.test(ham)?hataMetni(e):ham;
     console.error(hataBasligi||'Islem hatasi:', e);
     mpAlert(msg,(hataBasligi||'İşlem başarısız'));
     return null;
@@ -799,6 +803,26 @@ async function api(action, body){
       });
     }
     case 'jobs_list':{ const {data,error}=await sb.from('jobs').select('*').order('sort').order('id'); if(error)throw error; return ok(data); }
+    /* S11 §5 — koşullu güncelleme (iyimser eşzamanlılık). Yalnız DEĞİŞEN
+       alanlar yazılır ve satır, form açıldığındaki eski değerleri hâlâ
+       taşıyorsa güncellenir. Başka biri arada aynı alanı değiştirdiyse 0
+       satır döner: sessizce EZİLMEZ, çakışma olarak bildirilir. */
+    case 'row_update_cas':{
+      const tablo=({jobs:'jobs',documents:'documents'})[body.tablo]; if(!tablo) throw new Error('Geçersiz tablo.');
+      let s=sb.from(tablo).update(body.patch).eq('id',body.id);
+      Object.entries(body.eski||{}).forEach(([k,v])=>{ s=(v===null||v===undefined)?s.is(k,null):s.eq(k,v); });
+      const {data,error}=await s.select('*'); if(error)throw error;
+      if(!data||!data.length){
+        const {data:g}=await sb.from(tablo).select('*').eq('id',body.id).maybeSingle();
+        if(!g) throw Object.assign(new Error('Kayıt bulunamadı ya da değiştirme yetkiniz yok.'),{kod:'yok'});
+        const deg=Object.keys(body.eski||{}).filter(k=>String(g[k]??'')!==String(body.eski[k]??''));
+        if(!deg.length) throw Object.assign(new Error('Bu kaydı değiştirme yetkiniz yok.'),{kod:'yetki'});
+        throw Object.assign(new Error('cakisma'),{kod:'cakisma',alanlar:deg,guncel:g});
+      }
+      logYaz(tablo==='jobs'?'job_save':'document_update',{id:body.id,...body.patch}); return ok(data[0]); }
+    case 'job_create':{
+      const {data,error}=await sb.rpc('job_create',{p_job:body.job,p_followers:body.followers||[]});
+      if(error)throw error; logYaz('job_save',{id:data,...body.job}); return ok({id:data}); }
     case 'job_move':{ const {error}=await sb.from('jobs').update({status:body.status}).eq('id',body.id); if(error)throw error; return ok(); }
     case 'job_save': {
       try{ const r=await saveRow('jobs',body); logYaz(act,body); return ok(r); }
@@ -823,6 +847,14 @@ async function api(action, body){
     }
     case 'mecra_save': { const r=await saveRow('mecralar',body); logYaz(act,body); return ok(r); }
     case 'unit_save': { const r=await saveRow('units',body); logYaz(act,body); return ok(r); }
+    /* S11 §4: bir fiziksel panonun TÜM yüzlerinin konumu tek istekte.
+       Yetki RLS'tedir (envanter = yönetici); 0 satır sessiz başarı değildir. */
+    case 'units_konum':{
+      const ids=(body.ids||[]).filter(Boolean); if(!ids.length) throw new Error('Pano seçilmedi.');
+      const {data,error}=await sb.from('units').update({lat:body.lat,lng:body.lng}).in('id',ids).select('id');
+      if(error)throw error;
+      if(!data||data.length!==ids.length) throw new Error('Bu konumu değiştirme yetkiniz yok.');
+      logYaz('unit_save',{ids,lat:body.lat,lng:body.lng}); return ok(data); }
     case 'alt_all':{ const {data,error}=await sb.from('alt_mecralar').select('id,mecra_id,name,product_id').order('sort').order('id'); if(error)throw error; return ok(data); }
     case 'alt_list':{ const {data,error}=await sb.from('alt_mecralar').select('*').eq('mecra_id',q.mecra_id).order('sort').order('id'); if(error)throw error; return ok(data); }
     case 'alt_save': { const r=await saveRow('alt_mecralar',body); logYaz(act,body); return ok(r); }
@@ -1787,7 +1819,8 @@ async function navUygula(st){
      kullanici takvimde kalmali. Ayrildigimiz girdi geri itilir. */
   const mbg=document.getElementById('modalBg');
   if(mbg&&mbg.classList.contains('open')){
-    closeModal();
+    /* Kirli form Geri ile sessizce kaybolmaz (S11 §5). */
+    await modalVazgec();
     if(_navSon){ try{ history.pushState(_navSon,'',location.href); }catch(e){} }
     return; }
   _navSon=st;
@@ -1891,6 +1924,7 @@ let _modalOnceki=null;
 function modal(html){
   const m=document.getElementById('modal'), bg=document.getElementById('modalBg');
   m.classList.remove('mdl-gen');                 /* S7: genis modal bir sonrakine sizmasin */
+  _modalKirli=false;
   m.innerHTML=html;
   m.setAttribute('role','dialog'); m.setAttribute('aria-modal','true'); m.setAttribute('tabindex','-1');
   const b=m.querySelector('h3');
@@ -1902,7 +1936,27 @@ function modal(html){
   const ilk=m.querySelector('input:not([type=hidden]):not([disabled]),textarea,select,button');
   setTimeout(()=>{ (ilk||m).focus(); },30);
 }
+/* S11 §5 — form taslağı koruması. Formdaki alan değişikliği Kaydet'e kadar
+   TASLAKTIR. Kullanıcının GERÇEK girişi (isTrusted) diyaloğu "kirli" yapar;
+   programın doldurduğu alanlar yapmaz. Esc, arka plana tıklama, Vazgeç /
+   Kapat ve tarayıcı Geri kirli bir formu SORMADAN kapatmaz. Başarılı
+   kayıttan sonra kod `closeModal()` çağırır: o yol koşulsuz kapatır. */
+let _modalKirli=false;
+['input','change'].forEach(t=>document.addEventListener(t,e=>{
+  if(!e.isTrusted) return;
+  const el=e.target; if(!el||!el.closest||!el.closest('#modal')) return;
+  if(el.closest('[data-kirletmez]')) return;
+  _modalKirli=true;
+},true));
+function modalAcikMi(){ const bg=document.getElementById('modalBg'); return !!(bg&&bg.classList.contains('open')); }
+async function modalVazgec(){
+  if(_modalKirli&&!(await mpConfirm('Kaydedilmemiş değişiklikler var. Kaydetmeden kapatılsın mı?','Değişiklikler kaydedilmedi',
+      {danger:false,ok:'Kaydetmeden kapat',no:'Düzenlemeye dön'}))) return false;
+  closeModal(); return true;
+}
+window.addEventListener('beforeunload',e=>{ if((_modalKirli&&modalAcikMi())||ui._dirty){ e.preventDefault(); e.returnValue=''; } });
 function closeModal(){
+  _modalKirli=false;
   document.getElementById('modalBg').classList.remove('open');
   /* S6 §17-§18: formdan cikiliyorsa yuklenmis ama kaydedilmemis dosyalar
      depoda sahipsiz kalmaz. */
@@ -1921,7 +1975,9 @@ function modalBusy(on,txt){
 document.addEventListener('keydown',e=>{
   if(e.key!=='Escape')return;
   const bg=document.getElementById('modalBg');
-  if(bg&&bg.classList.contains('open')) closeModal();
+  /* Onay penceresi (mpDlg) açıksa Esc onu kapatır, formu değil. */
+  if(document.getElementById('mpDlgBg')) return;
+  if(bg&&bg.classList.contains('open')) modalVazgec();
 });
 
 
@@ -2248,7 +2304,7 @@ function calGun(gun){
       <span class="cal-t">${esc(e.t)}</span>
       <span class="cal-s">${esc(JL[e.s]||e.s||'')}</span></button>`).join('')}</div>
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
-      <button class="btn btn-ghost btn-sm" onclick="closeModal()">Kapat</button>
+      <button class="btn btn-ghost btn-sm" onclick="modalVazgec()">Kapat</button>
       <button class="btn btn-primary btn-sm" onclick="closeModal();go('is-takibi')">İş Takibine Git</button></div>`);
 }
 
@@ -3202,7 +3258,7 @@ function qcAc(a,b){
     </div>
 
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
-      <button class="btn btn-ghost btn-sm" onclick="closeModal()">Vazgeç</button>
+      <button class="btn btn-ghost btn-sm" onclick="modalVazgec()">Vazgeç</button>
       <button class="btn btn-primary btn-sm" onclick="qcKaydet()">${duz?'Kaydet':'Paylaş'}</button></div>`);
   /* Duzenlemede mevcut Is/Kurum secimini isaretle (secici render sonrasi). */
   if(duz){
@@ -3526,6 +3582,9 @@ async function jobDelete(id){ if(await mpConfirm('Bu iş kaydı silinsin mi? Ba�
    cikarilacagini soyler ve bir kez tuketilir. */
 async function workAc(id,odak){
   if(odak) ui._workOdak=odak;
+  /* Kaydedilmemiş aşama taslağı yalnız AYNI işte ve kullanıcı ayrılmayı
+     onaylamadıysa korunur (dirtyGuard onaylanınca ui._dirty düşer). */
+  if(ui._fazTaslak&&(ui._fazTaslak.id!==id||!ui._dirty)){ ui._fazTaslak=null; ui._dirty=false; }
   const veri=await guard(()=>Promise.all([api('work_detail&id='+id),api('team_list'),
     api('customers_list'),api('contacts_list'),
     api('work_followers_all&job_id='+id).catch(()=>[]), sozUnitYukle()]),'İş açılamadı');
@@ -3628,23 +3687,42 @@ function wBolum(o){
    TASIMAZ, yalniz hafifce tonlanir. Renkler Pano sutunlariyla ayni (JOBC).
    Tiklama mevcut `job_move` yolunu kullanir; ikinci bir faz yazicisi yok.
    Depolanan deger (`temas_takip`, `yayinda_aktif`) degismez. */
+/* S11 §5: aşama göstergesine tıklamak aşamayı HENÜZ değiştirmez — taslak
+   olarak işaretler; Kaydet ile yazılır, Vazgeç ile geri alınır. Önceden
+   tek bir yanlış tıklama aşamayı değiştirip kalıcı Hareket üretiyordu. */
 function workFazHtml(j){
   const i=FAZ_SIRA.indexOf(j.status);
-  return `<nav class="w-faz" id="wFaz" aria-label="İşin aşaması">
+  const tsl=(ui._fazTaslak&&ui._fazTaslak.id===j.id)?ui._fazTaslak.st:null;
+  return `<nav class="w-faz ${tsl?'taslak':''}" id="wFaz" aria-label="İşin aşaması">
     <span class="w-faz-l">Aşama</span>
-    <ol>${FAZ_SIRA.map((k,ix)=>{ const cur=ix===i;
-      return `<li class="${cur?'on':(i>=0&&ix<i?'once':'')}" style="--fc:var(--c-${JOBC[k]})">
-        <button type="button" ${cur?'aria-current="step"':''} onclick="workFazDegis(${j.id},'${k}')"
-          title="${cur?'Şu anki aşama':'Aşamayı “'+FAZ_ETIKET[k]+'” yap'}">${esc(FAZ_ETIKET[k])}</button></li>`; }).join('')}</ol>
+    <ol>${FAZ_SIRA.map((k,ix)=>{ const cur=ix===i, sec=tsl===k;
+      return `<li class="${cur?'on':(i>=0&&ix<i?'once':'')}${sec?' sec':''}" style="--fc:var(--c-${JOBC[k]})">
+        <button type="button" ${cur?'aria-current="step"':''} aria-pressed="${sec}" onclick="workFazDegis(${j.id},'${k}')"
+          title="${cur?'Şu anki aşama':'Aşamayı “'+FAZ_ETIKET[k]+'” olarak seç (Kaydet ile uygulanır)'}">${sec?'✓ ':''}${esc(FAZ_ETIKET[k])}</button></li>`; }).join('')}</ol>
     ${i<0?`<span class="w-faz-eski">Eski aşama: ${esc(JOBLBL[j.status]||j.status)}</span>`:''}
+    ${tsl?`<span class="w-faz-t" role="status">Aşama: <b>${esc(FAZ_ETIKET[j.status]||JOBLBL[j.status]||j.status)}</b> → <b>${esc(FAZ_ETIKET[tsl])}</b>
+      <button type="button" class="btn btn-ghost btn-sm" onclick="workFazVazgec()">Vazgeç</button>
+      <button type="button" class="btn btn-primary btn-sm" id="wFazKaydet" onclick="workFazKaydet()">Kaydet</button></span>`:''}
   </nav>`;
 }
-async function workFazDegis(id,st){
-  const j=ui._work; if(j&&j.id===id&&j.status===st) return;
-  const r=await guard(()=>api('job_move',{id,status:st}),'Aşama değiştirilemedi'); if(r===null) return;
+function workFazCiz(){ const el=document.getElementById('wFaz'); const j=ui._work; if(el&&j) el.outerHTML=workFazHtml(j); }
+function workFazDegis(id,st){
+  const j=ui._work; if(!j||j.id!==id) return;
+  ui._fazTaslak=(j.status===st)?null:{id,st};
+  ui._dirty=!!ui._fazTaslak;
+  workFazCiz();
+}
+function workFazVazgec(){ ui._fazTaslak=null; ui._dirty=false; workFazCiz(); }
+async function workFazKaydet(){
+  const t=ui._fazTaslak, j=ui._work; if(!t||!j) return;
+  const b=document.getElementById('wFazKaydet'); if(b&&b.disabled) return; if(b){ b.disabled=true; b.textContent='Kaydediliyor…'; }
+  let r;
+  try{ r=await api('row_update_cas',{tablo:'jobs',id:t.id,patch:{status:t.st},eski:{status:j.status}}); }
+  catch(e){ if(b){ b.disabled=false; b.textContent='Kaydet'; } if(!casHata(e)) mpAlert(hataMetni(e),'Aşama değiştirilemedi'); return; }
+  ui._fazTaslak=null; ui._dirty=false;
   /* Hareket DB tetikleyicisinden gelir (trg_jobs_hareket) - insan Update'i YAZILMAZ. */
-  toast('Aşama: '+FAZ_ETIKET[st]);
-  workAc(id,{bolum:'faz'});
+  toast('Aşama: '+FAZ_ETIKET[t.st]);
+  workAc(t.id,{bolum:'faz'});
 }
 
 /* ---- Operasyonel durum satiri (S7.1 §4-§6) ----
@@ -3690,7 +3768,7 @@ function workArsivForm(id){
         <span><b>${l}</b><em>${a}</em></span></label>`).join('')}</fieldset>
     <p class="fhint">Arşivlemek muhasebenin işlendiği anlamına gelmez. İş gerekirse yeniden açılabilir.</p>
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
-      <button class="btn btn-ghost btn-sm" onclick="closeModal()">Vazgeç</button>
+      <button class="btn btn-ghost btn-sm" onclick="modalVazgec()">Vazgeç</button>
       <button class="btn btn-primary btn-sm" onclick="workArsivKaydet(${id})">Arşivle</button></div>`);
 }
 async function workArsivKaydet(id){
@@ -3714,7 +3792,7 @@ function workAdForm(id){
         onkeydown="if(event.key==='Enter')workAdKaydet(${id})"></div>
     <p class="fhint">Aynı iş kalır; belgeler, operasyonlar ve geçmiş değişmez. Eski ad zaman çizelgesinde görünür.</p>
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
-      <button class="btn btn-ghost btn-sm" onclick="closeModal()">Vazgeç</button>
+      <button class="btn btn-ghost btn-sm" onclick="modalVazgec()">Vazgeç</button>
       <button class="btn btn-primary btn-sm" onclick="workAdKaydet(${id})">Kaydet</button></div>`);
   const e=document.getElementById('wAd'); if(e){ e.focus(); e.select(); }
 }
@@ -3724,7 +3802,10 @@ async function workAdKaydet(id){
   const eski=String(((ui._work&&ui._work.id===id)?ui._work:{}).title||'').replace(/\s+/g,' ').trim();
   if(yeni===eski){ closeModal(); return; }
   modalBusy(true);
-  const r=await guard(()=>api('job_save',{id,title:yeni}),'İş adı kaydedilemedi');
+  const eskiHam=((ui._work&&ui._work.id===id)?ui._work:{}).title;
+  let r;
+  try{ r=await api('row_update_cas',{tablo:'jobs',id,patch:{title:yeni},eski:{title:eskiHam??null}}); }
+  catch(e){ modalBusy(false); if(!casHata(e)) mpAlert(hataMetni(e),'İş adı kaydedilemedi'); return; }
   modalBusy(false); if(r===null) return;
   closeModal(); toast('İş adı güncellendi.'); workAc(id,{bolum:'faz'});
 }
@@ -3965,7 +4046,7 @@ async function sozAc(id){
       ${c.status!=='iptal'?`<button class="btn btn-ghost btn-sm" onclick="sozIptal(${c.id})">İptal et</button>`:''}
       ${c.status==='taslak'?`<button class="btn btn-outline btn-sm" onclick="sozImzala(${c.id})">İmzalı işaretle</button>`:''}
       ${c.status!=='iptal'||isAdmin()?`<button class="btn btn-primary btn-sm" onclick="sozForm({id:${c.id}})">Düzenle</button>`:''}
-      <button class="btn btn-ghost btn-sm" onclick="closeModal()">Kapat</button></div>`);
+      <button class="btn btn-ghost btn-sm" onclick="modalVazgec()">Kapat</button></div>`);
   const m=document.getElementById('modal'); if(m) m.classList.add('mdl-gen');
 }
 async function sozImzala(id){
@@ -4047,7 +4128,7 @@ async function sozForm(ctx){
     <div class="field"><label class="flabel" for="szNote">Not</label>
       <textarea class="inp" id="szNote" rows="2">${esc(c.note||'')}</textarea></div>
     <div style="display:flex;gap:8px;justify-content:flex-end">
-      <button class="btn btn-ghost btn-sm" onclick="closeModal()">Vazgeç</button>
+      <button class="btn btn-ghost btn-sm" onclick="modalVazgec()">Vazgeç</button>
       <button class="btn btn-primary btn-sm" onclick="sozKaydet()">Kaydet</button></div>`);
   const m=document.getElementById('modal'); if(m) m.classList.add('mdl-gen');
   sozOrgDegis(jobId, c.quote_id||ctx.quoteId||'');
@@ -4176,7 +4257,7 @@ function belgeSatirHtml(x,ctx){
     ||(ctx.tip==='is'&&ctx.orgId);
   return `<div class="bl-row" data-doc="${d.id}">
     ${resim?`<button type="button" class="bl-th sm" onclick="belgeAc(${d.id})" aria-label="${esc(belgeAd(d))} — önizle"><img data-belge-yol="${esc(d.storage_path)}" alt="" loading="lazy"></button>`
-      :`<span class="bl-ext ${d.provider==='external'?'dis':''}">${esc(belgeUzanti(d))}</span>`}
+      :`<span class="bl-ext ${d.provider==='external'?'dis':belgeTurSinif(d)}">${esc(belgeUzanti(d))}</span>`}
     <div class="bl-rb">
       <button type="button" class="bl-rt" onclick="belgeDetay(${d.id})" title="${esc(belgeAd(d))} — ayrıntılar ve ilişkiler">${esc(belgeAd(d))}${d.provider==='external'?' <span class="bl-dis">↗</span>':''}</button>
       <div class="bl-rs"><span class="pill">${esc(belgeTurLbl(d.doc_type))}</span>
@@ -4289,7 +4370,7 @@ async function belgeForm(ctx){
     </fieldset>
     <p class="bf-dur" id="bfDurum" role="status" aria-live="polite"></p>
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
-      <button class="btn btn-ghost btn-sm" onclick="closeModal()">Vazgeç</button>
+      <button class="btn btn-ghost btn-sm" onclick="modalVazgec()">Vazgeç</button>
       <button class="btn btn-primary btn-sm" id="bfKaydet" onclick="bfKaydet()">Kaydet</button></div>`);
   bfKurumCiz(onKurum); bfIsCiz(onIs); bfSozCiz(ctx.contractId||''); bfIliskiYaz();
 }
@@ -4435,7 +4516,7 @@ function bdCiz(){
         <button class="btn btn-ghost btn-sm" onclick="ui._bd.duzen=false;bdCiz()">Vazgeç</button>
         <button class="btn btn-primary btn-sm" id="bdKaydetB" onclick="bdKaydet()">Kaydet</button></div></div>`
     :`<dl class="md-dl bd-dl">
-      <span>Kategori</span><b><span class="pill">${esc(kat[1])}</span>${kat[2].length>1?` <span class="muted">${esc(belgeTurLbl(d.doc_type))}</span>`:''}</b>
+      <span>Kategori</span><b><span class="pill">${esc(kat[1])}</span>${belgeKatla(belgeTurLbl(d.doc_type))!==belgeKatla(kat[1])?` <span class="muted">${esc(belgeTurLbl(d.doc_type))}</span>`:''}</b>
       <span>Dosya</span><b class="bd-kir">${esc(d.original_name)} <span class="muted">· ${esc(dis?'harici bağlantı':[belgeUzanti(d),belgeBoyut(d.size_bytes)].filter(Boolean).join(' · '))}</span></b>
       <span>Eklenme</span><b>${esc(trTarih(d.created_at))}${tm[d.uploaded_by_team_id]?' · '+esc(tm[d.uploaded_by_team_id]):''}</b>
       ${d.updated_at?`<span>Düzenlendi</span><b class="muted">${esc(trTarih(d.updated_at))}</b>`:''}
@@ -4444,9 +4525,14 @@ function bdCiz(){
         <button class="btn btn-outline btn-sm" onclick="belgeAc(${d.id})">Bağlantıyı aç ↗</button></div>`
     :resim?`<div class="bd-onz"><img id="bdImg" alt="${esc(belgeAd(d))}"></div>`
     :pdf?`<div class="bd-onz"><iframe id="bdPdf" title="${esc(belgeAd(d))} — önizleme"></iframe></div>`
-    :`<div class="bd-onz bos"><span>Bu dosya türü burada önizlenemiyor.</span>
-        <button class="btn btn-outline btn-sm" onclick="belgeAc(${d.id},true)">İndir</button></div>`;
-  modal(`<div class="bd-h"><span class="bl-ext ${dis?'dis':''}">${esc(belgeUzanti(d))}</span>
+    :(()=>{ const s=belgeTurSinif(d);
+        const ne=s==='t-xls'?'Excel / tablo dosyası':s==='t-doc'?'Word belgesi':s==='t-txt'?'Metin dosyası':'Dosya';
+        const ac=s==='t-xls'?'Excel ya da uyumlu bir programla':s==='t-doc'?'Word ya da uyumlu bir programla':'ilgili programla';
+        return `<div class="bd-onz bos"><span class="bl-ext big ${s}">${esc(belgeUzanti(d))}</span>
+          <span><b>${esc(ne)}</b> · ${esc(belgeBoyut(d.size_bytes))}</span>
+          <span>Bu biçim tarayıcıda önizlenmez; indirip ${esc(ac)} açın. Dosya dışarıya gönderilmez.</span>
+          <button class="btn btn-primary btn-sm" onclick="belgeAc(${d.id},true)">İndir</button></div>`; })();
+  modal(`<div class="bd-h"><span class="bl-ext ${dis?'dis':belgeTurSinif(d)}">${esc(belgeUzanti(d))}</span>
       <h3 class="bd-t">${esc(belgeAd(d))}</h3></div>
     ${onizle}
     <div class="bd-ac">
@@ -4464,7 +4550,7 @@ function bdCiz(){
       `<li><b>${esc(tm[h.created_by_team_id]||'Sistem')}</b> <time>${esc(psZaman(h.occurred_at))}</time><span>${esc(h.body)}</span></li>`).join('')}</ul></div>`:''}
     <div class="sz-act">
       ${yetki?`<button class="btn btn-danger btn-sm" style="margin-right:auto" onclick="bdSil()">Kalıcı olarak sil</button>`:''}
-      <button class="btn btn-ghost btn-sm" onclick="closeModal()">Kapat</button></div>`);
+      <button class="btn btn-ghost btn-sm" onclick="modalVazgec()">Kapat</button></div>`);
   const m=document.getElementById('modal'); if(m) m.classList.add('mdl-gen');
   if(s.bagla) bdBaglaCiz();
   if(!dis&&(resim||pdf)) belgeImzali(d.storage_path).then(url=>{
@@ -4478,9 +4564,14 @@ async function bdYenile(){ if(!ui._bd) return; const id=ui._bd.d.id;
   if(!d){ closeModal(); return; } belgeKaydet(d); ui._bd={...ui._bd,d,hist:h||[]}; bdCiz(); }
 async function bdKaydet(){
   const d=ui._bd.d; const b=document.getElementById('bdKaydetB'); if(b&&b.disabled) return;
+  /* S11 §5: yalnız değişen alanlar, koşullu; değişiklik yoksa yazma/Hareket yok. */
+  const f=formFark(d,{title:(gv('bdAd')||'').trim()||null,doc_type:gv('bdTur'),note:(gv('bdNot')||'').trim()||null});
+  if(f.bos){ ui._bd.duzen=false; bdCiz(); toast('Değişiklik yok.'); return; }
   if(b){ b.disabled=true; b.textContent='Kaydediliyor…'; }
-  const r=await guard(()=>api('document_update',{id:d.id,title:(gv('bdAd')||'').trim()||null,doc_type:gv('bdTur'),note:(gv('bdNot')||'').trim()||null}),'Belge güncellenemedi');
-  if(r===null){ if(b){ b.disabled=false; b.textContent='Kaydet'; } return; }
+  let r;
+  try{ r=await api('row_update_cas',{tablo:'documents',id:d.id,patch:f.patch,eski:f.eski}); }
+  catch(e){ if(b){ b.disabled=false; b.textContent='Kaydet'; } if(!casHata(e)) mpAlert(hataMetni(e),'Belge güncellenemedi'); return; }
+  _modalKirli=false;
   ui._bd.duzen=false; toast('Belge bilgileri güncellendi.'); await bdYenile(); blListeTazele();
 }
 function bdBaglaAc(){ ui._bd.bagla=true; bdCiz(); }
@@ -4573,7 +4664,7 @@ function belgeTurForm(docId){
       <select class="inp" id="btTur">${BELGE_TUR.map(t=>`<option value="${t[0]}" ${d.doc_type===t[0]?'selected':''}>${t[1]}</option>`).join('')}</select></div>
     <p class="fhint">Dosyanın kendisi ve orijinal adı (${esc(d.original_name)}) değişmez.</p>
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
-      <button class="btn btn-ghost btn-sm" onclick="closeModal()">Vazgeç</button>
+      <button class="btn btn-ghost btn-sm" onclick="modalVazgec()">Vazgeç</button>
       <button class="btn btn-primary btn-sm" onclick="belgeTurKaydet()">Kaydet</button></div>`);
 }
 async function belgeTurKaydet(){
@@ -4672,7 +4763,7 @@ function entryForm(id,jobId,aksiyon){
           <option value="cancelled" ${x.action_status==='cancelled'?'selected':''}>İptal</option></select></div>
     </div>
     <div style="display:flex;gap:8px;justify-content:flex-end">
-      <button class="btn btn-ghost btn-sm" onclick="closeModal()">Vazgeç</button>
+      <button class="btn btn-ghost btn-sm" onclick="modalVazgec()">Vazgeç</button>
       <button class="btn btn-primary btn-sm" onclick="entrySave()">Kaydet</button></div>`);
   const f=document.getElementById('eb'); if(f)f.focus();
 }
@@ -4712,7 +4803,7 @@ async function quoteRevise(id){
 }
 function partyForm(jobId){
   modal(`<h3 style="margin:0 0 6px">Taraf Ekle</h3>
-    <p class="muted" style="font-size:12.5px;margin:0 0 14px">Bu işteki rol, kurumun genel etiketinden bağımsızdır (BR-ORG01).</p>
+    <p class="muted" style="font-size:12.5px;margin:0 0 14px">Bu işteki rol, kurumun genel etiketinden bağımsızdır.</p>
     <input type="hidden" id="pjid" value="${jobId}">
     <div class="field"><label class="flabel" for="pcid">Kurum</label>
       <select class="inp" id="pcid">${(ui._cust||[]).slice(0,800).map(x=>`<option value="${x.id}">${esc(x.firma||('#'+x.id))}</option>`).join('')}</select></div>
@@ -4724,7 +4815,7 @@ function partyForm(jobId){
         <option value="other">Diğer</option></select></div>
     <div class="field"><label class="flabel" for="pnote">Not</label><input class="inp" id="pnote"></div>
     <div style="display:flex;gap:8px;justify-content:flex-end">
-      <button class="btn btn-ghost btn-sm" onclick="closeModal()">Vazgeç</button>
+      <button class="btn btn-ghost btn-sm" onclick="modalVazgec()">Vazgeç</button>
       <button class="btn btn-primary btn-sm" onclick="partySave()">Kaydet</button></div>`);
 }
 async function partySave(){
@@ -4752,7 +4843,7 @@ function workMetaForm(id,job){
   /* S7: sozlesme artik yapisal kayit (Ticari bolumu). Eski jobs.contract_*
      alanlari burada DUZENLENMEZ - iki bagimsiz dogru olusmasin. */
   modal(`<h3 style="margin:0 0 6px">Muhasebe</h3>
-    <p class="muted" style="font-size:12.5px;margin:0 0 14px">Kapanmış iş muhasebenin işlendiği anlamına gelmez (BR-W04). Sözleşmeler işin Ticari bölümünde yönetilir.</p>
+    <p class="muted" style="font-size:12.5px;margin:0 0 14px">Kapanmış iş muhasebenin işlendiği anlamına gelmez. Sözleşmeler işin Ticari bölümünde yönetilir.</p>
     <input type="hidden" id="wmid" value="${id}">
     <div class="row2">
       <div class="field"><label class="flabel" for="was">Muhasebe durumu</label>
@@ -4769,7 +4860,7 @@ function workMetaForm(id,job){
       <span class="fhint">Boş bırakılırsa gönderildi işaretlendiği an yazılır.</span></div>
     <div class="field"><label class="flabel" for="wan">Muhasebe notu</label><input class="inp" id="wan" value="${esc(j.accounting_note)}"></div>
     <div style="display:flex;gap:8px;justify-content:flex-end">
-      <button class="btn btn-ghost btn-sm" onclick="closeModal()">Vazgeç</button>
+      <button class="btn btn-ghost btn-sm" onclick="modalVazgec()">Vazgeç</button>
       <button class="btn btn-primary btn-sm" onclick="workMetaSave()">Kaydet</button></div>`);
 }
 function workMetaDurumDegis(){
@@ -4795,10 +4886,18 @@ async function workMetaSave(){
   const id=+gv('wmid');
   const j=((ui._work&&ui._work.id===id)?ui._work:null)||(ui._jobs||[]).find(x=>x.id===id)||{};
   const as=gv('was');
+  /* S11 §5: yalnız değişen alanlar; değişiklik yoksa yazma yok, Hareket yok.
+     Durum değişmediyse devir damgalarına dokunulmaz (accZaman "şimdi"
+     üretmesin). */
+  const yeni={accounting_status:as,accounting_amount:gv('waa')?+gv('waa'):null,accounting_note:gv('wan')||null};
+  const elle=gv('wasd'), eskiGun=j.accounting_sent_at?String(j.accounting_sent_at).slice(0,10):'';
+  if(as!==(j.accounting_status||'yok')||(elle&&elle!==eskiGun)) Object.assign(yeni,accZaman(j,as,elle));
+  const f=formFark(j,yeni);
+  if(f.bos){ closeModal(); toast('Değişiklik yok — kaydedilecek bir şey olmadı.'); return; }
   modalBusy(true);
-  const r=await guard(()=>api('job_save',{id,accounting_status:as,
-    accounting_amount:gv('waa')?+gv('waa'):null,accounting_note:gv('wan')||null,
-    ...accZaman(j,as,gv('wasd'))}),'Kaydedilemedi');
+  let r;
+  try{ r=await api('row_update_cas',{tablo:'jobs',id,patch:f.patch,eski:f.eski}); }
+  catch(e){ modalBusy(false); if(!casHata(e)) mpAlert(hataMetni(e),'Kaydedilemedi'); return; }
   modalBusy(false);
   if(r===null)return;
   /* S4.4: sistem hareketi artik VERITABANI tetikleyicisinden gelir (trg_jobs_hareket). */
@@ -4837,6 +4936,9 @@ async function jobForm(st,id,ctx){
      yapabilmesi için (§24). Tek toplu okuma. */
   ui._affByKisi={}; (af||[]).forEach(a=>{ (ui._affByKisi[a.contact_id]=ui._affByKisi[a.contact_id]||[]).push(a); });
   const j = id ? (await api('jobs_list')).find(x=>x.id===id)||{} : {};
+  /* S11 §5: form açıldığı andaki satır — Kaydet yalnız farkı ve bu değerler
+     hâlâ yerindeyse yazar. */
+  ui._jobFormIlk=id?{...j}:null;
   const opt=(arr,val,lbl)=>`<option value="">— yok —</option>`+arr.map(x=>
     `<option value="${x.id}" ${String(val)===String(x.id)?'selected':''}>${esc(lbl(x))}</option>`).join('');
   const benim=(ui._me&&ui._me.id)||0;
@@ -4875,7 +4977,7 @@ async function jobForm(st,id,ctx){
     <div class="field" style="margin:10px 0 0"><span class="qc-mini">Dosya (isteğe bağlı) — gelen teklif, taslak sözleşme, referans görsel</span>
       ${ekAlan('job')}</div>
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
-      <button class="btn btn-ghost btn-sm" onclick="closeModal()">Vazgeç</button>
+      <button class="btn btn-ghost btn-sm" onclick="modalVazgec()">Vazgeç</button>
       <button class="btn btn-primary btn-sm" onclick="jobSave()">Oluştur</button></div>`);
     const t0=document.getElementById('jt'); if(t0)t0.focus();
     return;
@@ -4902,7 +5004,7 @@ async function jobForm(st,id,ctx){
   <div class="field"><label class="flabel" for="jn">Not</label><textarea class="inp" id="jn">${esc(j.note)}</textarea></div>
   <div class="qc-line qc-opt" style="margin-bottom:4px">
     <label class="qc-acil"><input type="checkbox" id="jAcil" ${j.is_urgent?'checked':''}><span>⚡ Acil</span></label></div>
-  <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn btn-ghost btn-sm" onclick="closeModal()">Vazgeç</button><button class="btn btn-primary btn-sm" onclick="jobSave()">Kaydet</button></div>`);
+  <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn btn-ghost btn-sm" onclick="modalVazgec()">Vazgeç</button><button class="btn btn-primary btn-sm" onclick="jobSave()">Kaydet</button></div>`);
 }
 /* İlgili kişi seçimi Work'ün kurumuna KISITLIDIR: contacts.customer_id
    üzerinden filtrelenir (brief §5.2). Kişi jobs'ta tekrar saklanmaz —
@@ -4976,6 +5078,31 @@ function jobKisiTazele(){
   const n=sel.options.length-1, h=document.getElementById('jkisiHint');
   if(h) h.textContent=!cid?'Önce kurum seçin.':(n?'':'Bu kurumda kayıtlı kişi yok — Kurumlar ekranından eklenebilir.');
 }
+/* S11 §5 — yalnız değişen alanlar. Sayı/boş/metin karşılaştırması
+   normalleştirilir: "12" ile 12, '' ile null aynı değerdir. */
+const _degNorm=v=>(v===undefined||v===null||v==='')?null:(typeof v==='boolean'?v:String(v));
+function formFark(ilk,yeni){
+  const patch={}, eski={};
+  Object.keys(yeni).forEach(k=>{ if(k==='id') return;
+    if(_degNorm(yeni[k])!==_degNorm(ilk[k])){ patch[k]=yeni[k]; eski[k]=ilk[k]===undefined?null:ilk[k]; } });
+  return {patch,eski,bos:!Object.keys(patch).length};
+}
+/* Çakışma: form AÇIK kalır; kullanıcının çalışması kaybolmaz. */
+const ALAN_AD={title:'Başlık',status:'Aşama',customer_id:'Kurum',primary_contact_id:'İlgili kişi',is_urgent:'Acil',
+  note:'Not',mecra_id:'Mecra',supplier_id:'Tedarikçi',assignee_id:'İş sahibi',start_day:'Başlangıç',end_day:'Bitiş',
+  accounting_status:'Muhasebe durumu',accounting_amount:'Tutar',accounting_note:'Muhasebe notu',accounting_sent_at:'Gönderim tarihi',
+  accounting_processed_at:'İşlenme tarihi',doc_type:'Kategori',lifecycle_status:'Durum'};
+/* Ağ hatası kullanıcıya teknik metinle gösterilmez. */
+function hataMetni(e){ const m=String((e&&e.message)||e||'');
+  if(/Failed to fetch|NetworkError|network|Load failed/i.test(m)) return 'Bağlantı kurulamadı. Değişiklikler kaydedilmedi ve formda duruyor; bağlantıyı kontrol edip tekrar deneyin.';
+  return m; }
+function casHata(e){
+  if(e&&e.kod==='cakisma'){
+    mpAlert('Bu kayıt siz düzenlerken başka biri tarafından değiştirildi ('+e.alanlar.map(k=>ALAN_AD[k]||k).join(', ')
+      +'). Değişiklikleriniz kaydedilmedi ve formda duruyor. Güncel hali görmek için formu kapatıp yeniden açın.','Kayıt güncellenmiş');
+    return true; }
+  return false;
+}
 async function jobSave(){
   if(!gv('jt').trim()){ mpAlert('Başlık zorunlu.'); return; }
   if(document.getElementById('ek_job')&&ekTurEksik('job')){ mpAlert('Eklenen her dosya için belge türünü seçin.','Dosya'); return; }
@@ -5000,24 +5127,32 @@ async function jobSave(){
      buradan yapilan asama degisikligi timeline'a hic dusmuyordu. Ayni
      mevcut mekanizmayla kapatildi; yeni bir workflow-history altsistemi
      KURULMADI (§26 - yeni sema yok). */
-  const r=await guard(()=>api('job_save',row),'İş kaydedilemedi');
+  /* S11 §5:
+     · YENİ iş: iş + hesap tarafı + ilgili ekip TEK işlemde (job_create);
+       önceden üç ayrı istekti ve son ikisinin hatası yutuluyordu.
+       (Dosya denemesinde form bu işi güncellemeye döner: jid dolu.)
+     · DÜZENLEME: yalnız DEĞİŞEN alanlar, form açıldığındaki değerler hâlâ
+       yerindeyse yazılır. Değişiklik yoksa YAZMA ve Hareket yok. */
+  let r;
+  if(yeni){
+    const fol=Array.from(document.querySelectorAll('.jFol:checked')).map(x=>+x.value);
+    r=await guard(()=>api('job_create',{job:row,followers:fol}),'İş kaydedilemedi');
+  } else {
+    const ilk=ui._jobFormIlk||{};
+    const f=formFark(ilk,row);
+    const dosyaBekliyor=!!(document.getElementById('ek_job')&&ekBekleyen('job').length);
+    if(f.bos&&!dosyaBekliyor){ modalBusy(false); closeModal(); toast('Değişiklik yok — kaydedilecek bir şey olmadı.'); return; }
+    try{ r=f.bos?{id:row.id}:await api('row_update_cas',{tablo:'jobs',id:row.id,patch:f.patch,eski:f.eski}); }
+    catch(e){ modalBusy(false); if(!casHata(e)) mpAlert(hataMetni(e),'İş kaydedilemedi'); return; }
+  }
   modalBusy(false);
   if(r===null) return;
-  /* S4.4: sistem hareketi artik VERITABANI tetikleyicisinden gelir (trg_jobs_hareket). */
-  /* Yeni Work: seçilen kurum compatibility alanına ve canonical
-     work_parties account rolüne birlikte yazılır (06 §8). Seçilen
-     "İlgili" kişiler work_followers'a yazılır — kimseye İŞ ATANMAZ. */
-  if(yeni && r && r.id){
-    if(cid) await api('work_party_save',{id:0,job_id:r.id,customer_id:cid,role:'account'}).catch(()=>{});
-    const fol=Array.from(document.querySelectorAll('.jFol:checked')).map(x=>+x.value);
-    if(fol.length) await api('work_follow_many',{id:r.id,team_ids:fol}).catch(()=>{});
-    /* S4.4: sistem hareketi artik VERITABANI tetikleyicisinden gelir (trg_jobs_hareket). */
-  }
   /* S6 §34: Is ONCE olusur; dosya sonradan baglanir. Dosya basarisizsa Is
      GERI ALINMAZ - form acik kalir, ayni dugme artik bu isi gunceller ve
      dosyayi yeniden dener. Vazgec dosyasiz devam eder. */
   if(r&&r.id&&document.getElementById('ek_job')&&ekBekleyen('job').length){
     const jidEl=document.getElementById('jid'); if(jidEl) jidEl.value=String(r.id);
+    if(yeni) ui._jobFormIlk={...row,id:r.id,lifecycle_status:'acik'};
     modalBusy(true,'Dosyalar yükleniyor…');
     const g=await ekGonder('job',[{job_id:r.id}]);
     modalBusy(false);
@@ -5327,7 +5462,7 @@ async function opForm(id,jobId){
       <textarea class="inp" id="opEv" rows="2" placeholder="https://drive.google.com/...">${esc(eskiKanit.join('\n'))}</textarea></div></details>
     <div style="display:flex;gap:8px;justify-content:flex-end">
       ${(id&&isAdmin())?`<button class="btn btn-danger btn-sm" style="margin-right:auto" onclick="opDel(${id})">Sil</button>`:''}
-      <button class="btn btn-ghost btn-sm" onclick="closeModal()">Vazgeç</button>
+      <button class="btn btn-ghost btn-sm" onclick="modalVazgec()">Vazgeç</button>
       <button class="btn btn-primary btn-sm" onclick="opSave()">Kaydet</button></div>`);
 }
 /* S4.4: `opOncekiBul()` kaldirildi. Yalnizca istemci tarafi sysEntry'ye
@@ -5423,7 +5558,7 @@ async function opTopluForm(jobId){
     <div class="field"><span class="flabel">Ortak dosyalar — baskı provası, ölçü belgesi (tek dosya, tüm satırlara bağlanır)</span>
       ${ekAlan('opb')}</div>
     <div style="display:flex;gap:8px;justify-content:flex-end">
-      <button class="btn btn-ghost btn-sm" onclick="closeModal()">Vazgeç</button>
+      <button class="btn btn-ghost btn-sm" onclick="modalVazgec()">Vazgeç</button>
       <button class="btn btn-primary btn-sm" id="opbKaydetB" onclick="opbKaydet()">Kaydet</button></div>`);
   const m=document.getElementById('modal'); if(m) m.classList.add('mdl-gen');
   opbPkCiz(); opbSatirCiz();
@@ -6523,7 +6658,7 @@ function keForm(id,tarih){
       <input class="inp" id="keNote" value="${esc(k.note)}" placeholder="isteğe bağlı"></div>
     <div style="display:flex;gap:8px;justify-content:flex-end">
       ${id?`<button class="btn btn-danger btn-sm" style="margin-right:auto" onclick="keSil(${id})">Sil</button>`:''}
-      <button class="btn btn-ghost btn-sm" onclick="closeModal()">Vazgeç</button>
+      <button class="btn btn-ghost btn-sm" onclick="modalVazgec()">Vazgeç</button>
       <button class="btn btn-primary btn-sm" onclick="keKaydet()">Kaydet</button></div>`);
   const t=document.getElementById('keTitle'); if(t)t.focus();
 }
@@ -6577,7 +6712,8 @@ function wsTakipTumu(){
    gates its own mutation surface via isAdmin() (see their definitions);
    nothing new is gated here. */
 function wsMecSub(){ const v=ui._mecSub||'doluluk'; return (v==='harita')?v:'doluluk'; }
-function wsMecTab(sub){ ui._mecSub=sub; wsMecralarHub(document.getElementById('content')); }
+async function wsMecTab(sub){ if(ui._dirty&&!(await dirtyGuard())) return;
+  ui._mecSub=sub; wsMecralarHub(document.getElementById('content')); }
 async function wsMecralarHub(c){
   const sub=wsMecSub();
   const tab=(key,label)=>`<button type="button" class="${sub===key?'on':''}" aria-pressed="${sub===key}" onclick="wsMecTab('${key}')">${esc(label)}</button>`;
@@ -6817,7 +6953,7 @@ function importOpen(cfg){
     </div>
     <div id="impBody"></div>
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
-      <button class="btn btn-ghost btn-sm" onclick="closeModal()">Vazgeç</button>
+      <button class="btn btn-ghost btn-sm" onclick="modalVazgec()">Vazgeç</button>
       <button class="btn btn-primary btn-sm" id="impGo" onclick="importApply()" disabled>İçe Aktar</button></div>`);
 }
 async function importParse(file){
@@ -7271,7 +7407,7 @@ const RAPOR=[
     RAPOR.find(r=>r.id==='dol').satirlar(c).filter(r=>r.statik).forEach(r=>{
       const x=o[r.mecra]=o[r.mecra]||{mecra:r.mecra||'—',pozSet:new Set(),dolu:0,rez:0,bos:0};
       x.pozSet.add(r.alan+'|'+r.poz+'|'+r.yuzey);
-      if(r.durum==='Dolu')x.dolu++; else if(r.durum==='Opsiyon')x.rez++; else if(r.durum==='Boş')x.bos++; });
+      if(r.durum==='Yayın'||r.durum==='Dolu')x.dolu++; else if(r.durum==='Opsiyon')x.rez++; else if(r.durum==='Müsait'||r.durum==='Boş')x.bos++; });
     const sira=Object.fromEntries(c.mec.map((m,i)=>[m.name,i]));
     return Object.values(o).map(x=>{ const t=x.dolu+x.rez+x.bos;
       return {mecra:x.mecra,poz:x.pozSet.size,dolu:x.dolu,rez:x.rez,bos:x.bos,toplam:t,
@@ -7767,67 +7903,315 @@ async function unitDel(id,altId,mid){ if(await mpConfirm('Pozisyon ve doluluk ge
    bir doluluk yazarı olarak kalamazdı. */
 
 
-/* ---------- HARİTA (konum işaretleme) ---------- */
-let hMap=null, hCluster=null, hMarker=null, hRows=[], hSel=null, hQ='';
+/* ---------- HARİTA (S11 §4) ----------
+   Doluluk sekmesiyle AYNI aktif kapsam ve AYNI durum hesabı (medya.js:
+   mdYukle / mdKapsamda / mdArsiv / mdYuzeyDurum / mdRefGun). Satır birimi
+   FİZİKSEL pano ya da LED ekranıdır:
+     · A/B yüzleri aynı panonun iki yüzüdür → tek satır, tek konum;
+     · LED kampanyaları pin DEĞİLDİR; fiziksel LED ekranları ayrı listelenir;
+     · kapsam dışı lokasyon, eski modelleme alanı ve pasif (ör. eski LED
+       yer tutucusu) envanter listeye girmez.
+   Koordinat uydurulmaz: konumu olmayan "Konum eklenmemiş" yazar.
+   Konum düzenleme yalnız yönetici ve yalnız "Konumu kaydet" ile yazılır;
+   bir panonun tüm yüzleri TEK istekte güncellenir. */
+let hMap=null, hCluster=null, hMarker=null, hRows=[], hSel=null, hQ='', hTaslak=null;
 async function harita(c){
-  const st=await api('settings_get'); ui._settings=st;
-  const [al,un]=await Promise.all([
-    sb.from('alt_mecralar').select('*').order('sort').order('id'),
-    sb.from('units').select('*').order('sort').order('id')
-  ]);
-  const mecs=ui._mecralar||await api('mecra_list'); ui._mecralar=mecs;
-  const altById={}; (al.data||[]).forEach(a=>altById[a.id]=a);
-  const mecById={}; mecs.forEach(m=>mecById[m.id]=m);
-  hRows=(un.data||[]).map(u=>{ const a=altById[u.alt_mecra_id]||{}; const m=mecById[a.mecra_id||u.mecra_id]||{};
-    return {id:u.id,unit:u.name||'(pozisyon)',alt:a.name||'—',mec:m.name||'—',theme:m.theme_color||'#0071e3',
-            mecId:a.mecra_id||u.mecra_id||0,altId:u.alt_mecra_id||0,mecSort:m.sort||0,altSort:a.sort||0,
-            lat:u.lat,lng:u.lng,konum:u.konum||''}; });
-  const yes=hRows.filter(r=>r.lat!=null&&r.lng!=null).length;
+  let st={}, M=null, hata=null;
+  try{ [st,M]=await Promise.all([api('settings_get'),(typeof mdYukle==='function')?mdYukle():null]); }
+  catch(e){ hata=e; }
+  if(hata||!M){
+    c.innerHTML=`<div class="sec-card"><div class="banner" role="alert">Harita verisi okunamadı${hata?': '+esc(hata.message||hata):''}.
+      <button class="btn btn-outline btn-sm" style="margin-left:8px" onclick="renderSection()">Yeniden dene</button></div></div>`;
+    return; }
+  ui._settings=st;
+  hRows=hFizikselListe(M); hSel=null; hTaslak=null; ui._dirty=false;
+  const pano=hRows.filter(r=>r.tip==='pano'), ekran=hRows.filter(r=>r.tip==='ekran');
+  const yuz=pano.reduce((n,r)=>n+r.faces.length,0);
+  const ref=mdRefGun(mdDurum());
 
-  /* Harita: sayfa metni CMS'i, Google Maps anahtarı ve koordinat
-     işaretleme mutation'dır — admin'e kapalı. Pozisyon listesi + harita
-     (pinler, arama, hover) salt okuma context'i olarak team_member'a
-     da açık kalır (parity audit S1 §4). */
+  /* Harita sayfası metinleri, Google anahtarı ve koordinat işaretleme
+     mutation'dır — yöneticiye açık. Liste + harita herkese salt okuma. */
   c.innerHTML=`
   ${isAdmin()?`<div class="sec-card"><h3 style="margin:0 0 6px;font-size:16px">Harita Sayfası Metinleri</h3>
     <p class="muted" style="font-size:13px;margin:0 0 12px">Header'daki <b>Maps</b> butonuyla açılan sayfanın başlığı ve açıklaması.</p>
-    <div class="field"><label class="flabel">Sayfa başlığı</label><input class="inp" id="mapTitle" value="${esc(st.mapTitle||'')}" placeholder="Reklam Alanlarımız — Adana Haritası"></div>
-    <div class="field"><label class="flabel">Açıklama</label><textarea class="inp" id="mapDesc" placeholder="Kısa tanıtım metni…">${esc(st.mapDesc||'')}</textarea></div>
-    <div class="field"><label class="flabel">Kapak görseli (sayfa üstü şerit)</label><div style="display:flex;gap:8px"><input class="inp" id="mapKapak" value="${esc(st.mapKapak||'')}"><button class="btn btn-outline btn-sm" style="flex:0 0 auto" onclick="pickUpload('image/*',u=>{document.getElementById('mapKapak').value=u;})">Yükle</button></div></div>
+    <div class="field"><label class="flabel" for="mapTitle">Sayfa başlığı</label><input class="inp" id="mapTitle" value="${esc(st.mapTitle||'')}" placeholder="Reklam Alanlarımız — Adana Haritası"></div>
+    <div class="field"><label class="flabel" for="mapDesc">Açıklama</label><textarea class="inp" id="mapDesc" placeholder="Kısa tanıtım metni…">${esc(st.mapDesc||'')}</textarea></div>
+    <div class="field"><label class="flabel" for="mapKapak">Kapak görseli (sayfa üstü şerit)</label><div style="display:flex;gap:8px"><input class="inp" id="mapKapak" value="${esc(st.mapKapak||'')}"><button class="btn btn-outline btn-sm" style="flex:0 0 auto" onclick="pickUpload('image/*',u=>{document.getElementById('mapKapak').value=u;})">Yükle</button></div></div>
     <button class="btn btn-primary btn-sm" onclick="saveMapTexts()">Kaydet</button></div>
 
   <div class="sec-card"><h3 style="margin:0 0 6px;font-size:16px">Google Maps Anahtarı</h3>
-    <p class="muted" style="font-size:13px;margin:0 0 12px">Buraya bir Google Maps API anahtarı yazarsanız site haritası <b>Google Maps</b> ile çalışır (uydu görünümü, Street View, tanıdık arayüz). Boş bırakırsanız ücretsiz OpenStreetMap kullanılır — özellikler aynıdır.
-      <br><b>Önemli:</b> Google Cloud'da anahtara mutlaka “HTTP yönlendiren” kısıtı koyun (yalnızca kendi alan adınız) ve günlük kota sınırı tanımlayın; aksi halde anahtarınız başkalarınca kullanılabilir.</p>
-    <div class="field"><label class="flabel">API anahtarı</label><input class="inp" id="gmKey" value="${esc(st.googleMapsKey||'')}" placeholder="AIza… (boş = OpenStreetMap)"></div>
+    <p class="muted" style="font-size:13px;margin:0 0 12px">Buraya bir Google Maps API anahtarı yazarsanız site haritası <b>Google Maps</b> ile çalışır. Boş bırakırsanız ücretsiz OpenStreetMap kullanılır. Anahtar bu adreste reddedilirse panel haritası kendiliğinden OpenStreetMap'e geçer.
+      <br><b>Önemli:</b> Google Cloud'da anahtara “HTTP yönlendiren” kısıtı koyun ve günlük kota sınırı tanımlayın.</p>
+    <div class="field"><label class="flabel" for="gmKey">API anahtarı</label><input class="inp" id="gmKey" value="${esc(st.googleMapsKey||'')}" placeholder="AIza… (boş = OpenStreetMap)"></div>
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
       <button class="btn btn-primary btn-sm" onclick="saveGmKey()">Kaydet</button>
-      <span class="muted" style="font-size:12.5px">Şu anki motor: <b>${st.googleMapsKey?'Google Maps':'OpenStreetMap (ücretsiz)'}</b></span></div></div>`:''}
+      <span class="muted" style="font-size:12.5px">Tanımlı motor: <b>${st.googleMapsKey?'Google Maps':'OpenStreetMap (ücretsiz)'}</b></span></div></div>`:''}
 
-  <div class="sec-card"><h3 style="margin:0 0 6px;font-size:16px">${isAdmin()?'Konum İşaretleme':'Konumlar'}</h3>
-    <p class="muted" style="font-size:13px;margin:0 0 14px">${isAdmin()
-      ?'Soldan bir pozisyon seçin, sonra <b>haritaya tıklayarak</b> yerini işaretleyin ve kaydedin. Kaydedince liste otomatik olarak <b>sıradaki işaretsiz pozisyona</b> geçer; aynı direğin A/B yüzeyleri için tek işaretleme yeter.<br>İşaretli konumlar sitedeki harita sayfasında pin olarak çıkar; yakın olanlar otomatik gruplanır.<br>'
-      :'Soldan bir pozisyon seçin veya haritadaki pinlere tıklayın; konum işaretleme mecra yetkisindedir (BR-M03).<br>'}<b id="hCount">${yes}</b> / ${hRows.length} pozisyonun konumu işaretli.</p>
+  <div class="sec-card"><h3 style="margin:0 0 6px;font-size:16px">${isAdmin()?'Konumlar ve konum işaretleme':'Konumlar'}</h3>
+    <p class="muted hmap-kap">Aktif kapsam: <b>${pano.length} fiziksel pano</b> (${yuz} statik yüz)${ekran.length?` · <b>${ekran.length} LED ekranı</b>`:''}.
+      Konumu eklenmiş: <b id="hCount">${hRows.filter(r=>r.lat!=null).length}</b> / ${hRows.length} pano/ekran.
+      Yüz durumları <b>${esc(mdKisa(ref,true))}</b> tarihine göredir.
+      ${isAdmin()?'<br>Bir pano seçin, haritaya tıklayarak yerini işaretleyin ve <b>Konumu kaydet</b>e basın; A/B yüzleri aynı konumu paylaşır.'
+        :'<br>Bir pano seçin veya haritadaki pinlere tıklayın; konum işaretleme yönetici yetkisindedir.'}</p>
     <div class="hmap-grid">
       <div class="hmap-side">
-        <input class="inp" id="hSearch" placeholder="Pozisyon / mecra ara…" oninput="hFilter(this.value)" style="margin-bottom:10px">
+        <input class="inp" id="hSearch" placeholder="Pano / lokasyon / ürün ara…" oninput="hFilter(this.value)" style="margin-bottom:10px" aria-label="Harita listesinde ara">
         <div id="hList" class="hlist"></div>
       </div>
       <div>
-        <div id="hMapNote" class="banner" style="display:none;margin-bottom:10px"></div>
+        <div id="hMapNote" class="hmap-not" style="display:none" role="status"></div>
         ${isAdmin()?`<div class="hbar">
-          <input class="inp" id="hGeo" placeholder="Adres / yer ara — ör. M1 Adana AVM" onkeydown="if(event.key==='Enter'){event.preventDefault();hGeoSearch()}">
+          <input class="inp" id="hGeo" placeholder="Adres / yer ara — ör. M1 Adana AVM" onkeydown="if(event.key==='Enter'){event.preventDefault();hGeoSearch()}" aria-label="Adres ara">
           <button class="btn btn-outline btn-sm" onclick="hGeoSearch()">Bul</button>
-          <input class="inp" id="hPaste" placeholder="Koordinat veya Maps linki yapıştır" onkeydown="if(event.key==='Enter'){event.preventDefault();hPasteCoord()}">
+          <input class="inp" id="hPaste" placeholder="Koordinat veya Maps linki yapıştır" onkeydown="if(event.key==='Enter'){event.preventDefault();hPasteCoord()}" aria-label="Koordinat yapıştır">
           <button class="btn btn-outline btn-sm" onclick="hPasteCoord()">Uygula</button>
         </div>
         <div id="hGeoRes" class="hgeores" style="display:none"></div>`:''}
-        <div id="hSelBar" class="hselbar">${isAdmin()?'Önce soldan bir pozisyon seçin.':'Bir pozisyon seçin.'}</div>
-        <div id="hMapCanvas" class="hmap"></div>
+        <div id="hSelBar" class="hselbar">Bir pano ya da LED ekranı seçin.</div>
+        <div class="hmap-kutu"><div id="hMapCanvas" class="hmap"></div><div id="hMapBos" class="hmap-bos" hidden></div></div>
       </div>
     </div></div>`;
   hRenderList();
   setTimeout(hInitMap,80);
+}
+/* Fiziksel pano / ekran listesi — Doluluk ile aynı kapsam kuralları. */
+function hFizikselListe(M){
+  const out=[];
+  M.mecs.filter(mdKapsamda).forEach(m=>{
+    const alanlar=(M.altByMec[m.id]||[]).filter(a=>!mdArsiv(a));
+    const yetim=(M.orphanByMec[m.id]||[]).filter(u=>u.active!==false);
+    const ekle=(a,us)=>{
+      const esz=mdEszamanli(a);
+      const grp=esz?us.map(u=>({base:u.name,faces:[u]}))
+                   :groupUnits(us).map(g=>({base:g.base,faces:[g.A,g.B].filter(Boolean)}));
+      grp.forEach(g=>{
+        const k=g.faces.find(u=>u.lat!=null&&u.lng!=null)||null;
+        out.push({id:g.faces[0].id, tip:esz?'ekran':'pano', ad:g.base, faces:g.faces,
+          mec:m.name||'—', mecId:m.id, mecSort:m.sort||0, theme:m.theme_color||'#0071e3',
+          alt:a.name||'Diğer pozisyonlar', urun:(a.product_id!=null&&M.pm[a.product_id])||a.name||'',
+          altId:a.id, altSort:a.sort||0, lat:k?+k.lat:null, lng:k?+k.lng:null,
+          konum:(g.faces.find(u=>u.konum)||{}).konum||''});
+      });
+    };
+    alanlar.forEach(a=>{ const us=(M.unitsByAlt[a.id]||[]).filter(u=>u.active!==false); if(us.length) ekle(a,us); });
+    if(yetim.length) ekle({id:'x'+m.id,name:'Diğer pozisyonlar',sort:9999},yetim);
+  });
+  return out;
+}
+function hFilter(q){ hQ=(q||'').toLocaleLowerCase('tr'); hRenderList(); }
+function hGrupAcik(){ if(!ui._hOpen) ui._hOpen={}; return ui._hOpen; }
+function hGrupTog(k){ const o=hGrupAcik(); o[k]=!(o[k]!==false); if(o[k]===true)delete o[k]; else o[k]=false; hRenderList(); }
+function hGrupHepsi(ac){ const o=hGrupAcik(); Object.keys(o).forEach(k=>delete o[k]); if(!ac){ hRows.forEach(r=>{ o['m'+r.mecId]=false; }); } hRenderList(); }
+function hVisible(){
+  return hRows.filter(r=>!hQ||[r.ad,r.alt,r.urun,r.mec,r.konum,...r.faces.map(u=>u.name)].some(x=>String(x||'').toLocaleLowerCase('tr').includes(hQ)));
+}
+function hRenderList(){ const box=document.getElementById('hList'); if(!box)return;
+  const cn=document.getElementById('hCount');
+  if(cn) cn.textContent=hRows.filter(r=>r.lat!=null).length;
+  const list=hVisible();
+  if(!list.length){ box.innerHTML='<p class="muted" style="font-size:13px;padding:8px">Sonuç yok.</p>'; return; }
+  const acik=hGrupAcik(); const aramaVar=!!hQ;
+  /* Lokasyon → ürün → fiziksel pano / ekran */
+  const mecs=new Map();
+  list.forEach(r=>{ if(!mecs.has(r.mecId)) mecs.set(r.mecId,{ad:r.mec,theme:r.theme,sort:r.mecSort,alts:new Map()});
+    const G=mecs.get(r.mecId); if(!G.alts.has(r.altId)) G.alts.set(r.altId,{ad:r.urun||r.alt,alan:r.alt,sort:r.altSort,rows:[],ekran:r.tip==='ekran'}); G.alts.get(r.altId).rows.push(r); });
+  const sayac=rows=>{ const ok=rows.filter(r=>r.lat!=null).length;
+    return `<span class="hsay ${ok===rows.length?'tam':(ok?'yari':'')}" title="Konumu eklenmiş / toplam">${ok}/${rows.length} konum</span>`; };
+  let html='';
+  [...mecs.entries()].sort((x,y)=>(x[1].sort-y[1].sort)||x[1].ad.localeCompare(y[1].ad,'tr')).forEach(([mid,G])=>{
+    const tum=[...G.alts.values()].flatMap(A=>A.rows);
+    const mOpen=aramaVar||acik['m'+mid]!==false;
+    html+=`<div class="hg ${mOpen?'open':''}"><button class="hg-h" onclick="hGrupTog('m${mid}')" aria-expanded="${mOpen}"><i class="hdot" style="background:${G.theme}"></i><b>${esc(G.ad)}</b>${sayac(tum)}<em class="chev"></em></button>`;
+    if(mOpen){
+      [...G.alts.entries()].sort((x,y)=>(x[1].sort-y[1].sort)||x[1].ad.localeCompare(y[1].ad,'tr')).forEach(([aid,A])=>{
+        const aOpen=aramaVar||acik['a'+aid]!==false;
+        const yuzN=A.rows.reduce((n,r)=>n+r.faces.length,0);
+        const ne=A.ekran?`${A.rows.length} LED ekranı`:`${A.rows.length} pano · ${yuzN} yüz`;
+        html+=`<div class="hga ${aOpen?'open':''}"><button class="hga-h" onclick="hGrupTog('a${aid}')" aria-expanded="${aOpen}"><span>${esc(A.ad)} <em class="hga-n">${esc(ne)}</em></span>${sayac(A.rows)}<em class="chev"></em></button>`;
+        if(aOpen) html+=A.rows.map(r=>{ const ok=r.lat!=null;
+          return `<button type="button" class="hrow ${hSel===r.id?'on':''}" onclick="hPick(${r.id})" aria-pressed="${hSel===r.id}">
+            <span class="hdot" style="background:${ok?r.theme:'#d2d2d7'}"></span>
+            <span class="hnm"><b>${esc(r.ad)}</b><span>${r.tip==='ekran'?'LED ekranı':r.faces.length>1?r.faces.map(u=>posParts(u.name).surf).join(' · ')+' yüz':'tek yüz'}${r.konum?' · '+esc(r.konum):''}</span></span>
+            <span class="hst ${ok?'ok':''}">${ok?'✓ konum':'Konum eklenmemiş'}</span></button>`;}).join('');
+        html+=`</div>`; });
+    }
+    html+=`</div>`; });
+  box.innerHTML=`<div class="hg-tools"><button onclick="hGrupHepsi(true)">Tümünü aç</button><span>·</span><button onclick="hGrupHepsi(false)">Tümünü kapat</button></div>`+html;
+}
+/* Google Maps yükleyici. Anahtar bu adreste REDDEDİLİRSE (ör. yönlendiren
+   kısıtı) Google bunu harita kurulduktan SONRA `gm_authFailure` ile
+   bildirir; önceki kod bu anda artık dinlemiyordu ve gri "Hata! Bir sorun
+   oluştu" alanı kalıyordu. Artık her durumda OpenStreetMap'e geçilir. */
+let hGoogleLoading=null, hEngine='leaflet', hgMap=null, hgMarkers=[], hgSel=null;
+function hLoadGoogle(key){
+  if(hGoogleLoading) return hGoogleLoading;
+  hGoogleLoading=new Promise((res,rej)=>{
+    if(window.google&&window.google.maps) return res();
+    const t=setTimeout(()=>rej(new Error('zaman aşımı')),15000);
+    window.__gmPanelReady=()=>{ clearTimeout(t); res(); };
+    const g=document.createElement('script'); g.async=true;
+    g.src='https://maps.googleapis.com/maps/api/js?key='+encodeURIComponent(key)+'&callback=__gmPanelReady&language=tr&region=TR';
+    g.onerror=()=>{ clearTimeout(t); rej(new Error('yüklenemedi')); };
+    document.head.appendChild(g);
+  });
+  return hGoogleLoading;
+}
+function hNot(msg,yeniden){ const n=document.getElementById('hMapNote'); if(!n) return;
+  if(!msg){ n.style.display='none'; n.innerHTML=''; return; }
+  n.innerHTML=esc(msg)+(yeniden?' <button class="btn btn-outline btn-sm" style="margin-left:8px" onclick="hInitMap(true)">Yeniden dene</button>':'');
+  n.style.display='block'; }
+let _hGoogleRed=false;
+window.gm_authFailure=()=>{ _hGoogleRed=true;
+  if(document.getElementById('hMapCanvas')&&hEngine==='google'){
+    hNot('Google Maps anahtarı bu adreste kullanılamıyor — harita OpenStreetMap ile gösteriliyor.');
+    hInitLeaflet(); } };
+function hInitMap(yeniden){
+  const el=document.getElementById('hMapCanvas'); if(!el)return;
+  if(yeniden){ hNot(''); if(hMap){ try{ hMap.remove(); }catch(e){} hMap=null; } el.innerHTML=''; }
+  const key=String((ui._settings||{}).googleMapsKey||'').trim();
+  if(key&&!_hGoogleRed){
+    hLoadGoogle(key).then(()=>{ if(_hGoogleRed) hInitLeaflet(); else hInitGoogle(); })
+      .catch(err=>{ console.warn('Panel Google Maps:',err.message);
+        hNot('Google Maps yüklenemedi ('+err.message+') — OpenStreetMap kullanılıyor.');
+        hInitLeaflet(); });
+  } else hInitLeaflet();
+}
+function hInitGoogle(){
+  hEngine='google';
+  hgMap=new google.maps.Map(document.getElementById('hMapCanvas'),{
+    center:{lat:37.0000,lng:35.3213}, zoom:12, mapTypeId:'hybrid',
+    mapTypeControl:true, streetViewControl:true, fullscreenControl:true, tilt:0});
+  hgMap.addListener('click',e=>{ if(!isAdmin())return;
+    if(hSel==null){ mpAlert('Önce listeden bir pano seçin.'); return; }
+    hPlace(e.latLng.lat(), e.latLng.lng()); });
+  hDrawAll();
+}
+function hInitLeaflet(){
+  const el=document.getElementById('hMapCanvas'); if(!el) return;
+  if(typeof L==='undefined'){ el.innerHTML=''; hNot('Harita kütüphanesi yüklenemedi.',true); return; }
+  if(hMap){ try{ hMap.remove(); }catch(e){} hMap=null; }
+  el.innerHTML=''; hgMap=null; hgMarkers=[]; hgSel=null;
+  hEngine='leaflet';
+  hMap=L.map('hMapCanvas').setView([37.0000,35.3213],12);
+  let tileHata=0;
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'&copy; OpenStreetMap'})
+    .on('tileerror',()=>{ if(++tileHata===4) hNot('Harita katmanı yüklenemiyor (internet bağlantısı?).',true); })
+    .addTo(hMap);
+  hCluster=L.markerClusterGroup({showCoverageOnHover:false,maxClusterRadius:50});
+  hMap.addLayer(hCluster);
+  hMap.on('click',e=>{ if(!isAdmin())return; if(hSel==null){ mpAlert('Önce listeden bir pano seçin.'); return; } hPlace(e.latlng.lat,e.latlng.lng); });
+  hDrawAll(); setTimeout(()=>hMap&&hMap.invalidateSize(),200);
+}
+function hDrawAll(){
+  const list=hRows.filter(r=>r.lat!=null&&r.id!==hSel);
+  const bos=document.getElementById('hMapBos');
+  if(bos){ const n=hRows.filter(r=>r.lat!=null).length;
+    bos.hidden=!!n||!!hTaslak;
+    bos.textContent=n?'':'Bu kapsamda konumu eklenmiş pano yok. Konumlar eklendikçe burada pin olarak görünür; liste “Konum eklenmemiş” olanları gösterir.'; }
+  if(hEngine==='google'){
+    if(!hgMap)return;
+    hgMarkers.forEach(m=>m.setMap(null)); hgMarkers=[];
+    hgMarkers=list.map(r=>{ const mk=new google.maps.Marker({position:{lat:r.lat,lng:r.lng},map:hgMap,
+        title:r.mec+' · '+r.ad, icon:{path:google.maps.SymbolPath.CIRCLE,scale:7,
+        fillColor:r.theme,fillOpacity:1,strokeColor:'#fff',strokeWeight:2}});
+      mk.addListener('click',()=>hPick(r.id)); return mk; });
+    return;
+  }
+  if(!hCluster)return; hCluster.clearLayers();
+  hCluster.addLayers(list.map(r=>{ const mk=L.marker([r.lat,r.lng],{title:r.mec+' · '+r.ad});
+    mk.on('click',()=>hPick(r.id)); return mk; }));
+}
+/* Seçili pano: yüzlerin durum tarihindeki durumu + takvime geçiş. */
+async function hPick(id){
+  if(hSel!==id&&ui._dirty&&!(await dirtyGuard())) return;
+  hSel=id; hTaslak=null; ui._dirty=false; hRenderList();
+  const r=hRows.find(x=>x.id===id); if(!r)return;
+  const M=ui._M; const ref=mdRefGun(mdDurum());
+  const bar=document.getElementById('hSelBar');
+  const yuzler=r.tip==='ekran'
+    ?(()=>{ const a=M&&M.altById[r.altId]; const y=a?mdYayinlar(M,a.id,ref):{aktif:[]};
+        return `<li><span class="hsel-y">LED</span><span>${y.aktif.length?`${y.aktif.length} kampanya yayında`:'Yayında kampanya yok'} <em class="muted">· eşzamanlı yayın alanı</em></span>
+          <button class="btn-link" onclick="hTakvimde(${r.faces[0].id},true)">Takvimde göster</button></li>`; })()
+    :r.faces.map(u=>{ const d=M?mdYuzeyDurum(M,u,ref):{etiket:'—',alt:''};
+        return `<li><span class="hsel-y">${esc(posParts(u.name).surf)}</span>
+          <span><span class="md-st md-st-${esc(d.kod||'bos')}">${esc(d.etiket)}</span>${d.alt?` <em class="muted">${esc(d.alt)}</em>`:''}${d.kayit&&d.kayit.customer_name?` · ${esc(orgKisa(d.kayit.customer_name,28))}`:''}</span>
+          <button class="btn-link" onclick="hTakvimde(${u.id})">Takvimde göster</button></li>`; }).join('');
+  bar.innerHTML=`<div class="hsel-h"><b>${esc(r.ad)}</b> <span class="muted">— ${esc(r.mec)} › ${esc(r.urun||r.alt)}</span>
+      <span class="hcoord" id="hCoord">${r.lat!=null?r.lat.toFixed(6)+', '+r.lng.toFixed(6):'Konum eklenmemiş'}</span>
+      ${isAdmin()?`<span class="hsel-a" id="hSelA"></span>`:''}</div>
+    <ul class="hsel-l" aria-label="Yüzlerin ${esc(mdKisa(ref,true))} tarihindeki durumu">${yuzler}</ul>`;
+  hSelEylem();
+  hDrawAll();
+  if(hEngine==='google'){
+    if(hgSel){ hgSel.setMap(null); hgSel=null; }
+    if(r.lat!=null){ hPlace(r.lat,r.lng,true); hgMap&&(hgMap.panTo({lat:r.lat,lng:r.lng}),hgMap.setZoom(18)); }
+    return;
+  }
+  if(hMarker&&hMap){ hMap.removeLayer(hMarker); hMarker=null; }
+  if(r.lat!=null&&hMap){ hPlace(r.lat,r.lng,true); hMap.setView([r.lat,r.lng],16); }
+}
+/* Konum eylemleri: yalnız yönetici; taslak varken Kaydet / Vazgeç. */
+function hSelEylem(){
+  const a=document.getElementById('hSelA'); if(!a) return;
+  const r=hRows.find(x=>x.id===hSel); if(!r){ a.innerHTML=''; return; }
+  a.innerHTML=hTaslak
+    ?`<em class="hsel-kirli">Kaydedilmemiş konum</em>
+      <button class="btn btn-ghost btn-sm" onclick="hVazgec()">Vazgeç</button>
+      <button class="btn btn-primary btn-sm" id="hKaydetB" onclick="hSave()">Konumu kaydet</button>`
+    :(r.lat!=null?`<button class="btn btn-ghost btn-sm" onclick="hClear()">Konumu kaldır</button>`:'<em class="muted">Haritaya tıklayarak konum işaretleyin</em>');
+}
+function hTakvimde(uid,led){
+  if(led){ const M=ui._M, u=M&&M.unitById[uid]; if(u&&typeof medyaAlanOdak==='function') return medyaAlanOdak(u.alt_mecra_id); }
+  if(typeof medyaYuzeyOdak==='function') medyaYuzeyOdak(uid);
+}
+function hPlace(lat,lng,quiet){
+  if(!quiet){ hTaslak={lat:+lat,lng:+lng}; ui._dirty=true; hSelEylem();
+    const bos=document.getElementById('hMapBos'); if(bos) bos.hidden=true; }
+  if(hEngine==='google'){
+    if(hgSel) hgSel.setMap(null);
+    hgSel=new google.maps.Marker({position:{lat:+lat,lng:+lng},map:hgMap,draggable:isAdmin(),
+      icon:{path:google.maps.SymbolPath.BACKWARD_CLOSED_ARROW,scale:6,fillColor:'#3455e6',fillOpacity:1,strokeColor:'#fff',strokeWeight:2}});
+    hgSel.addListener('dragend',()=>{ const p=hgSel.getPosition(); hTaslak={lat:p.lat(),lng:p.lng()}; ui._dirty=true; hSetCoordText(p.lat(),p.lng()); hSelEylem(); });
+    hSetCoordText(lat,lng);
+    if(!quiet&&hgMap) hgMap.panTo({lat:+lat,lng:+lng});
+    return;
+  }
+  if(!hMap) return;
+  if(hMarker) hMap.removeLayer(hMarker);
+  hMarker=L.marker([lat,lng],{draggable:isAdmin()}).addTo(hMap);
+  hMarker.on('dragend',()=>{ const p=hMarker.getLatLng(); hTaslak={lat:p.lat,lng:p.lng}; ui._dirty=true; hSetCoordText(p.lat,p.lng); hSelEylem(); });
+  hSetCoordText(lat,lng);
+  if(!quiet) hMap.panTo([lat,lng]);
+}
+function hSetCoordText(lat,lng){ const el=document.getElementById('hCoord'); if(el)el.textContent=(+lat).toFixed(6)+', '+(+lng).toFixed(6)+(hTaslak?' (kaydedilmedi)':''); }
+function hVazgec(){ hTaslak=null; ui._dirty=false; const id=hSel; hSel=null; hPick(id); }
+/* Konum yalnız "Konumu kaydet" ile yazılır; panonun TÜM yüzleri tek istekte. */
+async function hSave(){
+  const r=hRows.find(x=>x.id===hSel); if(!r||!hTaslak){ mpAlert('Haritaya tıklayarak konumu işaretleyin.'); return; }
+  const b=document.getElementById('hKaydetB'); if(b&&b.disabled) return; if(b){ b.disabled=true; b.textContent='Kaydediliyor…'; }
+  const p=hTaslak;
+  const sonuc=await guard(()=>api('units_konum',{ids:r.faces.map(u=>u.id),lat:p.lat,lng:p.lng}),'Konum kaydedilemedi');
+  if(sonuc===null){ if(b){ b.disabled=false; b.textContent='Konumu kaydet'; } return; }
+  r.lat=p.lat; r.lng=p.lng; r.faces.forEach(u=>{ u.lat=p.lat; u.lng=p.lng; });
+  hTaslak=null; ui._dirty=false;
+  toast(r.faces.length>1?`Konum kaydedildi — ${r.faces.length} yüz.`:'Konum kaydedildi.');
+  const id=hSel; hSel=null; hPick(id); hNext();
+}
+async function hClear(){
+  const r=hRows.find(x=>x.id===hSel); if(!r) return;
+  if(!await mpConfirm(`${r.ad} konumu kaldırılsın mı?${r.faces.length>1?' Panonun tüm yüzlerinden kaldırılır.':''}`,'Konumu kaldır',{danger:true,ok:'Kaldır'})) return;
+  const sonuc=await guard(()=>api('units_konum',{ids:r.faces.map(u=>u.id),lat:null,lng:null}),'Konum kaldırılamadı'); if(sonuc===null) return;
+  r.lat=null; r.lng=null; r.faces.forEach(u=>{ u.lat=null; u.lng=null; });
+  if(hEngine==='google'){ if(hgSel){hgSel.setMap(null);hgSel=null;} }
+  else if(hMarker&&hMap){ hMap.removeLayer(hMarker); hMarker=null; }
+  toast('Konum kaldırıldı.');
+  const id=hSel; hSel=null; hPick(id);
+}
+function hNext(){
+  const list=hVisible();
+  const i=list.findIndex(r=>r.id===hSel);
+  const nx=list.slice(i+1).find(r=>r.lat==null) || list.find(r=>r.lat==null);
+  if(nx && nx.id!==hSel) hPick(nx.id);
 }
 async function saveGmKey(){ await api('settings_save',{googleMapsKey:gv('gmKey').trim()}); mpAlert('Kaydedildi. Siteyi Ctrl+F5 ile yenileyin.'); renderSection(); }
 async function logYukle(){
@@ -7861,173 +8245,6 @@ async function saveGa(){
   await api('settings_save',{gaId:v}); toast(v?'Analytics açıldı. Siteyi Ctrl+F5 ile yenileyin.':'Analytics kapatıldı.'); renderSection();
 }
 async function saveMapTexts(){ await api('settings_save',{mapTitle:gv('mapTitle'),mapDesc:gv('mapDesc'),mapKapak:gv('mapKapak')}); mpAlert('Kaydedildi.'); }
-function hFilter(q){ hQ=(q||'').toLowerCase(); hRenderList(); }
-function hGrupAcik(){ if(!ui._hOpen) ui._hOpen={}; return ui._hOpen; }
-function hGrupTog(k){ const o=hGrupAcik(); o[k]=!(o[k]!==false); if(o[k]===true)delete o[k]; else o[k]=false; hRenderList(); }
-function hGrupHepsi(ac){ const o=hGrupAcik(); Object.keys(o).forEach(k=>delete o[k]); if(!ac){ hRows.forEach(r=>{ o['m'+r.mecId]=false; }); } hRenderList(); }
-function hRenderList(){ const box=document.getElementById('hList'); if(!box)return;
-  const cn=document.getElementById('hCount');
-  if(cn) cn.textContent=hRows.filter(r=>r.lat!=null&&r.lng!=null).length;
-  const list=hRows.filter(r=>!hQ||[r.unit,r.alt,r.mec,r.konum].some(x=>String(x||'').toLowerCase().includes(hQ)));
-  if(!list.length){ box.innerHTML='<p class="muted" style="font-size:13px;padding:8px">Sonuç yok.</p>'; return; }
-  const acik=hGrupAcik(); const aramaVar=!!hQ;
-  /* mecra → alan → pozisyon */
-  const mecs=new Map();
-  list.forEach(r=>{ if(!mecs.has(r.mecId)) mecs.set(r.mecId,{ad:r.mec,theme:r.theme,sort:r.mecSort,alts:new Map()});
-    const M=mecs.get(r.mecId); if(!M.alts.has(r.altId)) M.alts.set(r.altId,{ad:r.alt,sort:r.altSort,rows:[]}); M.alts.get(r.altId).rows.push(r); });
-  const sayac=rows=>{ const ok=rows.filter(r=>r.lat!=null&&r.lng!=null).length; return `<span class="hsay ${ok===rows.length?'tam':(ok?'yari':'')}">${ok}/${rows.length}</span>`; };
-  let html='';
-  [...mecs.entries()].sort((x,y)=>(x[1].sort-y[1].sort)||x[1].ad.localeCompare(y[1].ad,'tr')).forEach(([mid,M])=>{
-    const tum=[...M.alts.values()].flatMap(A=>A.rows);
-    const mOpen=aramaVar||acik['m'+mid]!==false;
-    html+=`<div class="hg ${mOpen?'open':''}"><button class="hg-h" onclick="hGrupTog('m${mid}')"><i class="hdot" style="background:${M.theme}"></i><b>${esc(M.ad)}</b>${sayac(tum)}<em class="chev"></em></button>`;
-    if(mOpen){
-      [...M.alts.entries()].sort((x,y)=>(x[1].sort-y[1].sort)||x[1].ad.localeCompare(y[1].ad,'tr')).forEach(([aid,A])=>{
-        const aOpen=aramaVar||acik['a'+aid]!==false;
-        html+=`<div class="hga ${aOpen?'open':''}"><button class="hga-h" onclick="hGrupTog('a${aid}')"><span>${esc(A.ad)}</span>${sayac(A.rows)}<em class="chev"></em></button>`;
-        if(aOpen) html+=A.rows.map(r=>{ const ok=r.lat!=null&&r.lng!=null;
-          return `<div class="hrow ${hSel===r.id?'on':''}" onclick="hPick(${r.id})"><span class="hdot" style="background:${ok?r.theme:'#d2d2d7'}"></span>
-            <div class="hnm"><b>${esc(r.unit)}</b>${r.konum?`<span>${esc(r.konum)}</span>`:''}</div><span class="hst">${ok?'✓':'—'}</span></div>`;}).join('');
-        html+=`</div>`; });
-    }
-    html+=`</div>`; });
-  box.innerHTML=`<div class="hg-tools"><button onclick="hGrupHepsi(true)">Tümünü aç</button><span>·</span><button onclick="hGrupHepsi(false)">Tümünü kapat</button></div>`+html;
-}
-/* Google Maps yükleyici (anahtar Ayarlar > Harita bölümünden) */
-let hGoogleLoading=null, hEngine='leaflet', hgMap=null, hgMarkers=[], hgSel=null;
-function hLoadGoogle(key){
-  if(hGoogleLoading) return hGoogleLoading;
-  hGoogleLoading=new Promise((res,rej)=>{
-    if(window.google&&window.google.maps) return res();
-    const t=setTimeout(()=>rej(new Error('zaman asimi')),15000);
-    window.gm_authFailure=()=>{ clearTimeout(t); rej(new Error('anahtar reddedildi')); };
-    window.__gmPanelReady=()=>{ clearTimeout(t); res(); };
-    const g=document.createElement('script'); g.async=true;
-    g.src='https://maps.googleapis.com/maps/api/js?key='+encodeURIComponent(key)+'&callback=__gmPanelReady&language=tr&region=TR';
-    g.onerror=()=>{ clearTimeout(t); rej(new Error('yuklenemedi')); };
-    document.head.appendChild(g);
-  });
-  return hGoogleLoading;
-}
-function hInitMap(){
-  const el=document.getElementById('hMapCanvas'); if(!el)return;
-  const key=String((ui._settings||{}).googleMapsKey||'').trim();
-  if(key){
-    hLoadGoogle(key).then(()=>hInitGoogle())
-      .catch(err=>{ console.warn('Panel Google Maps:',err.message);
-        const n=document.getElementById('hMapNote');
-        if(n){ n.textContent='Google Maps yüklenemedi ('+err.message+') — OpenStreetMap kullanılıyor.'; n.style.display='block'; }
-        hInitLeaflet(); });
-  } else hInitLeaflet();
-}
-function hInitGoogle(){
-  hEngine='google';
-  hgMap=new google.maps.Map(document.getElementById('hMapCanvas'),{
-    center:{lat:37.0000,lng:35.3213}, zoom:12, mapTypeId:'hybrid',
-    mapTypeControl:true, streetViewControl:true, fullscreenControl:true, tilt:0});
-  hgMap.addListener('click',e=>{
-    if(!isAdmin())return;   /* konum işaretleme mutation'dır (parity audit S1 §4) */
-    if(hSel==null){ mpAlert('Önce soldaki listeden bir pozisyon seçin.'); return; }
-    hPlace(e.latLng.lat(), e.latLng.lng());
-  });
-  hDrawAll(); 
-}
-function hInitLeaflet(){
-  const el=document.getElementById('hMapCanvas');
-  if(typeof L==='undefined'){ el.innerHTML='<p class="muted" style="padding:20px">Harita yüklenemedi. Sayfayı yenileyin.</p>'; return; }
-  hEngine='leaflet';
-  hMap=L.map('hMapCanvas').setView([37.0000,35.3213],12);
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'&copy; OpenStreetMap'}).addTo(hMap);
-  hCluster=L.markerClusterGroup({showCoverageOnHover:false,maxClusterRadius:50});
-  hMap.addLayer(hCluster);
-  hMap.on('click',e=>{ if(!isAdmin())return; if(hSel==null){ mpAlert('Önce soldaki listeden bir pozisyon seçin.'); return; } hPlace(e.latlng.lat,e.latlng.lng); });
-  hDrawAll(); setTimeout(()=>hMap.invalidateSize(),200);
-}
-function hDrawAll(){
-  const list=hRows.filter(r=>r.lat!=null&&r.lng!=null&&r.id!==hSel);
-  if(hEngine==='google'){
-    if(!hgMap)return;
-    hgMarkers.forEach(m=>m.setMap(null)); hgMarkers=[];
-    hgMarkers=list.map(r=>{ const mk=new google.maps.Marker({position:{lat:+r.lat,lng:+r.lng},map:hgMap,
-        title:r.mec+' · '+r.unit, icon:{path:google.maps.SymbolPath.CIRCLE,scale:7,
-        fillColor:r.theme,fillOpacity:1,strokeColor:'#fff',strokeWeight:2}});
-      mk.addListener('click',()=>hPick(r.id)); return mk; });
-    return;
-  }
-  if(!hCluster)return; hCluster.clearLayers();
-  hCluster.addLayers(list.map(r=>L.marker([r.lat,r.lng],{title:r.mec+' · '+r.unit})
-    .bindPopup(`<b>${esc(r.unit)}</b><br>${esc(r.mec)} › ${esc(r.alt)}`)));
-}
-function hPick(id){ hSel=id; hRenderList(); const r=hRows.find(x=>x.id===id); if(!r)return;
-  const bar=document.getElementById('hSelBar');
-  bar.innerHTML=`<b>${esc(r.unit)}</b> <span class="muted">— ${esc(r.mec)} › ${esc(r.alt)}</span>
-    <span class="hcoord" id="hCoord">${r.lat!=null?(+r.lat).toFixed(6)+', '+(+r.lng).toFixed(6):'konum yok'}</span>
-    ${isAdmin()?`<button class="btn btn-primary btn-sm" onclick="hSave()">Konumu Kaydet</button>
-    ${r.lat!=null?`<button class="btn btn-danger btn-sm" onclick="hClear()">Konumu Sil</button>`:''}`:''}`;
-  hDrawAll();
-  if(hEngine==='google'){
-    if(hgSel){ hgSel.setMap(null); hgSel=null; }
-    if(r.lat!=null&&r.lng!=null){ hPlace(r.lat,r.lng,true); hgMap.panTo({lat:+r.lat,lng:+r.lng}); hgMap.setZoom(18); }
-    return;
-  }
-  if(hMarker){ hMap.removeLayer(hMarker); hMarker=null; }
-  if(r.lat!=null&&r.lng!=null){ hPlace(r.lat,r.lng,true); hMap.setView([r.lat,r.lng],16); }
-}
-function hPlace(lat,lng,quiet){
-  if(hEngine==='google'){
-    if(hgSel) hgSel.setMap(null);
-    hgSel=new google.maps.Marker({position:{lat:+lat,lng:+lng},map:hgMap,draggable:true,
-      icon:{path:google.maps.SymbolPath.BACKWARD_CLOSED_ARROW,scale:6,fillColor:'#3455e6',fillOpacity:1,strokeColor:'#fff',strokeWeight:2}});
-    hgSel.addListener('dragend',()=>{ const p=hgSel.getPosition(); hSetCoordText(p.lat(),p.lng()); });
-    hSetCoordText(lat,lng);
-    if(!quiet) hgMap.panTo({lat:+lat,lng:+lng});
-    return;
-  }
-  if(hMarker) hMap.removeLayer(hMarker);
-  hMarker=L.marker([lat,lng],{draggable:true}).addTo(hMap);
-  hMarker.on('dragend',()=>{ const p=hMarker.getLatLng(); hSetCoordText(p.lat,p.lng); });
-  hSetCoordText(lat,lng);
-  if(!quiet) hMap.panTo([lat,lng]);
-}
-function hSetCoordText(lat,lng){ const el=document.getElementById('hCoord'); if(el)el.textContent=(+lat).toFixed(6)+', '+(+lng).toFixed(6); }
-async function hSave(){
-  const has = hEngine==='google' ? !!hgSel : !!hMarker;
-  if(hSel==null||!has){ mpAlert('Haritaya tıklayarak konumu işaretleyin.'); return; }
-  const p = hEngine==='google' ? {lat:hgSel.getPosition().lat(), lng:hgSel.getPosition().lng()} : hMarker.getLatLng();
-  await api('unit_save',{id:hSel,lat:p.lat,lng:p.lng});
-  const r=hRows.find(x=>x.id===hSel); if(r){ r.lat=p.lat; r.lng=p.lng; }
-  let msg='Konum kaydedildi.';
-  const tw=hTwins(r);
-  if(tw.length && await mpConfirm(r.unit+' kaydedildi. Aynı yapının diğer yüzü olan '+tw.map(t=>t.unit).join(', ')+' için de aynı konum kullanılsın mı?','Diğer Yüz',{danger:false,ok:'Evet, Kullan'})){
-    for(const t of tw){ await api('unit_save',{id:t.id,lat:p.lat,lng:p.lng}); t.lat=p.lat; t.lng=p.lng; }
-    msg='Konum kaydedildi — '+(tw.length+1)+' yüzey.';
-  }
-  hRenderList(); hDrawAll();
-  if(typeof toast==='function') toast(msg); else mpAlert(msg);
-  hNext();
-}
-/* Aynı direğin A/B yüzeyleri: P1-A ile P1-B gibi. Yalnız A/B eki + ayraç ya da rakam şartı aranır,
-   böylece "Megaboard" gibi 'd' ile biten adlar yanlışlıkla eşleşmez. */
-function hAB(nm){
-  const m=String(nm||'').match(/^(.*?)([-_ ])?([ABab])$/);
-  if(!m) return null;
-  if(!m[2] && !/[0-9]$/.test(m[1])) return null;
-  return m[1].replace(/[-_ ]+$/,'').toLowerCase();
-}
-function hTwins(r){
-  if(!r) return [];
-  const key=hAB(r.unit); if(!key) return [];
-  return hRows.filter(x=> x.id!==r.id && x.alt===r.alt && x.lat==null && hAB(x.unit)===key );
-}
-function hVisible(){
-  return hRows.filter(r=>!hQ||[r.unit,r.alt,r.mec,r.konum].some(x=>String(x||'').toLowerCase().includes(hQ)));
-}
-function hNext(){
-  const list=hVisible();
-  const i=list.findIndex(r=>r.id===hSel);
-  const nx=list.slice(i+1).find(r=>r.lat==null) || list.find(r=>r.lat==null);
-  if(nx && nx.id!==hSel) hPick(nx.id);
-}
 /* Haritayı bir noktaya uçur (motordan bağımsız) */
 function hFly(lat,lng,z){
   if(hEngine==='google'){ if(hgMap){ hgMap.panTo({lat:+lat,lng:+lng}); hgMap.setZoom(z||18); } }
@@ -8072,18 +8289,10 @@ function hParseLL(s){
   return {lat:la,lng:ln};
 }
 function hPasteCoord(){
-  if(hSel==null){ mpAlert('Önce soldan bir pozisyon seçin.'); return; }
+  if(hSel==null){ mpAlert('Önce listeden bir pano seçin.'); return; }
   const p=hParseLL(gv('hPaste'));
   if(!p){ mpAlert('Koordinat okunamadı.\n\nÖrnek: 37.015902, 35.249627\nveya Google Maps adres çubuğundaki linkin tamamı.\n\nNot: maps.app.goo.gl ile başlayan kısa linkler koordinat içermez; linki tarayıcıda açıp adres çubuğundakini kopyalayın.'); return; }
   hPlace(p.lat,p.lng); hFly(p.lat,p.lng,18);
-}
-async function hClear(){
-  if(hSel==null)return; if(!await mpConfirm('Bu pozisyonun konumu silinsin mi?','Konumu Sil'))return;
-  await api('unit_save',{id:hSel,lat:null,lng:null});
-  const r=hRows.find(x=>x.id===hSel); if(r){ r.lat=null; r.lng=null; }
-  if(hEngine==='google'){ if(hgSel){hgSel.setMap(null);hgSel=null;} }
-  else if(hMarker){ hMap.removeLayer(hMarker); hMarker=null; }
-  hRenderList(); hDrawAll(); hPick(hSel);
 }
 
 
@@ -8358,7 +8567,7 @@ function supForm(id){ const x=(ui._sup||[]).find(s=>s.id===id)||{aktif:true};
     <div class="field"><label class="flabel">Vergi Dairesi</label><input class="inp" id="svd" value="${esc(x.vergi_dairesi)}"></div></div>
     <div class="field"><label class="flabel">Notlar</label><textarea class="inp" id="sn">${esc(x.notlar)}</textarea></div>
     <label class="switch" style="margin-bottom:14px"><input type="checkbox" id="sak" ${x.aktif===false?'':'checked'}><span class="sl"></span><span class="txt">Aktif tedarikçi</span></label>
-    <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn btn-ghost btn-sm" onclick="closeModal()">Vazgeç</button>
+    <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn btn-ghost btn-sm" onclick="modalVazgec()">Vazgeç</button>
       <button class="btn btn-primary btn-sm" onclick="supSave()">Kaydet</button></div>`);
 }
 async function supSave(){
@@ -8408,7 +8617,7 @@ function custForm(id){ const x=(ui._cust||[]).find(c=>c.id===id)||{};
     <div class="row3"><div class="field"><label class="flabel" for="cv">Vergi No</label><input class="inp" id="cv" value="${esc(x.vergi_no)}"></div>
     <div class="field"><label class="flabel" for="cvd">Vergi Dairesi</label><input class="inp" id="cvd" value="${esc(x.vergi_dairesi)}"></div>
     <div class="field"><label class="flabel" for="cp">Puan (0-5)</label><input class="inp" id="cp" type="number" min="0" max="5" value="${esc(x.puan||0)}"></div></div>
-    <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn btn-ghost btn-sm" onclick="closeModal()">Vazgeç</button><button class="btn btn-primary btn-sm" onclick="custSave()">Kaydet</button></div>`);
+    <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn btn-ghost btn-sm" onclick="modalVazgec()">Vazgeç</button><button class="btn btn-primary btn-sm" onclick="custSave()">Kaydet</button></div>`);
 }
 /* ilgili_kisi bilinçli olarak gönderilmez: raw provenance evidence olarak
    dokunulmadan kalır (S02_001 §2.4). */
@@ -8790,7 +8999,7 @@ async function blListeCiz(){
     return `<div class="bx-row" role="listitem">
       <button type="button" class="bx-main" onclick="belgeDetay(${d.id})" title="${esc(d.ad)}${d.ad!==d.original_name?' · '+esc(d.original_name):''}">
         ${resim?`<span class="bl-th sm bx-th"><img data-belge-yol="${esc(d.storage_path)}" alt="" loading="lazy"></span>`
-          :`<span class="bl-ext ${d.provider==='external'?'dis':''}">${esc(belgeUzanti(d))}</span>`}
+          :`<span class="bl-ext ${d.provider==='external'?'dis':belgeTurSinif(d)}">${esc(belgeUzanti(d))}</span>`}
         <span class="bx-b"><span class="bx-t">${esc(d.ad)}</span>
           <span class="bx-s"><span class="pill">${esc(kat[1])}</span>
             ${d.iliskisiz?'<span class="pill sand">İlişkilendirilmemiş</span>'
@@ -8932,7 +9141,7 @@ function hafEkle(){
         <b>Belge</b><span>Sözleşme, teklif, tasarım, fotoğraf, fatura, katalog — işe bağlamak zorunlu değil</span></button>
     </div>
     <div style="display:flex;justify-content:flex-end;margin-top:14px">
-      <button class="btn btn-ghost btn-sm" onclick="closeModal()">Vazgeç</button></div>`);
+      <button class="btn btn-ghost btn-sm" onclick="modalVazgec()">Vazgeç</button></div>`);
 }
 
 /* Kurum: TEK zorunlu alan ad (§20). Rol, adres, vergi, fatura bilgisi
@@ -8947,7 +9156,7 @@ function orgQuickForm(ctx){
     <div id="oqDup"></div>
     <p class="fhint">Telefon, adres, vergi ve ilişki rolü sonradan eklenebilir.</p>
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
-      <button class="btn btn-ghost btn-sm" onclick="closeModal()">Vazgeç</button>
+      <button class="btn btn-ghost btn-sm" onclick="modalVazgec()">Vazgeç</button>
       <button class="btn btn-primary btn-sm" onclick="orgQuickSave()">Oluştur</button></div>`);
   const f=document.getElementById('oqAd'); if(f)f.focus();
 }
@@ -9002,7 +9211,7 @@ function personForm(ctx){
         <input class="inp" id="pfBirim"></div></div>
     <p class="fhint">Kurum seçmezsen kişi yine kaydedilir; bağlantıyı sonra ekleyebilirsin.</p>
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
-      <button class="btn btn-ghost btn-sm" onclick="closeModal()">Vazgeç</button>
+      <button class="btn btn-ghost btn-sm" onclick="modalVazgec()">Vazgeç</button>
       <button class="btn btn-primary btn-sm" onclick="personSave()">Oluştur</button></div>`);
   const f=document.getElementById('pfAd'); if(f)f.focus();
 }
@@ -9131,7 +9340,7 @@ function affForm(id,contactId){
     <label class="switch" style="margin-bottom:14px"><input type="checkbox" id="afA" ${a.active===false?'':'checked'}><span class="sl"></span><span class="txt">Aktif</span></label>
     <p class="fhint">Unvan ve birim bu KURUMDAKİ rolü anlatır; kişinin telefonu ve e-postası kendi kaydındadır.</p>
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px">
-      <button class="btn btn-ghost btn-sm" onclick="closeModal()">Vazgeç</button>
+      <button class="btn btn-ghost btn-sm" onclick="modalVazgec()">Vazgeç</button>
       <button class="btn btn-primary btn-sm" onclick="affSave()">Kaydet</button></div>`);
 }
 async function affYeniKurum(){
@@ -9177,7 +9386,7 @@ function contactForm(id,customerId){
     <label class="switch" style="margin-bottom:8px"><input type="checkbox" id="kpr" ${x.is_primary?'checked':''}><span class="sl"></span><span class="txt">Birincil kişi</span></label>
     <label class="switch" style="margin-bottom:14px"><input type="checkbox" id="kak" ${x.active===false?'':'checked'}><span class="sl"></span><span class="txt">Aktif</span></label>
     <div style="display:flex;gap:8px;justify-content:flex-end">
-      <button class="btn btn-ghost btn-sm" onclick="closeModal()">Vazgeç</button>
+      <button class="btn btn-ghost btn-sm" onclick="modalVazgec()">Vazgeç</button>
       <button class="btn btn-primary btn-sm" onclick="contactSave()">Kaydet</button></div>`);
   const f=document.getElementById('kn'); if(f)f.focus();
 }
@@ -9201,13 +9410,13 @@ async function contactDel(id){
 function orgRolForm(id){
   const o=ui._org||{}; const cur=Array.isArray(o.relationship_roles)?o.relationship_roles:[];
   modal(`<h3 style="margin:0 0 6px">İlişki Rolleri</h3>
-    <p class="muted" style="font-size:12.5px;margin:0 0 14px">Kurumun uzun dönemli, tanımlayıcı rolleri. Belirli bir işteki taraf rolü ayrıdır (BR-ORG01).</p>
+    <p class="muted" style="font-size:12.5px;margin:0 0 14px">Kurumun uzun dönemli, tanımlayıcı rolleri. Belirli bir işteki taraf rolü ayrıdır.</p>
     <input type="hidden" id="orid" value="${id}">
     ${ORG_ROLES.map(r=>`<label class="switch" style="margin-bottom:8px">
       <input type="checkbox" class="orgRol" value="${r[0]}" ${cur.includes(r[0])?'checked':''}>
       <span class="sl"></span><span class="txt">${esc(r[1])}</span></label>`).join('')}
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
-      <button class="btn btn-ghost btn-sm" onclick="closeModal()">Vazgeç</button>
+      <button class="btn btn-ghost btn-sm" onclick="modalVazgec()">Vazgeç</button>
       <button class="btn btn-primary btn-sm" onclick="orgRolSave()">Kaydet</button></div>`);
 }
 async function orgRolSave(){
@@ -9245,9 +9454,9 @@ async function quoteView(id){
     <div style="display:flex;justify-content:space-between;margin:14px 0;font-weight:700"><span>Toplam</span><span>${money(q.total)}</span></div>
     ${isAdmin()
       ?`<div class="field"><label class="flabel">Durum</label><select class="inp" id="qs">${['yeni','gorusuldu','onaylandi','iptal'].map(s=>`<option value="${s}" ${q.status===s?'selected':''}>${s}</option>`).join('')}</select></div>
-    <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn btn-ghost btn-sm" onclick="closeModal()">Kapat</button><button class="btn btn-primary btn-sm" onclick="quoteStatus(${q.id})">Durumu Kaydet</button></div>`
+    <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn btn-ghost btn-sm" onclick="modalVazgec()">Kapat</button><button class="btn btn-primary btn-sm" onclick="quoteStatus(${q.id})">Durumu Kaydet</button></div>`
       :`<div class="meta" style="margin-bottom:14px">Durum: <span class="badge-st st-${esc(q.status||'yeni')}">${esc(QL[q.status]||'Yeni')}</span></div>
-    <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn btn-ghost btn-sm" onclick="closeModal()">Kapat</button></div>`}`);
+    <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn btn-ghost btn-sm" onclick="modalVazgec()">Kapat</button></div>`}`);
 }
 async function quoteStatus(id){
   const r=await guard(()=>api('quote_status',{id,status:gv('qs')}),'Durum kaydedilemedi');
@@ -9559,7 +9768,7 @@ async function teamNotPaylas(id){
     <div class="field"><label class="flabel">Başlık</label><input class="inp" id="pnK" placeholder="ör. Tüyap görüşmesi"></div>
     <div class="field"><label class="flabel">Not</label><textarea class="inp" id="pnB" style="min-height:120px">${esc(tam)}</textarea></div>
     <div style="display:flex;gap:8px;justify-content:flex-end">
-      <button class="btn btn-ghost btn-sm" onclick="closeModal()">Vazgeç</button>
+      <button class="btn btn-ghost btn-sm" onclick="modalVazgec()">Vazgeç</button>
       <button class="btn btn-primary btn-sm" onclick="teamNotPaylasKaydet(${id})">Gönder</button></div>`);
 }
 async function teamNotPaylasKaydet(id){
@@ -9594,7 +9803,7 @@ function teamForm(id){ const x=(ui._team||[]).find(t=>t.id===id)||{};
         Görev/Departman: <b>${esc(x.role||'—')}</b><br>
         Yetki: <span class="pill">${x.app_role==='admin'?'Yönetici':'Ekip Üyesi'}</span></div>
       <p class="muted" style="font-size:11.5px;margin:8px 0 0">Bu alanlar hesap kimliğini ve yetkiyi belirler; yalnız yönetici değiştirebilir.</p></div>
-    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px"><button class="btn btn-ghost btn-sm" onclick="closeModal()">Vazgeç</button><button class="btn btn-primary btn-sm" onclick="teamSave()">Kaydet</button></div>`);
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px"><button class="btn btn-ghost btn-sm" onclick="modalVazgec()">Vazgeç</button><button class="btn btn-primary btn-sm" onclick="teamSave()">Kaydet</button></div>`);
     const f=document.getElementById('tn'); if(f)f.focus();
     return;
   }
@@ -9610,7 +9819,7 @@ function teamForm(id){ const x=(ui._team||[]).find(t=>t.id===id)||{};
         <option value="admin" ${x.app_role==='admin'?'selected':''}>Yönetici — Yönetim Paneli + Workspace</option></select></div>
     <div class="field"><label class="flabel">Görev/Departman</label><input class="inp" id="tr" value="${esc(x.role)}" placeholder="Satış &amp; Pazarlama"></div></div>
     <p class="muted" style="font-size:11.5px;margin:2px 0 14px">Yetki, panele giriş yapılan e-posta ile bu adres eşleştiğinde uygulanır. Bildirim e-postaları da Satış &amp; Pazarlama görevli üyelere ve yöneticilere gider.</p>
-    <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn btn-ghost btn-sm" onclick="closeModal()">Vazgeç</button><button class="btn btn-primary btn-sm" onclick="teamSave()">Kaydet</button></div>`);
+    <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn btn-ghost btn-sm" onclick="modalVazgec()">Vazgeç</button><button class="btn btn-primary btn-sm" onclick="teamSave()">Kaydet</button></div>`);
 }
 async function teamSave(){
   if(!gv('tn').trim()){ mpAlert('Ad Soyad zorunlu.','Ekip'); return; }
@@ -9839,7 +10048,7 @@ async function leadView(id){
       <b>İlgilenilen mecralar:</b> ${esc(mecs||'—')}<br>
       <b>Hedef kitle:</b> ${esc(l.hedef_kitle||'—')}</div>
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
-      <button class="btn btn-ghost btn-sm" onclick="closeModal()">Kapat</button>
+      <button class="btn btn-ghost btn-sm" onclick="modalVazgec()">Kapat</button>
       <button class="btn btn-outline btn-sm" onclick="leadMusteri(${l.id})">Müşteri olarak ekle</button></div>`);
   renderSection();
 }
@@ -9930,7 +10139,7 @@ function noteView(id){ const n=(ui._notes||[]).find(x=>x.id===id); if(!n)return;
       <div class="nv-meta">${esc(n.ilgili_kisi||'')}${n.tarih?' · '+esc(n.tarih):''}${n.created_at?' · eklendi '+esc(String(n.created_at).slice(0,10)):''}</div></div>
     <div class="nv-body">${esc(n.body||'—')}</div>
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
-      <button class="btn btn-ghost btn-sm" onclick="closeModal()">Kapat</button>
+      <button class="btn btn-ghost btn-sm" onclick="modalVazgec()">Kapat</button>
       <button class="btn btn-outline btn-sm" onclick="noteForm(${n.id})">Düzenle</button></div>`);
 }
 function noteForm(id){ const n=(ui._notes||[]).find(x=>x.id===id)||{};
@@ -9939,7 +10148,7 @@ function noteForm(id){ const n=(ui._notes||[]).find(x=>x.id===id)||{};
     <div class="row2"><div class="field"><label class="flabel">İlgili Kişi</label><input class="inp" id="nik" value="${esc(n.ilgili_kisi)}"></div>
     <div class="field"><label class="flabel">Tarih</label><input class="inp" id="nt" type="date" value="${esc(n.tarih)}"></div></div>
     <div class="field"><label class="flabel">İçerik</label><textarea class="inp" style="min-height:120px" id="nb">${esc(n.body)}</textarea></div>
-    <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn btn-ghost btn-sm" onclick="closeModal()">Vazgeç</button><button class="btn btn-primary btn-sm" onclick="noteSave()">Kaydet</button></div>`);
+    <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn btn-ghost btn-sm" onclick="modalVazgec()">Vazgeç</button><button class="btn btn-primary btn-sm" onclick="noteSave()">Kaydet</button></div>`);
 }
 async function noteSave(){ await api('note_save',{id:+gv('nid'),konu:gv('nk'),ilgili_kisi:gv('nik'),tarih:gv('nt')||null,body:gv('nb')}); closeModal(); renderSection(); }
 async function noteDel(id){ if(await mpConfirm('Not silinsin mi?','Notu Sil')){ await api('note_delete&id='+id); renderSection(); } }

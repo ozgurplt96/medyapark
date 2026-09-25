@@ -94,6 +94,12 @@ begin
   if w_aci is null or w_adn is null or w_yil is null then
     raise notice 'PS9 demo: iş çözülemedi — atlandı.'; return;
   end if;
+  -- S11: notlar gerçek kullanım diline çevrildikten sonra da tekrar
+  -- çalıştırma çoğaltmasın: senaryo işlerinde yerleşim varsa yüklüdür.
+  if exists (select 1 from public.media_placements where work_id in (w_aci, w_aci2, w_adn, w_yil)
+              and note is not null and note not like 'PS9U·%') then
+    raise notice 'PS9 demo: zaten yüklü — atlandı.'; return;
+  end if;
 
   select a.id into a_cuk from public.alt_mecralar a join public.mecralar m on m.id = a.mecra_id
    where m.name = 'Çukurova Kulübü' and a.name = 'Kulüp Sabit Panolar';

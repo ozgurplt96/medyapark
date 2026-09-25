@@ -31,36 +31,43 @@ begin
 
   for r in
     select * from (values
-      ( 1,'C1', 'job',      'teklif',           'Teklif',                  make_date(gy,2,10) + time '10:10'),
-      ( 2,'C1', 'contract', 'sozlesme',         'Sözleşme',                make_date(gy,2,20) + time '14:10'),
-      ( 3,'C1', 'op:baski', 'tasarim',          'Baskı onay görseli',      make_date(gy,2,23) + time '10:50'),
-      ( 4,'C1', 'op:montaj','montaj_fotografi', 'Montaj fotoğrafı',        make_date(gy,3,1)  + time '09:15'),
-      ( 5,'C1', 'job',      'muhasebe',         'Fatura özeti',            make_date(gy,5,3)  + time '09:50'),
-      ( 6,'C2', 'contract', 'sozlesme',         'Sözleşme',                make_date(gy,8,22) + time '12:50'),
-      ( 7,'C2R','contract', 'sozlesme',         'Yenileme sözleşmesi',     make_date(gy,11,26)+ time '14:50'),
-      ( 8,'C3', 'job',      'teklif',           'Teklif',                  make_date(y,2,24)  + time '10:25'),
-      ( 9,'C3', 'contract', 'sozlesme',         'Sözleşme',                make_date(y,3,3)   + time '11:50'),
-      (10,'C3', 'op:montaj','montaj_fotografi', 'Montaj fotoğrafı',        make_date(y,3,15)  + time '08:55'),
-      (11,'C3', 'job',      'muhasebe',         'Fatura özeti',            make_date(y,6,3)   + time '09:55'),
-      (12,'C4', 'job',      'teklif',           'Teklif',                  (d-65) + time '10:05'),
-      (13,'C4', 'contract', 'sozlesme',         'Sözleşme',                (d-54) + time '11:55'),
-      (14,'C4', 'op:baski', 'tasarim',          'Baskı onay görseli',      (d-48) + time '15:20'),
-      (15,'C4', 'op:montaj','montaj_fotografi', 'Montaj fotoğrafı',        (d-40) + time '09:25'),
-      (16,'C5', 'job',      'teklif',           'Teklif',                  (d-15) + time '10:05'),
-      (17,'C5', 'contract', 'sozlesme',         'Sözleşme',                (d-6)  + time '11:55'),
-      (18,'C5', 'job',      'tasarim',          'Lansman tasarımı — onaylı',(d-2) + time '15:25'),
-      (19,'C6', 'job',      'teklif',           'Teklif',                  (d-2)  + time '11:15'),
-      (20,'C7', 'job',      'teklif',           'Teklif',                  (d-32) + time '10:05'),
-      (21,'C7', 'contract', 'sozlesme',         'Sözleşme',                (d-26) + time '11:55'),
-      (22,'C7', 'job',      'tasarim',          'LED kreatif (15 sn) — kare görseli', (d-23) + time '15:55'),
-      (23,'C8', 'job',      'teklif',           'Teklif',                  (d-50) + time '10:05'),
-      (24,null, null,       'katalog',          'Mecra kataloğu ve fiyat listesi ' || y || ' (örnek)', make_date(y,1,15) + time '11:00')
-    ) v(n, zincir, bag, tur, baslik, zaman)
+      ( 1,'C1', 'job',      'teklif',           'Teklif',                  make_date(gy,2,10) + time '10:10', null),
+      ( 2,'C1', 'contract', 'sozlesme',         'Sözleşme',                make_date(gy,2,20) + time '14:10', null),
+      ( 3,'C1', 'op:baski', 'tasarim',          'Baskı onay görseli',      make_date(gy,2,23) + time '10:50', null),
+      ( 4,'C1', 'op:montaj','montaj_fotografi', 'Montaj fotoğrafı',        make_date(gy,3,1)  + time '09:15', null),
+      ( 5,'C1', 'job',      'muhasebe',         'Fatura özeti',            make_date(gy,5,3)  + time '09:50', null),
+      ( 6,'C2', 'contract', 'sozlesme',         'Sözleşme',                make_date(gy,8,22) + time '12:50', null),
+      ( 7,'C2R','contract', 'sozlesme',         'Yenileme sözleşmesi',     make_date(gy,11,26)+ time '14:50', null),
+      ( 8,'C3', 'job',      'teklif',           'Teklif',                  make_date(y,2,24)  + time '10:25', null),
+      ( 9,'C3', 'contract', 'sozlesme',         'Sözleşme',                make_date(y,3,3)   + time '11:50', null),
+      (10,'C3', 'op:montaj','montaj_fotografi', 'Montaj fotoğrafı',        make_date(y,3,15)  + time '08:55', null),
+      (11,'C3', 'job',      'muhasebe',         'Fatura özeti',            make_date(y,6,3)   + time '09:55', null),
+      (12,'C4', 'job',      'teklif',           'Teklif',                  (d-65) + time '10:05', null),
+      (13,'C4', 'contract', 'sozlesme',         'Sözleşme',                (d-54) + time '11:55', null),
+      (14,'C4', 'op:baski', 'tasarim',          'Baskı onay görseli',      (d-48) + time '15:20', null),
+      (15,'C4', 'op:montaj','montaj_fotografi', 'Montaj fotoğrafı',        (d-40) + time '09:25', null),
+      (16,'C5', 'job',      'teklif',           'Teklif',                  (d-15) + time '10:05', null),
+      (17,'C5', 'contract', 'sozlesme',         'Sözleşme',                (d-6)  + time '11:55', null),
+      (18,'C5', 'job',      'tasarim',          'Lansman tasarımı — onaylı',(d-2) + time '15:25', null),
+      (19,'C6', 'job',      'teklif',           'Teklif',                  (d-2)  + time '11:15', null),
+      (20,'C7', 'job',      'teklif',           'Teklif',                  (d-32) + time '10:05', null),
+      (21,'C7', 'contract', 'sozlesme',         'Sözleşme',                (d-26) + time '11:55', null),
+      (22,'C7', 'job',      'tasarim',          'LED kreatif (15 sn) — kare görseli', (d-23) + time '15:55', null),
+      (23,'C8', 'job',      'teklif',           'Teklif',                  (d-50) + time '10:05', null),
+      (24,null, null,       'katalog',          'Mecra kataloğu ve fiyat listesi ' || y || ' (örnek)', make_date(y,1,15) + time '11:00', null),
+      -- S11 §6: farklı dosya biçimleri (biçim ≠ kategori)
+      (25,'C5', 'op:baski', 'baski_dosyasi', 'Baskı üretim listesi', (d-4) + time '14:10', 'ornek-uretim-listesi.xlsx'),
+      (26,'C2', 'job',      'diger',         'Eski yüzey listesi (Stadyum)', make_date(gy,8,12) + time '11:20', 'ornek-eski-yuzey-listesi.xls'),
+      (27,'C4', 'job',      'diger',         'Yayın yüzey listesi', (d-40) + time '09:40', 'ornek-yayin-listesi.csv'),
+      (28,'C4', 'op:montaj','montaj_fotografi','Montaj fotoğrafı — gece çekimi', (d-40) + time '08:10', 'ornek-montaj-fotografi.jpg'),
+      (29,'C5', 'job',      'tasarim',       'Lansman tasarımı — alternatif', (d-5) + time '16:30', 'ornek-tasarim-alternatif.png'),
+      (30,'C6', 'job',      'diger',         'Kampanya brifi', (d-3) + time '10:45', 'ornek-kampanya-brief.docx')
+    ) v(n, zincir, bag, tur, baslik, zaman, dosya)
   loop
     yol := 'a10d0000-0000-4000-8000-' || lpad(r.n::text, 12, '0') || '/'
-        || case r.tur when 'teklif' then 'ornek-teklif.pdf' when 'sozlesme' then 'ornek-sozlesme.pdf'
+        || coalesce(r.dosya, case r.tur when 'teklif' then 'ornek-teklif.pdf' when 'sozlesme' then 'ornek-sozlesme.pdf'
                       when 'tasarim' then 'ornek-tasarim.jpg' when 'montaj_fotografi' then 'ornek-uygulama-gorseli.png'
-                      when 'muhasebe' then 'ornek-fatura.pdf' else 'ornek-katalog.pdf' end;
+                      when 'muhasebe' then 'ornek-fatura.pdf' else 'ornek-katalog.pdf' end);
     if exists (select 1 from public.documents where storage_bucket = 'documents' and storage_path = yol) then continue; end if;
     if not exists (select 1 from storage.objects where bucket_id = 'documents' and name = yol) then
       eksik := eksik + 1; continue;                    -- kırık yol KAYDEDİLMEZ
@@ -68,7 +75,10 @@ begin
 
     j_id := null; j_title := null; j_owner := null; hedef := null; sahip := ilk_ekip;
     if r.zincir is not null then
-      select id, title, assignee_id into j_id, j_title, j_owner from public.jobs where note = 'PS10·' || r.zincir;
+      select id, title, assignee_id into j_id, j_title, j_owner from public.jobs
+       where sort = case r.zincir when 'C1' then 9201 when 'C2' then 9202 when 'C2R' then 9203 when 'C3' then 9204
+                    when 'C4' then 9205 when 'C5' then 9206 when 'C6' then 9207 when 'C7' then 9208 when 'C8' then 9209 end
+          or note = 'PS10·' || r.zincir;                  -- S11 öncesi işaret
       if j_id is null then continue; end if;
       sahip := coalesce(j_owner, ilk_ekip);
       if r.bag = 'job' then hedef := j_id;
