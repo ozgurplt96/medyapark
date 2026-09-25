@@ -24,7 +24,7 @@
 -- `supabase/seed-files/ps10/documents.sql` ile bağlar (SQL tek başına
 -- depoya dosya koyamaz).
 --
--- DETERMİNİSTİK + İDEMPOTENT: her zincir `jobs.note = 'PS10·<anahtar>'`
+-- DETERMİNİSTİK + İDEMPOTENT: her zincir `jobs.sort` bandıyla (9201…) tanınır (S11: not alanı işaret taşımaz)
 -- işaretiyle bir kez kurulur; kullanıcı kayıtları EZİLMEZ. Yüzeyler
 -- çakışma denetimiyle (media_conflicts) seçilir; dolu yüze yazılmaz.
 --
@@ -50,15 +50,24 @@ returns bigint[] language sql as $$
     ) a order by 2 limit p_n) x;
 $$;
 
+-- S11: zincir kimliği `jobs.sort` bandında (9201…); kullanıcıya görünen not
+-- alanı işaret taşımaz.
+create or replace function pg_temp.ps10_bant(p_key text) returns int language sql immutable as $$
+  select case p_key when 'C1' then 9201 when 'C2' then 9202 when 'C2R' then 9203 when 'C3' then 9204
+    when 'C4' then 9205 when 'C5' then 9206 when 'C6' then 9207 when 'C7' then 9208 when 'C8' then 9209
+    else 9210 + nullif(substr(p_key, 3), '')::int end;
+$$;
+
 create or replace function pg_temp.ps10_is(p_key text, p_title text, p_cust bigint, p_owner bigint,
                                            p_status text, p_lokal date)
 returns bigint language plpgsql as $$
 declare v bigint;
 begin
-  select id into v from public.jobs where note = 'PS10·' || p_key;
+  select id into v from public.jobs where sort = pg_temp.ps10_bant(p_key)
+     or note = 'PS10·' || p_key;                    -- S11 öncesi işaret
   if v is not null then return null; end if;             -- zaten kurulu: zinciri atla
-  insert into public.jobs (title, customer_id, status, lifecycle_status, assignee_id, note, start_day)
-  values (p_title, p_cust, p_status, 'acik', p_owner, 'PS10·' || p_key, p_lokal)
+  insert into public.jobs (title, customer_id, status, lifecycle_status, assignee_id, sort, start_day)
+  values (p_title, p_cust, p_status, 'acik', p_owner, pg_temp.ps10_bant(p_key), p_lokal)
   returning id into v;
   insert into public.work_parties (job_id, customer_id, role) values (v, p_cust, 'account')
   on conflict do nothing;
@@ -104,7 +113,9 @@ begin
   if coalesce(array_length(p_units, 1), 0) = 0 then return 0; end if;
   insert into public.media_placements (unit_id, customer_id, work_id, commitment, start_date, end_date,
                                        contract_item_id, option_expires_at, note, created_by_team_id)
-  select u, p_cust, p_job, p_taah, p_bas, p_bit, p_item, p_ops, 'PS10· yaşam döngüsü', p_team
+  select u, p_cust, p_job, p_taah, p_bas, p_bit, p_item, p_ops,
+         case when p_taah = 'reserved' then 'Opsiyon — müşteri bütçe onayı bekleniyor.'
+              when p_item is not null then 'Sözleşmeye bağlı kampanya yayını.' else 'Kampanya yayını.' end, p_team
     from unnest(p_units) u;
   get diagnostics n = row_count;
   return n;
@@ -409,7 +420,7 @@ begin
       i1 := pg_temp.ps10_kalem(c, 'mecra', 'LED yayını — 15 sn kreatif', (select mecra_id from public.alt_mecralar where id = led), 1, bas, bit, 0, 1);
       insert into public.media_placements (alt_mecra_id, customer_id, work_id, commitment, start_date, end_date,
                                            contract_item_id, note, created_by_team_id)
-      values (led, k[7], j, 'confirmed', bas, bit, i1, 'PS10· LED yaşam döngüsü', t[1 + 1 % tn]);
+      values (led, k[7], j, 'confirmed', bas, bit, i1, 'LED kampanyası — 15 sn kreatif.', t[1 + 1 % tn]);
       toplam := toplam + 1;
       perform pg_temp.ps10_not(j, t[1 + 1 % tn], (bas - 3) + time '16:00', 'Kreatif (15 sn) yayın ekibine iletildi; baskı/montaj gerekmiyor.');
       update public.jobs set status = 'yayinda_aktif' where id = j;
@@ -477,7 +488,7 @@ begin
      set created_by_team_id = j.assignee_id,
          created_at = least(p.start_date - 10, (now() at time zone 'Europe/Istanbul')::date - 1) + time '11:00'
     from public.jobs j
-   where j.id = p.work_id and j.note like 'PS10·%' and p.note like 'PS10·%'
+   where j.id = p.work_id and j.sort between 9201 and 9299
      and (p.created_by_team_id is null or p.created_at > now() - interval '1 day');
   execute 'alter table public.media_placements enable trigger trg_media_placements_dogrula';
 end $$;
@@ -495,7 +506,7 @@ begin
      and daterange(p1.start_date, p1.end_date, '[]') && daterange(p2.start_date, p2.end_date, '[]')
    where p1.unit_id is not null;
   if v_cak > 0 then raise exception 'PS10: % statik çakışma.', v_cak; end if;
-  select count(*) into v_is from public.jobs where note like 'PS10·%';
+  select count(*) into v_is from public.jobs where sort between 9201 and 9299;
   -- Dönem adı ile yerleşim tarihi çelişmemeli: "ilk yarı" işinde 1 Temmuz sonrası kayıt yok.
   select count(*) into v_ter from public.media_placements p join public.jobs j on j.id = p.work_id
    where j.title like '% ilk yarı%' and p.start_date >= make_date(extract(year from p.start_date)::int, 7, 1)

@@ -31,7 +31,12 @@ declare
   b1 date; e1 date; b2 date; e2 date; taah text; opt date;
   yeni bigint; toplam int := 0;
 begin
-  if exists (select 1 from public.media_placements where note like 'PS9U·%') then
+  -- S11: görünür notlar gerçek kullanım diline çevrildiği için işaret
+  -- yalnız nota bağlı DEĞİL; bu tohumun kendi dönem işlerinde yerleşim
+  -- varsa da yüklü sayılır.
+  if exists (select 1 from public.media_placements where note like 'PS9U·%')
+     or exists (select 1 from public.media_placements p join public.jobs j on j.id = p.work_id
+                 where j.title like '% · ' || extract(year from d)::int || ' ikinci yarı kampanyası') then
     raise notice 'PS9 kullanım: zaten yüklü — atlandı.'; return;
   end if;
   yb := make_date(extract(year from d)::int, 1, 1);
