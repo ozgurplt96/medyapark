@@ -89,9 +89,23 @@ function pickUpload(accept, cb, opt){ const inp=document.createElement('input');
    ======================================================================== */
 const BELGE_TUR=[['teklif','Teklif'],['sozlesme','Sözleşme'],['tasarim','Tasarım'],
   ['baski_dosyasi','Baskı Dosyası'],['montaj_fotografi','Montaj Fotoğrafı'],
-  ['sokum_fotografi','Söküm Fotoğrafı'],['mecra_belgesi','Mecra Belgesi'],
-  ['muhasebe','Muhasebe'],['diger','Diğer']];
+  ['sokum_fotografi','Söküm Fotoğrafı'],['muhasebe','Fatura / Muhasebe'],
+  ['katalog','Katalog / Fiyat Listesi'],['mecra_belgesi','Mecra Belgesi'],['diger','Diğer']];
 const belgeTurLbl=v=>(BELGE_TUR.find(x=>x[0]===v)||[null,'Diğer'])[1];
+/* S10 §3: kullanıcıya görünen BELGE KATEGORİSİ. Saklanan tür değişmez;
+   kategori onları sade gruplara toplar. Dosya BİÇİMİ (PDF, JPG) kategori
+   DEĞİLDİR — biçim ayrıca dosya simgesinde yazılır. */
+const BELGE_KAT=[
+  ['sozlesme','Sözleşme',['sozlesme']],
+  ['teklif','Teklif',['teklif']],
+  ['tasarim','Tasarım / baskı dosyası',['tasarim','baski_dosyasi']],
+  ['foto','Uygulama fotoğrafı',['montaj_fotografi','sokum_fotografi']],
+  ['fatura','Fatura / muhasebe',['muhasebe']],
+  ['katalog','Katalog / fiyat listesi',['katalog']],
+  ['diger','Diğer',['mecra_belgesi','diger']]];
+const belgeKat=v=>BELGE_KAT.find(k=>k[2].includes(v))||BELGE_KAT[BELGE_KAT.length-1];
+/* Sunucudaki `_belge_katla` ile AYNI katlama: İ/I/ı -> i, sonra küçük harf. */
+const belgeKatla=t=>String(t||'').replace(/[İIı]/g,'i').toLowerCase();
 /* 25 MB: proje Storage tavani 50 MiB (config.toml / FILE_SIZE_LIMIT).
    Bucket ayni siniri SUNUCUDA da uygular. Daha buyuk uretim dosyalari
    "Mevcut dosya baglantisi" olarak eklenir. */
@@ -248,8 +262,23 @@ let _ekSay=0;
 function ekYeni(kid,opt){
   EK[kid]={items:[],mevcut:(opt&&opt.mevcut)||[],kaldir:new Set(),
            turZorunlu:!!(opt&&opt.turZorunlu),varsayilan:(opt&&opt.varsayilan)||null,
-           varsayilanResim:(opt&&opt.varsayilanResim)||null};
+           varsayilanResim:(opt&&opt.varsayilanResim)||null,
+           tahmin:!!(opt&&opt.tahmin),degisti:(opt&&opt.degisti)||null};
   return EK[kid];
+}
+/* S10: dosya adından YALNIZ belirgin kategori önerilir (düzeltilebilir);
+   belirsizse boş kalır ve kullanıcı seçer. Biçim (PDF) kategori değildir. */
+function ekTurTahmin(ad){
+  const t=belgeKatla(ad);
+  if(/sozlesme|sözleşme|protokol|contract/.test(t)) return 'sozlesme';
+  if(/teklif|offer|proposal/.test(t)) return 'teklif';
+  if(/fatura|invoice|dekont|makbuz/.test(t)) return 'muhasebe';
+  if(/katalog|fiyat|price|tarife/.test(t)) return 'katalog';
+  if(/montaj|uygulama|kurulum/.test(t)) return 'montaj_fotografi';
+  if(/sokum|söküm/.test(t)) return 'sokum_fotografi';
+  if(/baski|baskı|print|prova/.test(t)) return 'baski_dosyasi';
+  if(/tasarim|tasarım|design|gorsel|görsel|mockup/.test(t)) return 'tasarim';
+  return '';
 }
 function ekAlan(kid,opt){
   if(!EK[kid]) ekYeni(kid,opt);
@@ -267,7 +296,8 @@ function ekAlan(kid,opt){
     </div>
     <div class="ek-list" id="ekv_${kid}">${ekListeHtml(kid)}</div></div>`;
 }
-function ekVarsayilanTur(e,resim){
+function ekVarsayilanTur(e,resim,ad){
+  if(e.tahmin){ const t=ekTurTahmin(ad); if(t) return t; }
   if(e.turZorunlu) return '';
   return (resim&&e.varsayilanResim)||e.varsayilan||'diger';
 }
@@ -303,7 +333,8 @@ function ekListeHtml(kid){
     </div>`; }).join('');
   return mev+yeni;
 }
-function ekCiz(kid){ const el=document.getElementById('ekv_'+kid); if(el) el.innerHTML=ekListeHtml(kid); }
+function ekCiz(kid){ const el=document.getElementById('ekv_'+kid); if(el) el.innerHTML=ekListeHtml(kid);
+  const e=EK[kid]; if(e&&e.degisti) try{ e.degisti(); }catch(x){ console.error(x); } }
 function ekToplam(kid){ const e=EK[kid]; if(!e) return 0;
   return e.items.filter(i=>!i.gecersiz).length+e.mevcut.filter(m=>!e.kaldir.has(m.link_id)).length; }
 function ekSec(kid,inp){
@@ -315,7 +346,7 @@ function ekSec(kid,inp){
     if(yer<=0){ asan++; return; }
     const v=belgeDogrula(f);
     const it={k:'e'+(++_ekSay),tip:'dosya',file:f,ad:f.name,boyut:f.size,mime:v.mime||f.type,
-              tur:ekVarsayilanTur(e,/^image\//.test(v.mime||'')),durum:v.hata?'hata':'hazir',hata:v.hata||null,gecersiz:!!v.hata};
+              tur:ekVarsayilanTur(e,/^image\//.test(v.mime||''),f.name),durum:v.hata?'hata':'hazir',hata:v.hata||null,gecersiz:!!v.hata};
     e.items.push(it); if(!v.hata) yer--;
   });
   if(asan) toast(`En fazla ${BELGE_ADET} dosya eklenebilir; ${asan} dosya alınmadı.`);
@@ -332,11 +363,12 @@ function ekLinkEkle(kid){
   if(e.items.filter(i=>!i.gecersiz).length>=BELGE_ADET){ toast(`En fazla ${BELGE_ADET} belge.`); return; }
   let ad=(gv('ekla_'+kid)||'').trim();
   if(!ad){ try{ ad=decodeURIComponent(u.pathname.split('/').filter(Boolean).pop()||'')||u.hostname; }catch(x){ ad=u.hostname; } }
-  e.items.push({k:'e'+(++_ekSay),tip:'link',url,ad:ad.slice(0,255),tur:ekVarsayilanTur(e,false),durum:'hazir'});
+  e.items.push({k:'e'+(++_ekSay),tip:'link',url,ad:ad.slice(0,255),tur:ekVarsayilanTur(e,false,ad),durum:'hazir'});
   document.getElementById('eklu_'+kid).value=''; document.getElementById('ekla_'+kid).value='';
   ekCiz(kid);
 }
-function ekTurDegis(kid,k,v){ const it=(EK[kid]||{items:[]}).items.find(i=>i.k===k); if(it) it.tur=v; }
+function ekTurDegis(kid,k,v){ const it=(EK[kid]||{items:[]}).items.find(i=>i.k===k); if(it) it.tur=v;
+  const e=EK[kid]; if(e&&e.degisti) try{ e.degisti(); }catch(x){} }
 function ekMevcutKaldir(kid,linkId){ const e=EK[kid]; if(!e) return;
   if(e.kaldir.has(linkId)) e.kaldir.delete(linkId); else e.kaldir.add(linkId); ekCiz(kid); }
 async function ekCikar(kid,k){
@@ -399,7 +431,7 @@ function ekGovde(kid,links){
     provider:i.tip==='link'?'external':'supabase',
     storage_path:i.tip==='link'?null:i.yol, external_url:i.tip==='link'?i.url:null,
     original_name:i.ad, doc_type:i.tur||'diger', mime_type:i.mime||null,
-    size_bytes:i.boyut||null, links}));
+    size_bytes:i.boyut||null, title:i.baslik||null, note:i.not||null, links}));
 }
 /* DB adimi basarisiz olursa: yuklenen nesneler temizlenir, ogeler yeniden
    denemeye hazir birakilir. Yarim kalmis "basarili" belge olusmaz. */
@@ -413,22 +445,34 @@ async function ekGonder(kid,links){
   const e=EK[kid]; if(!e||!ekBekleyen(kid).length) return {ok:true,sayi:0};
   if(!await ekYukle(kid)) return {ok:false,hata:'bazı dosyalar yüklenemedi'};
   const govde=ekGovde(kid,links);
+  let sonuc=null;
   try{
-    await api('document_create',{docs:govde});
-    ekBekleyen(kid).forEach(i=>{ i.kaydedildi=true; i.durum='yuklendi'; });
-    ekCiz(kid);
-    return {ok:true,sayi:govde.length};
+    sonuc=await api('document_create',{docs:govde});
   }catch(err){
-    await ekGeriAl(kid,'Kaydedilemedi.');
-    return {ok:false,hata:(err&&err.message)||String(err)};
+    /* S10: yanıt kaybolduysa işlem yine de COMMIT olmuş olabilir. Yüklenen
+       nesnelere ait metadata VARSA kayıt başarılıdır — nesneyi silmek
+       (ilişkisiz belgede depo politikası buna izin verir) metadata'yı
+       dosyasız bırakırdı, tekrar göndermek ise mükerrer belge üretirdi. */
+    const yollar=govde.filter(g=>g.storage_path).map(g=>g.storage_path);
+    let var_=[];
+    if(yollar.length&&yollar.length===govde.length){
+      try{ const {data}=await sb.from('documents').select('id,storage_path').in('storage_path',yollar); var_=data||[]; }catch(e){}
+    }
+    if(!(var_.length&&var_.length===yollar.length)){
+      await ekGeriAl(kid,'Kaydedilemedi.');
+      return {ok:false,hata:(err&&err.message)||String(err)};
+    }
+    sonuc=var_.map(x=>x.id);
   }
+  ekBekleyen(kid).forEach(i=>{ i.kaydedildi=true; i.durum='yuklendi'; });
+  ekCiz(kid);
+  return {ok:true,sayi:govde.length,ids:Array.isArray(sonuc)?sonuc:[]};
 }
-/* Baglanti kaldir (+ son baglantiysa dosyayi ve metadata'yi temizle). */
+/* Baglanti kaldir. Dosya SILINMEZ (S10): son baglanti da kalkarsa belge
+   Hafiza > Belgeler'de "İlişkilendirilmemiş" olarak durur. */
 async function belgeBagKaldir(linkIds){
   linkIds=(linkIds||[]).filter(Boolean); if(!linkIds.length) return {ok:true,docIds:[]};
-  const r=await api('document_links_remove',{ids:linkIds});
-  if(r.docIds&&r.docIds.length) r.temizlik=await api('documents_cleanup',{ids:r.docIds}).catch(()=>null);
-  return r;
+  return api('document_links_remove',{ids:linkIds});
 }
 /* Kayit sonrasi dogru ekrani tazele: Work/Kurum detayindaysak orada kal. */
 function ekranTazele(){
@@ -662,33 +706,17 @@ async function api(action, body){
   parts.slice(1).forEach(kv=>{ const i=kv.indexOf('='); if(i>=0)q[kv.slice(0,i)]=decodeURIComponent(kv.slice(i+1)); });
   const ok=(d)=>d;
 
-  /* S6 §23/§33: belge tasiyabilen bir kayit silinirken once ona bagli
-     belgeler not alinir; kayit silinince (FK cascade baglantiyi dusurur,
-     son baglantiysa belge `detached_at` alir) dosya + metadata temizlenir.
-     Baska bir baglami olan belge KORUNUR. RLS 0 satir dondururse bu artik
-     sessiz basari degil, acik hatadir. */
+  /* S10: belge taşıyabilen bir kayıt silinince FK cascade yalnız BAĞLANTIYI
+     düşürür; belge dosyasıyla birlikte kalır (başka bağlamı yoksa Hafıza >
+     Belgeler'de "İlişkilendirilmemiş"). S6'daki otomatik dosya temizliği
+     KALDIRILDI: bağlantıyı kaldırmak dosyayı silmek değildir. RLS 0 satır
+     döndürürse bu sessiz başarı değil, açık hatadır. */
   if(act==='entry_delete'||act==='operation_delete'||act==='job_delete'||act==='contract_delete'){
     const delId=(q.id!=null&&q.id!=='')?q.id:(body&&body.id);
     if(delId==null||delId==='') throw new Error('Silinecek kayıt belirtilmedi.');
-    let bq=sb.from('document_links').select('document_id');
-    if(act==='entry_delete') bq=bq.eq('entry_id',delId);
-    else if(act==='operation_delete') bq=bq.eq('operation_id',delId);
-    else if(act==='contract_delete') bq=bq.eq('contract_id',delId);
-    else {
-      const {data:ops}=await sb.from('work_operations').select('id').eq('job_id',delId);
-      const oids=(ops||[]).map(o=>o.id);
-      bq=bq.or(`job_id.eq.${delId}${oids.length?`,operation_id.in.(${oids.join(',')})`:''}`);
-    }
-    const {data:bl,error:be}=await bq; if(be)throw be;
     const {data:sil,error}=await sb.from(act==='contract_delete'?'contracts':DELMAP[act]).delete().eq('id',delId).select('id');
     if(error)throw error;
     if(!sil||!sil.length) throw new Error('Bu kaydı silme yetkiniz yok.');
-    const docIds=[...new Set((bl||[]).map(x=>x.document_id))];
-    if(docIds.length){
-      try{ const t=await api('documents_cleanup',{ids:docIds});
-        if(t&&t.kalan) toast(`${t.kalan} ek dosya temizlenemedi; daha sonra yeniden denenecek.`); }
-      catch(e){ console.error('[belge] temizlik hatasi',e); }
-    }
     logYaz(act,body,q); return ok();
   }
   if(act.endsWith('_delete') && DELMAP[act]){
@@ -869,8 +897,10 @@ async function api(action, body){
         if(k.mecra_id!=null&&tMecra!=null&&k.mecra_id!==tMecra) return;
         if(bas&&k.end_date&&k.end_date<bas) return;       // donem ortusmuyor
         if(bit&&k.start_date&&k.start_date>bit) return;
+        /* S10 §6: kalem anlaşılır adla — sözleşme · kalem · gün.ay.yıl dönemi. */
+        const g=v=>v?String(v).slice(0,10).split('-').reverse().join('.'):'';
         out.push({id:k.id,
-          etiket:`${c.title||c.reference_no||('Sözleşme #'+c.id)} · ${k.description||k.item_type||'kalem'}${k.start_date?` · ${k.start_date}${k.end_date?'–'+k.end_date:''}`:''}`});
+          etiket:`${c.title||c.reference_no||('Sözleşme #'+c.id)} · ${k.description||sozKalemLbl(k.item_type)}${k.start_date?` · ${g(k.start_date)}${k.end_date?'–'+g(k.end_date):''}`:''}${c.status==='taslak'?' · taslak':''}`});
       }));
       return ok(out); }
     case 'customers_min':{ const rows=await rapHepsi(()=>sb.from('customers').select('id,firma').order('id'));
@@ -1046,10 +1076,11 @@ async function api(action, body){
       logYaz(act,body); return ok(); }
     case 'document_link_add':{
       const row={document_id:body.document_id};
-      ['job_id','entry_id','operation_id','customer_id','contact_id','quote_id']
+      ['job_id','entry_id','operation_id','customer_id','contact_id','quote_id','contract_id']
         .forEach(k=>{ if(body[k]) row[k]=body[k]; });
       const {data,error}=await sb.from('document_links').insert(row).select('id').single();
-      if(error)throw error; logYaz(act,body); return ok(data); }
+      if(error){ if(error.code==='23505') throw new Error('Belge bu kayda zaten bağlı.'); throw error; }
+      logYaz(act,body); return ok(data); }
     case 'document_links_remove':{
       const ids=(body.ids||[]).filter(Boolean);
       if(!ids.length) return ok({docIds:[],eksik:0});
@@ -1057,15 +1088,72 @@ async function api(action, body){
       if(error)throw error;
       logYaz(act,body);
       return ok({docIds:[...new Set((data||[]).map(x=>x.document_id))],eksik:ids.length-(data||[]).length}); }
-    /* Hicbir baglama bagli olmayan (`detached_at`) belgelerin dosyasini ve
-       metadata'sini temizler. Once DOSYA silinir; basarisizsa metadata
-       KORUNUR ve sonraki denemede yeniden ele alinir (S6 §24). */
+    /* ---- Hafıza > Belgeler (S10) ----
+       Tek okuma modeli: `document_index` görünümü (SECURITY INVOKER — RLS
+       taban tablolarda aynen geçerli). Sunucu tarafı süzme + sayfalama;
+       arama yalnız METADATA üzerindedir (ad, orijinal ad, açıklama, bağlı
+       iş/kurum/sözleşme adı). Dosya içeriği aranmaz. */
+    case 'documents_index':{
+      const sayfa=Math.max(1,+q.sayfa||1), adet=Math.min(50,+q.adet||20);
+      let s=sb.from('document_index').select('id,title,original_name,ad,doc_type,mime_type,size_bytes,provider,storage_path,external_url,note,uploaded_by_team_id,created_at,updated_at,job_ids,customer_ids,contract_ids,bag_sayisi,iliskisiz',{count:'exact'});
+      belgeKatla(q.q).split(/\s+/).filter(Boolean).slice(0,6)
+        .forEach(w=>{ s=s.ilike('arama','%'+w.replace(/[\\%_]/g,m=>'\\'+m)+'%'); });
+      const kat=BELGE_KAT.find(k=>k[0]===q.kat); if(kat) s=s.in('doc_type',kat[2]);
+      if(q.kurum) s=s.contains('customer_ids',[+q.kurum]);
+      if(q.is) s=s.contains('job_ids',[+q.is]);
+      if(q.iliskisiz==='1') s=s.eq('iliskisiz',true);
+      /* Tarih süzgeci YEREL gün sınırıyla (B51): "12 Eyl" = yerel 00:00'dan. */
+      const yerel=(iso,ek)=>{ const [y,m,d]=iso.split('-').map(Number); return new Date(y,m-1,d+(ek||0)).toISOString(); };
+      if(/^\d{4}-\d{2}-\d{2}$/.test(q.from||'')) s=s.gte('created_at',yerel(q.from));
+      if(/^\d{4}-\d{2}-\d{2}$/.test(q.to||'')) s=s.lt('created_at',yerel(q.to,1));
+      const bas=(sayfa-1)*adet;
+      const {data,error,count}=await s.order('created_at',{ascending:false}).order('id',{ascending:false}).range(bas,bas+adet-1);
+      if(error)throw error;
+      return ok({satirlar:data||[],toplam:count||0,sayfa,adet}); }
+    /* Süzgeç seçenekleri: yalnız belgesi OLAN kurum ve işler (531 kurumluk
+       liste değil). Sayfalı okuma — sessiz 1000 tavanı yok. */
+    case 'documents_facets':{
+      const rows=await rapHepsi(()=>sb.from('document_index').select('id,job_ids,customer_ids').order('id'));
+      const k=new Set(), j=new Set();
+      rows.forEach(r=>{ (r.customer_ids||[]).forEach(x=>k.add(x)); (r.job_ids||[]).forEach(x=>j.add(x)); });
+      return ok({kurumlar:[...k],isler:[...j],toplam:rows.length}); }
+    case 'document_detail':{
+      const {data,error}=await sb.from('documents')
+        .select('*,document_links(id,job_id,entry_id,operation_id,customer_id,contact_id,quote_id,contract_id,created_by_team_id,created_at,'
+          +'jobs(id,title,customer_id),customers(id,firma),contracts(id,title,reference_no,job_id,customer_id,status),'
+          +'entries(id,job_id,body,occurred_at),work_operations(id,job_id,operation_type,planned_date),quotes(id,work_id,revision_no),contacts(id,name))')
+        .eq('id',q.id).maybeSingle();
+      if(error)throw error; return ok(data); }
+    /* Belgenin güvenilir hareketleri (eklendi / bağlandı / kaldırıldı /
+       düzenlendi). Görüntüleme hareket ÜRETMEZ. */
+    case 'document_history':{
+      const {data,error}=await sb.from('entries')
+        .select('id,job_id,customer_id,body,system_kind,created_by_team_id,occurred_at')
+        .eq('document_id',q.id).eq('source','system')
+        .order('occurred_at',{ascending:false}).order('id',{ascending:false}).limit(30);
+      if(error)throw error; return ok(data||[]); }
+    /* Kalıcı silme: önce tüm bağlantılar (yetki RLS'te), sonra dosya,
+       sonra metadata. Bir bağlantı kaldırılamazsa dosyaya DOKUNULMAZ. */
+    case 'document_delete':{
+      const {data:ls,error:le}=await sb.from('document_links').select('id').eq('document_id',body.id);
+      if(le)throw le;
+      if((ls||[]).length){
+        const r=await api('document_links_remove',{ids:ls.map(x=>x.id)});
+        if(r.eksik) throw new Error('Belgenin bazı bağlantılarını kaldırma yetkiniz yok; belge silinmedi.');
+      }
+      const t=await api('documents_cleanup',{ids:[body.id]});
+      if(!t.silinen) throw new Error('Belge silinemedi. Yalnız yükleyen ya da yönetici silebilir; dosya deposuna ulaşılamadıysa daha sonra tekrar deneyin.');
+      logYaz(act,body); return ok(t); }
+    /* KALICI SILME — yalniz ACIKCA secilen belgeler (S10). Ilişkisiz belge
+       artik mesru bir durumdur ("İlişkilendirilmemiş"); kimliksiz bir
+       "tum baglantisizlari temizle" taramasi YAPILMAZ. Sira yapisal kalir:
+       once DOSYA silinir; basarisizsa metadata KORUNUR (S6 §24). */
     case 'documents_cleanup':{
       const me=(ui._me&&ui._me.id)||0, adm=isAdmin();
       const ids=((body&&body.ids)||[]).filter(Boolean);
+      if(!ids.length) return ok({silinen:0,kalan:0});
       let sel=sb.from('documents').select('id,provider,storage_path,uploaded_by_team_id')
-        .not('detached_at','is',null);
-      if(ids.length) sel=sel.in('id',ids);
+        .not('detached_at','is',null).in('id',ids);
       if(!adm) sel=sel.eq('uploaded_by_team_id',me);
       const {data,error}=await sel.limit(200); if(error)throw error;
       const aday=data||[]; if(!aday.length) return ok({silinen:0,kalan:0});
@@ -1097,6 +1185,18 @@ async function api(action, body){
       const {data,error}=await sb.rpc('contract_save',
         {p_contract:body.contract, p_items:body.items||[], p_doc_ids:body.doc_ids||[]});
       if(error)throw error; logYaz(act,{id:data}); return ok({id:data}); }
+    /* S10: belge ilişki seçicisi için sözleşme listesi (iptaller hariç). */
+    case 'contracts_min':{ const {data,error}=await sb.from('contracts')
+        .select('id,title,reference_no,job_id,customer_id,status').neq('status','iptal').order('id',{ascending:false});
+      if(error)throw error; return ok(data||[]); }
+    /* S10 §6: rezervasyon ayrıntısında bağlı sözleşme kalemi → sözleşme →
+       belgeleri. Tek okuma; yalnız görüntüleme. */
+    case 'contract_item_ctx':{
+      const {data,error}=await sb.from('contract_items')
+        .select('id,description,item_type,start_date,end_date,contracts(id,title,reference_no,status,job_id,customer_id,'
+          +'document_links(id,documents(id,original_name,title,doc_type,mime_type,size_bytes,provider,storage_path,external_url,uploaded_by_team_id,created_at,note)))')
+        .eq('id',q.id).maybeSingle();
+      if(error)throw error; return ok(data); }
     case 'contract_detail':{
       const {data,error}=await sb.from('contracts').select('*,contract_items(*),'+BELGE_SEL)
         .eq('id',q.id).single();
@@ -1580,7 +1680,7 @@ function showApp(){
                  ikon-only'ye duser, eylem KAYBOLMAZ (§15). */''}
             <button class="btn btn-sm act act-upd" onclick="qcAc({})" title="Bir güncelleme paylaş">${ic('plus',15)}<span class="act-l">Güncelleme</span></button>
             <button class="btn btn-sm act act-work" onclick="jobForm()" title="Yeni iş aç">${ic('plus',15)}<span class="act-l">Yeni İş</span></button>
-            <button class="btn btn-sm act act-mem" onclick="hafEkle()" title="Hafızaya kişi veya kurum ekle">${ic('plus',15)}<span class="act-l">Hafızaya Ekle</span></button>
+            <button class="btn btn-sm act act-mem" onclick="hafEkle()" title="Hafızaya kişi, kurum veya belge ekle">${ic('plus',15)}<span class="act-l">Hafızaya Ekle</span></button>
             ${/* §14: AYNI operasyon formu, ikinci bir modal YOK. Global
                  baglamda Is secimi zorunludur cunku operasyon bir Work'un
                  child'idir; Work Detail'den acildiginda Is on-secilidir. */''}
@@ -3160,7 +3260,7 @@ async function entryDuzenleIs(id){
    kolay bir sizinti yuzeyi yaratirdi. */
 async function entryKaldir(id){
   puMenuKapat();
-  if(!await mpConfirm('Bu güncelleme kalıcı olarak silinsin mi? Etiketler de kaldırılır.',
+  if(!await mpConfirm('Bu güncelleme kalıcı olarak silinsin mi? Etiketler de kaldırılır; ekli dosyalar Hafıza > Belgeler\'de kalır.',
     'Güncellemeyi Sil')) return;
   const r=await guard(()=>api('entry_delete&id='+id),'Silinemedi'); if(r===null)return;
   toast('Güncelleme silindi.'); renderSection();
@@ -3414,7 +3514,7 @@ async function jobMove(id,status){
   /* S4.4: sistem hareketi artik VERITABANI tetikleyicisinden gelir (trg_jobs_hareket). */
   renderSection();
 }
-async function jobDelete(id){ if(await mpConfirm('Bu iş kaydı silinsin mi? Bağlı güncellemeler de silinir.','İşi Sil')){ await api('job_delete&id='+id); renderSection(); } }
+async function jobDelete(id){ if(await mpConfirm('Bu iş kaydı silinsin mi? Bağlı güncellemeler de silinir. Belgeler silinmez; Hafıza > Belgeler\'de kalır.','İşi Sil')){ await api('job_delete&id='+id); renderSection(); } }
 
 /* ---------- WORK DETAIL (07 §7) ---------- */
 /* S7.1 ust hiyerarsi: Ad -> Kurum/kisi -> ASAMA (belirgin) -> operasyonel
@@ -3882,7 +3982,7 @@ async function sozIptal(id){
   toast('Sözleşme iptal edildi.'); await ekranTazele(); sozAc(id);
 }
 async function sozSil(id){
-  if(!await mpConfirm('Bu taslak sözleşme kalıcı olarak silinsin mi? Yalnız ona bağlı belgeler de silinir; başka yere bağlı belgeler kalır.','Taslağı sil',{danger:true,ok:'Sil'})) return;
+  if(!await mpConfirm('Bu taslak sözleşme kalıcı olarak silinsin mi? Bağlı belgeler silinmez; Hafıza > Belgeler\'de kalır.','Taslağı sil',{danger:true,ok:'Sil'})) return;
   const r=await guard(()=>api('contract_delete&id='+id),'Silinemedi'); if(r===null) return;
   closeModal(); toast('Taslak silindi.'); ekranTazele();
 }
@@ -4047,16 +4147,10 @@ async function sozKaydet(){
 }
 
 /* ============ BELGELER: Work ve Kurum yuzeyi (S6 §35-§41) ============= */
-const BELGE_GRUP=[
-  ['tumu','Tümü',()=>true],
-  ['teklif','Teklif',d=>d.doc_type==='teklif'],
-  ['sozlesme','Sözleşme',d=>d.doc_type==='sozlesme'],
-  ['tasarim','Tasarım',d=>d.doc_type==='tasarim'],
-  ['baski','Baskı',d=>d.doc_type==='baski_dosyasi'],
-  ['foto','Fotoğraf',d=>d.doc_type==='montaj_fotografi'||d.doc_type==='sokum_fotografi'
-                        ||(d.doc_type==='diger'&&belgeResimMi(d))]];
-const BELGE_ANA_GRUP=BELGE_GRUP.slice(1);        /* Diger = bunlarin hicbiri (kendisi HARIC) */
-BELGE_GRUP.push(['diger','Diğer',d=>!BELGE_ANA_GRUP.some(g=>g[2](d))]);
+/* S10: İş detayındaki belge sekmeleri Hafıza > Belgeler ile AYNI
+   kategorileri kullanır (BELGE_KAT); iki ayrı sınıflandırma yok. */
+const BELGE_GRUP=[['tumu','Tümü',()=>true],
+  ...BELGE_KAT.map(k=>[k[0],k[1],d=>belgeKat(d.doc_type)[0]===k[0]])];
 
 /* Work'un belgeleri: dogrudan + guncellemeler + operasyonlar + teklifler.
    Ayni belge birden cok yoldan geliyorsa TEK satir, kaynaklar birlesik. */
@@ -4084,7 +4178,7 @@ function belgeSatirHtml(x,ctx){
     ${resim?`<button type="button" class="bl-th sm" onclick="belgeAc(${d.id})" aria-label="${esc(belgeAd(d))} — önizle"><img data-belge-yol="${esc(d.storage_path)}" alt="" loading="lazy"></button>`
       :`<span class="bl-ext ${d.provider==='external'?'dis':''}">${esc(belgeUzanti(d))}</span>`}
     <div class="bl-rb">
-      <button type="button" class="bl-rt" onclick="belgeAc(${d.id})" title="${esc(d.original_name)}">${esc(belgeAd(d))}${d.provider==='external'?' <span class="bl-dis">↗</span>':''}</button>
+      <button type="button" class="bl-rt" onclick="belgeDetay(${d.id})" title="${esc(belgeAd(d))} — ayrıntılar ve ilişkiler">${esc(belgeAd(d))}${d.provider==='external'?' <span class="bl-dis">↗</span>':''}</button>
       <div class="bl-rs"><span class="pill">${esc(belgeTurLbl(d.doc_type))}</span>
         <span>${esc(trTarih(d.created_at))}</span>
         ${tm[d.uploaded_by_team_id]?`<span>${esc(tm[d.uploaded_by_team_id])}</span>`:''}
@@ -4139,49 +4233,302 @@ function orgBelgeKart(d){
       ${isten.length>5?`<p class="fhint">+${isten.length-5} belge daha ilgili işlerin Belgeler bölümünde.</p>`:''}`:''}
   </div>`;
 }
-/* Tek "Belge Ekle" formu: Work ya da Kurum. Ayni ek bileseni. */
-function belgeEkleAc(ctx){
-  ctx=ctx||{}; ui._blCtx=ctx;
-  /* S7 §41: sozlesmeye eklenen belgenin turu varsayilan Sozlesme (duzeltilebilir).
-     S7.1 §21: Ticari'deki "+ Teklif/Sözleşme Belgesi" ayni yukleyiciyi turu
-     ONCEDEN SECILI acar; kullanici yine degistirebilir (§23). */
-  const on=ctx.contractId?'sozlesme':ctx.tur||null;
-  ekYeni('bl',on?{varsayilan:on,varsayilanResim:on}:{turZorunlu:true});
-  const w=ctx.jobId?ui._work:null;
-  const orgAd=w&&w.customer_id?((ui._cust||[]).find(x=>x.id===w.customer_id)||{}).firma:'';
-  const hedef=ctx.contractId?`Sözleşme: <b>${esc(ctx.baslik||'#'+ctx.contractId)}</b>`
-    :ctx.jobId?`İş: <b>${esc((w||{}).title||'#'+ctx.jobId)}</b>`
-    :`Kurum: <b>${esc(((ui._org||{}).firma)||'#'+ctx.custId)}</b>`;
-  /* S7.1 §22: kullaniciya veritabani mimarisi ogretilmez. */
-  const yerYazi=ctx.contractId?'Bu dosya sözleşme kaydının belgelerine eklenecek.'
-    :ctx.jobId?'Bu dosya işin belgelerine eklenecek.':'Bu dosya kurumun belgelerine eklenecek.';
-  modal(`<h3 style="margin:0 0 4px">${on==='sozlesme'&&!ctx.contractId?'Sözleşme Belgesi Ekle':on==='teklif'?'Teklif Belgesi Ekle':'Belge Ekle'}</h3>
-    <p class="muted" style="font-size:12.5px;margin:0 0 12px">${hedef}</p>
-    ${ekAlan('bl')}
-    <p class="fhint" style="margin-top:10px">${yerYazi}</p>
-    ${ctx.jobId&&w&&w.customer_id?`<label class="qc-who" style="margin-top:4px"><input type="checkbox" id="blOrg">
-      <span>Kurumun belgelerinde de görünsün${orgAd?' ('+esc(orgKisa(orgAd,30))+')':''}</span></label>`:''}
-    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+/* İş / Kurum / Sözleşme içindeki "Belge Ekle" artık TEK belge formunu
+   bağlamı önceden seçili açar (S10 §4). */
+function belgeEkleAc(ctx){ return belgeForm(ctx||{}); }
+
+/* ============ BELGE FORMU (S10 §4) ======================================
+   TEK form, TEK kayıt akışı: global "Hafızaya Ekle > Belge", Hafıza >
+   Belgeler "Belge ekle" ve İş / Kurum / Sözleşme içindeki "Belge Ekle".
+   Önce dosya ya da bağlantı; tek belgede başlık dosya adından önerilir ve
+   düzenlenir; kategori, açıklama ve ilişkiler kolayca eklenir. İlişki
+   bilinmiyorsa belge "İlişkilendirilmemiş" kaydedilir — sahte iş/kurum
+   OLUŞTURULMAZ. Bağlamsız açılışta hiçbir iş/kurum ÖNCEDEN SEÇİLMEZ.
+   Yükleme ve kayıt S6 ek bileşeniyle yapılır (durum, tekrar dene, kayıt
+   hatasında dosya temizliği, kapatınca kaydedilmemiş yüklemeyi geri al). */
+async function belgeForm(ctx){
+  ctx=ctx||{};
+  const veri=await guard(()=>Promise.all([api('customers_min'),api('jobs_list'),api('contracts_min').catch(()=>[])]),'Form açılamadı');
+  if(!veri) return;
+  const [cu,jobs,cs]=veri;
+  const jm={}; (jobs||[]).forEach(j=>jm[j.id]=j);
+  const ctr=(cs||[]).find(c=>c.id===ctx.contractId)||null;
+  const onIs=ctx.jobId||(ctr&&ctr.job_id)||'';
+  const onKurum=ctx.custId||(onIs&&jm[onIs]&&jm[onIs].customer_id)||(ctr&&ctr.customer_id)||'';
+  ui._bf={ctx,cu:(cu||[]).slice().sort((a,b)=>String(a.firma||'').localeCompare(String(b.firma||''),'tr')),
+          jobs:jobs||[],jm,cs:cs||[],basOtomatik:true,kayit:false};
+  /* S7 §41 / S7.1 §21: sözleşmeden açılınca kategori önceden Sözleşme,
+     Ticari'den teklif/sözleşme olarak açılınca o (düzeltilebilir). */
+  const on=ctx.tur||(ctx.contractId?'sozlesme':null);
+  ekYeni('bf',on?{varsayilan:on,varsayilanResim:on,degisti:bfDegisti}
+                :{turZorunlu:true,tahmin:true,degisti:bfDegisti});
+  const baglamYazi=ctr?`Sözleşme: <b>${esc(ctr.title||'#'+ctr.id)}</b>`
+    :ctx.jobId&&jm[ctx.jobId]?`İş: <b>${esc(jm[ctx.jobId].title)}</b>`
+    :ctx.custId?`Kurum: <b>${esc(orgKisa((ui._bf.cu.find(x=>x.id===ctx.custId)||{}).firma||'#'+ctx.custId,50))}</b>`
+    :'Dosyayı ya da bağlantıyı ekleyin; ilişki bilinmiyorsa sonra da bağlanabilir.';
+  modal(`<h3 style="margin:0 0 4px">${on==='sozlesme'&&!ctx.contractId?'Sözleşme Belgesi Ekle':on==='teklif'?'Teklif Belgesi Ekle':'Belge ekle'}</h3>
+    <p class="muted" style="font-size:12.5px;margin:0 0 12px">${baglamYazi}</p>
+    ${ekAlan('bf')}
+    <div class="field" id="bfTek" hidden style="margin-top:10px"><label class="flabel" for="bfBaslik">Başlık</label>
+      <input class="inp" id="bfBaslik" maxlength="200" oninput="ui._bf.basOtomatik=false">
+      <p class="fhint" style="margin:4px 0 0">Dosya adından önerildi; listede ve aramada bu ad görünür. Orijinal dosya adı ayrıca saklanır.</p></div>
+    <div class="field" style="margin-top:10px"><label class="flabel" for="bfNot">Kısa açıklama <span class="muted">— isteğe bağlı</span></label>
+      <textarea class="inp" id="bfNot" rows="2" maxlength="500" placeholder="ör. Müşteriye gönderilen ikinci revizyon"></textarea></div>
+    <fieldset class="bf-rel"><legend>İlişkiler <span class="muted">— isteğe bağlı</span></legend>
+      <div class="row2">
+        <div class="field"><label class="flabel" for="bfKurum">Kurum</label>
+          <select class="inp" id="bfKurum" onchange="bfKurumDegis()"></select></div>
+        <div class="field"><label class="flabel" for="bfIs">İş</label>
+          <select class="inp" id="bfIs" onchange="bfIsDegis()"></select></div>
+      </div>
+      <div class="field"><label class="flabel" for="bfSoz">Sözleşme kaydı</label>
+        <select class="inp" id="bfSoz" onchange="bfIliskiYaz()"></select>
+        <p class="fhint" style="margin:4px 0 0">Belgeyi mevcut bir sözleşme kaydına ekler; sözleşme kalemi, imza durumu ya da rezervasyon oluşturmaz.</p></div>
+      <label class="qc-who" id="bfOrgSar" hidden><input type="checkbox" id="bfOrg"><span>Kurumun belgelerinde de görünsün</span></label>
+      <p class="fhint bf-ozet" id="bfIliski" aria-live="polite"></p>
+    </fieldset>
+    <p class="bf-dur" id="bfDurum" role="status" aria-live="polite"></p>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
       <button class="btn btn-ghost btn-sm" onclick="closeModal()">Vazgeç</button>
-      <button class="btn btn-primary btn-sm" onclick="belgeEkleKaydet()">Kaydet</button></div>`);
+      <button class="btn btn-primary btn-sm" id="bfKaydet" onclick="bfKaydet()">Kaydet</button></div>`);
+  bfKurumCiz(onKurum); bfIsCiz(onIs); bfSozCiz(ctx.contractId||''); bfIliskiYaz();
 }
-async function belgeEkleKaydet(){
-  const ctx=ui._blCtx||{};
-  if(!ekBekleyen('bl').length){ mpAlert('Bir dosya seçin ya da bağlantı ekleyin.','Belge'); return; }
-  if(ekTurEksik('bl')){ mpAlert('Her belge için türünü seçin.','Belge'); return; }
-  const links=[];
-  if(ctx.contractId) links.push({contract_id:ctx.contractId});
-  else if(ctx.jobId){ links.push({job_id:ctx.jobId});
-    const w=ui._work; if(w&&w.customer_id&&(document.getElementById('blOrg')||{}).checked) links.push({customer_id:w.customer_id}); }
-  else if(ctx.custId) links.push({customer_id:ctx.custId});
-  if(!links.length){ mpAlert('Belgenin ekleneceği yer bulunamadı.'); return; }
-  modalBusy(true,'Yükleniyor…');
-  const g=await ekGonder('bl',links);
-  modalBusy(false);
-  if(!g.ok){ mpAlert('Belge eklenemedi: '+g.hata+' — Kaydet ile tekrar deneyin.','Belge'); return; }
-  closeModal(); toast(g.sayi>1?g.sayi+' belge eklendi.':'Belge eklendi.');
+function bfKurumCiz(sec){
+  const s=document.getElementById('bfKurum'); if(!s) return;
+  s.innerHTML='<option value="">— Seçilmedi —</option>'+ui._bf.cu.map(c=>
+    `<option value="${c.id}" ${String(sec)===String(c.id)?'selected':''}>${esc(orgKisa(c.firma||('#'+c.id),60))}</option>`).join('');
+}
+/* İş seçeneği kurumla daralır; açık işler önce, arşiv işleri etiketli. */
+function bfIsCiz(sec){
+  const s=document.getElementById('bfIs'); if(!s) return;
+  const k=gv('bfKurum');
+  const l=ui._bf.jobs.filter(j=>!k||String(j.customer_id)===String(k))
+    .sort((a,b)=>((a.lifecycle_status==='kapandi')-(b.lifecycle_status==='kapandi'))||String(a.title).localeCompare(String(b.title),'tr'));
+  s.innerHTML=`<option value="">${k&&!l.length?'— Bu kurumun işi yok —':'— Seçilmedi —'}</option>`+l.map(j=>
+    `<option value="${j.id}" ${String(sec)===String(j.id)?'selected':''}>${esc(j.title)}${j.lifecycle_status==='kapandi'?' (arşiv)':''}</option>`).join('');
+}
+function bfSozCiz(sec){
+  const s=document.getElementById('bfSoz'); if(!s) return;
+  const k=gv('bfKurum'), is=gv('bfIs');
+  const l=ui._bf.cs.filter(c=>is?(String(c.job_id)===String(is)||(!c.job_id&&String(c.customer_id)===String(k)))
+                               :k?String(c.customer_id)===String(k):true);
+  s.innerHTML=`<option value="">— Bağlı değil —</option>`+l.map(c=>
+    `<option value="${c.id}" ${String(sec)===String(c.id)?'selected':''}>${esc(c.title||('Sözleşme #'+c.id))}${c.reference_no?' · '+esc(c.reference_no):''}${c.status==='taslak'?' · taslak':''}</option>`).join('');
+  s.disabled=!l.length&&!sec;
+}
+function bfKurumDegis(){ const is=gv('bfIs'); const j=ui._bf.jm[is];
+  bfIsCiz(j&&String(j.customer_id)===String(gv('bfKurum'))?is:''); bfSozCiz(gv('bfSoz')); bfIliskiYaz(); }
+/* İş seçilince kurum işten türer (boşsa); çelişkili İş A / Kurum B oluşmaz. */
+function bfIsDegis(){ const j=ui._bf.jm[gv('bfIs')];
+  if(j&&j.customer_id&&!gv('bfKurum')){ bfKurumCiz(j.customer_id); bfIsCiz(j.id); }
+  bfSozCiz(gv('bfSoz')); bfIliskiYaz(); }
+/* Seçimden bağlantı listesi — gereksiz tekrar yazılmaz: işin kendi kurumu
+   ayrıca "kurum belgesi" yapılmaz (isteğe bağlı kutu hariç), sözleşmenin
+   kendi işi ayrıca bağlanmaz (iş detayı sözleşme belgelerini zaten okur). */
+function bfBaglantilar(){
+  const k=+gv('bfKurum')||0, is=+gv('bfIs')||0, sz=+gv('bfSoz')||0;
+  const c=ui._bf.cs.find(x=>x.id===sz)||null, j=ui._bf.jm[is]||null;
+  const out=[];
+  if(sz) out.push({contract_id:sz});
+  if(is&&!(c&&c.job_id===is)) out.push({job_id:is});
+  const kurumuKapsanir=(j&&j.customer_id===k)||(c&&c.customer_id===k);
+  if(k&&(!kurumuKapsanir||(document.getElementById('bfOrg')||{}).checked)) out.push({customer_id:k});
+  return out;
+}
+function bfIliskiYaz(){
+  const el=document.getElementById('bfIliski'); if(!el) return;
+  const k=+gv('bfKurum')||0, is=+gv('bfIs')||0;
+  const j=ui._bf.jm[is]||null;
+  const sar=document.getElementById('bfOrgSar');
+  if(sar) sar.hidden=!(k&&j&&j.customer_id===k);
+  el.innerHTML=bfBaglantilar().length?'':'Hiçbir ilişki seçilmedi: belge <b>İlişkilendirilmemiş</b> olarak kaydedilir ve sonra bağlanabilir.';
+}
+/* Tek belge varken başlık alanı görünür; dosya adından önerilir. */
+function bfDegisti(){
+  const tek=document.getElementById('bfTek'), inp=document.getElementById('bfBaslik'); if(!tek||!inp) return;
+  const bek=ekBekleyen('bf').filter(i=>!i.gecersiz);
+  tek.hidden=bek.length!==1;
+  if(bek.length===1&&ui._bf.basOtomatik){
+    const ad=String(bek[0].ad||''); const n=ad.lastIndexOf('.');
+    inp.value=(bek[0].tip==='dosya'&&n>0)?ad.slice(0,n):ad;
+  }
+  const d=document.getElementById('bfDurum'); if(d&&!ui._bf.kayit) d.textContent='';
+}
+async function bfKaydet(){
+  const f=ui._bf; if(!f||f.kayit) return;               // çift tıklama tek kayıt
+  const bek=ekBekleyen('bf').filter(i=>!i.gecersiz);
+  if(!bek.length){ mpAlert('Önce bir dosya seçin ya da harici bağlantı ekleyin.','Belge'); return; }
+  if(ekTurEksik('bf')){ mpAlert('Her belge için kategori seçin.','Belge'); return; }
+  const baslik=(gv('bfBaslik')||'').trim(), not=(gv('bfNot')||'').trim();
+  bek.forEach(i=>{ i.baslik=bek.length===1?(baslik||null):null; i.not=not||null; });
+  const links=bfBaglantilar();
+  const btn=document.getElementById('bfKaydet'), dur=document.getElementById('bfDurum');
+  f.kayit=true; if(btn){ btn.disabled=true; btn.textContent='Kaydediliyor…'; }
+  const dosyaSay=bek.filter(i=>i.tip==='dosya'&&!i.yol).length;
+  if(dur){ dur.className='bf-dur'; dur.textContent=dosyaSay?`${dosyaSay} dosya yükleniyor…`:'Kaydediliyor…'; }
+  const g=await ekGonder('bf',links);
+  f.kayit=false; if(btn){ btn.disabled=false; btn.textContent='Kaydet'; }
+  if(!g.ok){
+    if(dur){ dur.className='bf-dur hata'; dur.textContent='Kaydedilemedi: '+g.hata+' — dosyalar geri alındı; Kaydet ile tekrar deneyin.'; }
+    return;
+  }
+  closeModal();
+  toast(g.sayi>1?`${g.sayi} belge eklendi.`:(links.length?'Belge eklendi.':'Belge eklendi — İlişkilendirilmemiş.'));
+  if(f.ctx.contractId){ await ekranTazele(); sozAc(f.ctx.contractId); return; }
+  if(document.getElementById('blListe')){ blListeCiz(); return; }
   await ekranTazele();
-  if(ctx.contractId) sozAc(ctx.contractId);
+}
+
+/* ============ BELGE DETAYI (S10 §5) ====================================
+   Önizleme (resim, PDF) ya da açık aç/indir; bilgiler; ilişkiler (işe,
+   kuruma, sözleşmeye git); bilgi ve ilişki düzenleme; güvenilir geçmiş.
+   "Düzenle" DOSYA İÇERİĞİNİ değiştirmez; yeni sürüm yükleme yoktur ve
+   dosya sessizce üzerine yazılmaz. Görüntüleme hareket ÜRETMEZ. */
+const BD_TIP={job_id:'İş',customer_id:'Kurum',contract_id:'Sözleşme',entry_id:'Güncelleme',
+              operation_id:'Baskı / Montaj',quote_id:'Teklif',contact_id:'Kişi'};
+async function belgeDetay(id){
+  puMenuKapat&&puMenuKapat();
+  const r=await guard(()=>Promise.all([api('document_detail&id='+id),api('document_history&id='+id).catch(()=>[]),
+    (ui._team&&ui._team.length)?Promise.resolve(ui._team):api('team_list')]),'Belge açılamadı');
+  if(!r) return;
+  const [d,hist,team]=r;
+  if(!d){ mpAlert('Belge bulunamadı ya da görme yetkiniz yok.','Belge'); return; }
+  ui._team=team||ui._team; belgeKaydet(d); ui._bd={d,hist:hist||[],duzen:false,bagla:false};
+  bdCiz();
+}
+function bdYetki(d){ const benim=(ui._me&&ui._me.id)||0; return isAdmin()||d.uploaded_by_team_id===benim; }
+function bdBagSatir(l,d){
+  const benim=(ui._me&&ui._me.id)||0;
+  const tip=Object.keys(BD_TIP).find(k=>l[k]!=null);
+  let ad='', git='';
+  if(tip==='job_id'&&l.jobs){ ad=l.jobs.title; git=`closeModal();workAc(${l.job_id},{bolum:'belge',docId:${d.id}})`; }
+  else if(tip==='customer_id'&&l.customers){ ad=orgKisa(l.customers.firma||'',60); git=`closeModal();orgAc(${l.customer_id})`; }
+  else if(tip==='contract_id'&&l.contracts){ ad=l.contracts.title||('Sözleşme #'+l.contract_id); git=`closeModal();sozAc(${l.contract_id})`; }
+  else if(tip==='entry_id'&&l.entries){ ad=String(l.entries.body||'').trim().slice(0,70)||'(yalnız dosyalı güncelleme)';
+    if(l.entries.job_id) git=`closeModal();workAc(${l.entries.job_id},{entryId:${l.entry_id}})`; }
+  else if(tip==='operation_id'&&l.work_operations){ ad=opTypeLbl(l.work_operations.operation_type)+(l.work_operations.planned_date?' · '+trTarih(l.work_operations.planned_date):'');
+    git=`closeModal();workAc(${l.work_operations.job_id},{bolum:'op',opId:${l.operation_id}})`; }
+  else if(tip==='quote_id'){ ad='Teklif #'+l.quote_id; git=`closeModal();quoteView(${l.quote_id})`; }
+  else if(tip==='contact_id'&&l.contacts){ ad=l.contacts.name; git=`closeModal();personAc(${l.contact_id})`; }
+  /* Güncellemenin eki güncellemenin kendisinden düzenlenir (yazar kuralı). */
+  const kaldir=tip!=='entry_id'&&(isAdmin()||d.uploaded_by_team_id===benim||l.created_by_team_id===benim);
+  return `<li class="bd-bag"><span class="bd-bt">${esc(BD_TIP[tip]||'Bağlam')}</span>
+    ${git?`<button type="button" class="btn-link bd-bn" onclick="${git}" title="${esc(ad)}">${esc(ad||'—')} ›</button>`:`<span class="bd-bn">${esc(ad||'—')}</span>`}
+    ${kaldir?`<button type="button" class="ek-x" onclick="bdBagKaldir(${l.id})" aria-label="${esc(BD_TIP[tip])} bağlantısını kaldır" title="Bağlantıyı kaldır — dosya silinmez">✕</button>`:''}</li>`;
+}
+function bdCiz(){
+  const s=ui._bd; if(!s) return; const d=s.d;
+  const tm={}; (ui._team||[]).forEach(t=>tm[t.id]=t.name);
+  const yetki=bdYetki(d);
+  const links=d.document_links||[];
+  const dis=d.provider==='external', resim=belgeResimMi(d), pdf=!dis&&/pdf/.test(d.mime_type||'');
+  const kat=belgeKat(d.doc_type);
+  const bilgi=s.duzen?`<div class="bd-duz">
+      <div class="field"><label class="flabel" for="bdAd">Başlık</label>
+        <input class="inp" id="bdAd" maxlength="200" value="${esc(d.title||'')}" placeholder="${esc(d.original_name)}"></div>
+      <div class="field"><label class="flabel" for="bdTur">Kategori</label>
+        <select class="inp" id="bdTur">${BELGE_TUR.map(t=>`<option value="${t[0]}" ${d.doc_type===t[0]?'selected':''}>${esc(t[1])}</option>`).join('')}</select></div>
+      <div class="field"><label class="flabel" for="bdNot">Açıklama</label>
+        <textarea class="inp" id="bdNot" rows="2" maxlength="500">${esc(d.note||'')}</textarea></div>
+      <p class="fhint">Dosyanın içeriği ve orijinal adı (${esc(d.original_name)}) değişmez.</p>
+      <div style="display:flex;gap:8px;justify-content:flex-end">
+        <button class="btn btn-ghost btn-sm" onclick="ui._bd.duzen=false;bdCiz()">Vazgeç</button>
+        <button class="btn btn-primary btn-sm" id="bdKaydetB" onclick="bdKaydet()">Kaydet</button></div></div>`
+    :`<dl class="md-dl bd-dl">
+      <span>Kategori</span><b><span class="pill">${esc(kat[1])}</span>${kat[2].length>1?` <span class="muted">${esc(belgeTurLbl(d.doc_type))}</span>`:''}</b>
+      <span>Dosya</span><b class="bd-kir">${esc(d.original_name)} <span class="muted">· ${esc(dis?'harici bağlantı':[belgeUzanti(d),belgeBoyut(d.size_bytes)].filter(Boolean).join(' · '))}</span></b>
+      <span>Eklenme</span><b>${esc(trTarih(d.created_at))}${tm[d.uploaded_by_team_id]?' · '+esc(tm[d.uploaded_by_team_id]):''}</b>
+      ${d.updated_at?`<span>Düzenlendi</span><b class="muted">${esc(trTarih(d.updated_at))}</b>`:''}
+      ${d.note?`<span>Açıklama</span><b class="bd-kir">${esc(d.note)}</b>`:''}</dl>`;
+  const onizle=dis?`<div class="bd-onz bos"><span>Harici bağlantı — dosya bu uygulamada saklanmıyor.</span>
+        <button class="btn btn-outline btn-sm" onclick="belgeAc(${d.id})">Bağlantıyı aç ↗</button></div>`
+    :resim?`<div class="bd-onz"><img id="bdImg" alt="${esc(belgeAd(d))}"></div>`
+    :pdf?`<div class="bd-onz"><iframe id="bdPdf" title="${esc(belgeAd(d))} — önizleme"></iframe></div>`
+    :`<div class="bd-onz bos"><span>Bu dosya türü burada önizlenemiyor.</span>
+        <button class="btn btn-outline btn-sm" onclick="belgeAc(${d.id},true)">İndir</button></div>`;
+  modal(`<div class="bd-h"><span class="bl-ext ${dis?'dis':''}">${esc(belgeUzanti(d))}</span>
+      <h3 class="bd-t">${esc(belgeAd(d))}</h3></div>
+    ${onizle}
+    <div class="bd-ac">
+      ${dis?'':`<button class="btn btn-outline btn-sm" onclick="belgeAc(${d.id})">Aç</button>
+      <button class="btn btn-ghost btn-sm" onclick="belgeAc(${d.id},true)">İndir</button>`}
+      <span style="flex:1"></span>
+      ${yetki&&!s.duzen?`<button class="btn btn-outline btn-sm" onclick="ui._bd.duzen=true;bdCiz()">Bilgileri düzenle</button>`:''}</div>
+    <div class="sz-sec"><div class="tc-h">Bilgiler</div>${bilgi}</div>
+    <div class="sz-sec"><div class="tc-h">İlişkiler <span class="chip">${links.length}</span>
+        ${s.bagla?'':`<button type="button" class="btn btn-outline btn-sm" style="margin-left:auto" onclick="bdBaglaAc()">${ic('plus',15)} İlişki ekle</button>`}</div>
+      ${links.length?`<ul class="bd-bags">${links.map(l=>bdBagSatir(l,d)).join('')}</ul>`
+        :'<p class="empty" style="margin:4px 0">İlişkilendirilmemiş. Bir işe, kuruma ya da sözleşmeye bağlayabilirsiniz.</p>'}
+      <div id="bdBagla"></div></div>
+    ${s.hist.length?`<div class="sz-sec"><div class="tc-h">Geçmiş</div><ul class="bd-hist">${s.hist.map(h=>
+      `<li><b>${esc(tm[h.created_by_team_id]||'Sistem')}</b> <time>${esc(psZaman(h.occurred_at))}</time><span>${esc(h.body)}</span></li>`).join('')}</ul></div>`:''}
+    <div class="sz-act">
+      ${yetki?`<button class="btn btn-danger btn-sm" style="margin-right:auto" onclick="bdSil()">Kalıcı olarak sil</button>`:''}
+      <button class="btn btn-ghost btn-sm" onclick="closeModal()">Kapat</button></div>`);
+  const m=document.getElementById('modal'); if(m) m.classList.add('mdl-gen');
+  if(s.bagla) bdBaglaCiz();
+  if(!dis&&(resim||pdf)) belgeImzali(d.storage_path).then(url=>{
+    const img=document.getElementById('bdImg'), fr=document.getElementById('bdPdf');
+    if(img) img.src=url; if(fr) fr.src=url;
+  }).catch(()=>{ const o=document.querySelector('.bd-onz');
+    if(o){ o.classList.add('bos'); o.innerHTML='<span>Dosya açılamadı — depoda bulunamadı ya da erişim reddedildi.</span>'; } });
+}
+async function bdYenile(){ if(!ui._bd) return; const id=ui._bd.d.id;
+  const [d,h]=await Promise.all([api('document_detail&id='+id),api('document_history&id='+id).catch(()=>[])]);
+  if(!d){ closeModal(); return; } belgeKaydet(d); ui._bd={...ui._bd,d,hist:h||[]}; bdCiz(); }
+async function bdKaydet(){
+  const d=ui._bd.d; const b=document.getElementById('bdKaydetB'); if(b&&b.disabled) return;
+  if(b){ b.disabled=true; b.textContent='Kaydediliyor…'; }
+  const r=await guard(()=>api('document_update',{id:d.id,title:(gv('bdAd')||'').trim()||null,doc_type:gv('bdTur'),note:(gv('bdNot')||'').trim()||null}),'Belge güncellenemedi');
+  if(r===null){ if(b){ b.disabled=false; b.textContent='Kaydet'; } return; }
+  ui._bd.duzen=false; toast('Belge bilgileri güncellendi.'); await bdYenile(); blListeTazele();
+}
+function bdBaglaAc(){ ui._bd.bagla=true; bdCiz(); }
+/* İlişki ekleme: yeniden YÜKLEME YOK — aynı belge yeni bağlama bağlanır. */
+async function bdBaglaCiz(){
+  const box=document.getElementById('bdBagla'); if(!box) return;
+  box.innerHTML='<p class="muted">Yükleniyor…</p>';
+  const [cu,jobs,cs]=await Promise.all([api('customers_min'),api('jobs_list'),api('contracts_min').catch(()=>[])]);
+  ui._bdSec={cu:(cu||[]).slice().sort((a,b)=>String(a.firma||'').localeCompare(String(b.firma||''),'tr')),
+             jobs:(jobs||[]).slice().sort((a,b)=>((a.lifecycle_status==='kapandi')-(b.lifecycle_status==='kapandi'))||String(a.title).localeCompare(String(b.title),'tr')),cs:cs||[]};
+  box.innerHTML=`<div class="bd-bf">
+    <select class="inp inp-sm" id="bdBTip" onchange="bdBaglaHedef()" aria-label="İlişki türü">
+      <option value="job_id">İş</option><option value="customer_id">Kurum</option><option value="contract_id">Sözleşme</option></select>
+    <select class="inp inp-sm" id="bdBHedef" aria-label="Bağlanacak kayıt"></select>
+    <button class="btn btn-primary btn-sm" id="bdBKaydet" onclick="bdBaglaKaydet()">Bağla</button>
+    <button class="btn btn-ghost btn-sm" onclick="ui._bd.bagla=false;bdCiz()">Vazgeç</button></div>`;
+  bdBaglaHedef();
+}
+function bdBaglaHedef(){
+  const t=gv('bdBTip'), s=document.getElementById('bdBHedef'); if(!s) return;
+  const L=ui._bdSec, mev=new Set((ui._bd.d.document_links||[]).map(l=>t+':'+l[t]));
+  const l=t==='job_id'?L.jobs.map(j=>[j.id,j.title+(j.lifecycle_status==='kapandi'?' (arşiv)':'')])
+    :t==='customer_id'?L.cu.map(c=>[c.id,orgKisa(c.firma||('#'+c.id),60)])
+    :L.cs.map(c=>[c.id,(c.title||'Sözleşme #'+c.id)+(c.reference_no?' · '+c.reference_no:'')]);
+  s.innerHTML='<option value="">— Seçin —</option>'+l.filter(x=>!mev.has(t+':'+x[0]))
+    .map(x=>`<option value="${x[0]}">${esc(x[1])}</option>`).join('');
+}
+async function bdBaglaKaydet(){
+  const t=gv('bdBTip'), h=+gv('bdBHedef'); if(!h){ mpAlert('Bağlanacak kaydı seçin.','Belge'); return; }
+  const b=document.getElementById('bdBKaydet'); if(b&&b.disabled) return; if(b) b.disabled=true;
+  const r=await guard(()=>api('document_link_add',{document_id:ui._bd.d.id,[t]:h}),'Bağlanamadı');
+  if(b) b.disabled=false; if(r===null) return;
+  ui._bd.bagla=false; toast('Belge bağlandı.'); await bdYenile(); blListeTazele();
+}
+async function bdBagKaldir(linkId){
+  const d=ui._bd.d; const kalan=(d.document_links||[]).length-1;
+  if(!await mpConfirm(kalan?'Bu bağlantı kaldırılsın mı? Dosya silinmez.'
+      :'Bu son bağlantı. Kaldırılırsa dosya silinmez; Belgeler\'de İlişkilendirilmemiş olarak kalır.','Bağlantıyı kaldır',{danger:false,ok:'Kaldır'})) return;
+  const r=await guard(()=>belgeBagKaldir([linkId]),'Kaldırılamadı'); if(r===null) return;
+  if(r.eksik){ mpAlert('Bu bağlantıyı kaldırma yetkiniz yok.','Belge'); return; }
+  toast('Bağlantı kaldırıldı.'); await bdYenile(); blListeTazele();
+}
+async function bdSil(){
+  const d=ui._bd.d; const n=(d.document_links||[]).length;
+  if(!await mpConfirm(`“${belgeAd(d)}” kalıcı olarak silinsin mi?${n?` ${n} bağlantısı da kaldırılır.`:''} Dosya geri getirilemez.`,'Belgeyi sil',{danger:true,ok:'Kalıcı olarak sil'})) return;
+  const r=await guard(()=>api('document_delete',{id:d.id}),'Silinemedi'); if(r===null) return;
+  closeModal(); toast('Belge silindi.');
+  if(document.getElementById('blListe')) blListeCiz(); else ekranTazele();
 }
 /* Satir menusu: tur duzelt, kuruma bagla, bu baglamdan kaldir. Yetki
    sunucuda zorlanir; burada yalniz anlamli secenekler gosterilir. */
@@ -4195,7 +4542,7 @@ function belgeMenu(ev,docId,linkId,tip,ctxId,orgId){
   const bag=tum.find(l=>l.id===linkId)||null;
   const kaldirabilir=linkId&&(isAdmin()||d.uploaded_by_team_id===benim||(bag&&bag.created_by_team_id===benim));
   const kurumdaVar=orgId&&tum.some(l=>l.customer_id===orgId);
-  const items=[];
+  const items=[`<button type="button" role="menuitem" onclick="belgeDetay(${docId})">Ayrıntılar ve ilişkiler</button>`];
   if(sahip) items.push(`<button type="button" role="menuitem" onclick="belgeTurForm(${docId})">Adı / türü düzelt</button>`);
   if(tip==='is'&&orgId&&!kurumdaVar) items.push(`<button type="button" role="menuitem" onclick="belgeKurumaBagla(${docId},${orgId})">Kurumun belgelerine de ekle</button>`);
   /* S7 §25: yuklenmis sozlesme belgesinden yapisal kayit - yeniden yukleme yok.
@@ -4245,14 +4592,14 @@ async function belgeBaglamdanKaldir(docId,linkId,tip){
   const d=_belgeler.get(docId); if(!d) return;
   const digerleri=(d.document_links||[]).filter(l=>l.id!==linkId).length;
   const yer=tip==='is'?'bu işten':'bu kurumdan';
+  /* S10: bağlantıyı kaldırmak dosyayı SİLMEZ. */
   const msg=digerleri
     ?`“${belgeAd(d)}” ${yer} kaldırılsın mı? Belge bağlı olduğu diğer ${digerleri} yerde kalır.`
-    :`“${belgeAd(d)}” başka hiçbir yere bağlı değil. Kaldırılırsa dosya da kalıcı olarak silinir.`;
-  if(!await mpConfirm(msg,'Belgeyi Kaldır',{danger:true,ok:digerleri?'Kaldır':'Kaldır ve dosyayı sil'})) return;
+    :`“${belgeAd(d)}” ${yer} kaldırılsın mı? Dosya silinmez; Hafıza > Belgeler'de İlişkilendirilmemiş olarak kalır.`;
+  if(!await mpConfirm(msg,'Belgeyi Kaldır',{danger:false,ok:'Kaldır'})) return;
   const r=await guard(()=>belgeBagKaldir([linkId]),'Kaldırılamadı'); if(r===null) return;
   if(r.eksik){ mpAlert('Bu bağlantıyı kaldırma yetkiniz yok.','Belge'); return; }
-  if(r.temizlik&&r.temizlik.kalan) toast('Bağlantı kaldırıldı; dosya temizliği daha sonra yeniden denenecek.');
-  else toast(digerleri?'Belge bu bağlamdan kaldırıldı.':'Belge silindi.');
+  toast(digerleri?'Belge bu bağlamdan kaldırıldı.':'Belge bu bağlamdan kaldırıldı — Belgeler\'de duruyor.');
   ekranTazele();
 }
 function workPartyCiz(){
@@ -4352,7 +4699,7 @@ async function entryDone(id){
   toast('Aksiyon tamamlandı.'); workAc(e.job_id||(ui._work||{}).id);
 }
 async function entryDel(id){
-  if(!await mpConfirm('Bu güncelleme silinsin mi?','Güncellemeyi Sil'))return;
+  if(!await mpConfirm('Bu güncelleme silinsin mi? Ekli dosyalar Hafıza > Belgeler\'de kalır.','Güncellemeyi Sil'))return;
   const jid=(ui._work||{}).id;
   const r=await guard(()=>api('entry_delete&id='+id),'Silinemedi'); if(r===null)return;
   toast('Silindi.'); workAc(jid);
@@ -5213,7 +5560,7 @@ async function opbKaydet(){
 function opIse(jid){ closeModal(); workAc(jid); }
 function opGuncelle(jid){ closeModal(); qcAc({jobId:jid}); }
 async function opDel(id){
-  if(!await mpConfirm('Bu baskı/montaj kaydı silinsin mi?','Kaydı Sil'))return;
+  if(!await mpConfirm('Bu baskı/montaj kaydı silinsin mi? Ekli dosyalar Hafıza > Belgeler\'de kalır.','Kaydı Sil'))return;
   const jid=(ui._ops||ui._workOps||[]).find(x=>x.id===id)?.job_id||(ui._work||{}).id;
   const r=await guard(()=>api('operation_delete&id='+id),'Silinemedi'); if(r===null)return;
   closeModal(); toast('Silindi.');
@@ -5484,7 +5831,8 @@ const HR_GRUP={
   isler:['work_created','work_renamed','work_phase','work_lifecycle','quote_revised','quote_approved'],
   operasyon:['operation_created','operation_status'],
   muhasebe:['work_accounting'],
-  belgeler:['document_added','contract_created','contract_signed','contract_cancelled','work_contract'],
+  belgeler:['document_added','document_linked','document_unlinked','document_changed',
+            'contract_created','contract_signed','contract_cancelled','work_contract'],
   /* S8: gercek, guvenilir medya olaylari (yerlesim/kampanya olusturma,
      anlamli donem/durum degisikligi, iptal). Hedef yapisal:
      entries.media_placement_id. */
@@ -5496,7 +5844,7 @@ function hareketHedef(h){
   if(k.startsWith('media_')) return {bolum:'medya',placementId:h.media_placement_id||null};
   if(k==='operation_created'||k==='operation_status') return {bolum:'op',opId:h.work_operation_id||null};
   if(k==='work_accounting') return {bolum:'muhasebe'};
-  if(k==='document_added') return {bolum:'belge',docId:h.document_id||null};
+  if(k.startsWith('document_')) return {bolum:'belge',docId:h.document_id||null};
   if(k.startsWith('contract_')||k.startsWith('quote_')||k==='work_contract') return {bolum:'ticari'};
   if(k==='work_lifecycle') return {bolum:'durum'};
   return {bolum:'faz'};
@@ -5506,12 +5854,16 @@ function hareketAc(id){
   /* S8: medya olayi Mecralar'da ILGILI kayda gider (yapisal hedef). Geri
      tusu ayni Hareketler filtre/sayfasina doner (sessionStorage). */
   if(String(h.system_kind||'').startsWith('media_')&&h.media_placement_id){ medyaOdak(h.media_placement_id); return; }
+  /* S10 §7: belge hareketi BELGEYE gider (ilişkisiz belge dahil); iş ve
+     kurum çipleri kendi hedeflerine gider. */
+  if(String(h.system_kind||'').startsWith('document_')&&h.document_id){ belgeDetay(h.document_id); return; }
   if(!h.job_id) return;
   workAc(h.job_id,{...hareketHedef(h),entryId:h.id});
 }
 const HR_ROZET={work_created:'Yeni iş',work_renamed:'İş adı',work_phase:'Aşama',work_lifecycle:'Durum',work_contract:'Sözleşme',
   work_accounting:'Muhasebe',operation_created:'Operasyon',operation_status:'Operasyon',
   quote_revised:'Teklif',quote_approved:'Teklif',document_added:'Belge',
+  document_linked:'Belge',document_unlinked:'Belge',document_changed:'Belge',
   contract_created:'Sözleşme',contract_signed:'Sözleşme',contract_cancelled:'Sözleşme',
   media_created:'Mecra',media_changed:'Mecra',media_cancelled:'Mecra'};
 
@@ -5538,7 +5890,8 @@ function hareketGovde(veri,hg,jm,cm,tm){
     const aktor=h.created_by_team_id&&tm[h.created_by_team_id]?tm[h.created_by_team_id]:null;
     /* S7.1 §39: satir bir baglanti - olayin anlasilacagi yere gider. Ic
        chip'ler kendi hedefine gider ve satir tiklamasini tetiklemez. */
-    const git=!!h.job_id||!!(h.media_placement_id&&String(h.system_kind||'').startsWith('media_'));
+    const git=!!h.job_id||!!(h.media_placement_id&&String(h.system_kind||'').startsWith('media_'))
+      ||!!(h.document_id&&String(h.system_kind||'').startsWith('document_'));
     const hedefAd={op:'operasyonu',belge:'belgeyi',muhasebe:'muhasebe bilgisini',ticari:'ticari bölümü',durum:'işin durumunu',faz:'işi',medya:'mecra kaydını'}[hareketHedef(h).bolum];
     return `<article class="pu hr ${git?'hr-git':''}" ${git?`role="link" tabindex="0" title="${esc(hedefAd?'İlgili '+hedefAd+' aç':'Aç')}"
         onclick="hareketAc(${h.id})" onkeydown="if(event.key==='Enter')hareketAc(${h.id})"`:''}>
@@ -5616,10 +5969,6 @@ async function workspaceHome(c){
     /* S6 §47: Dikkat Gerekenler'in geciken kaynagi. Son 400 guncelleme
        penceresinden DEGIL, terminli acik aksiyonlardan okunur. */
     api(`entries_list&action_status=open&due_to=${bugun}&limit=1000`).catch(()=>[])]);
-  /* S6 §18/§24: yarim kalmis bir temizlik varsa oturumda bir kez sessizce
-     yeniden denenir (kuyruk yok). */
-  if(!ui._belgeTemizlikDenendi){ ui._belgeTemizlikDenendi=true;
-    api('documents_cleanup',{}).catch(e=>console.error('[belge] temizlik',e)); }
   ui._team=team||[]; ui._jobs=jobs||[]; ui._cust=custs||[];
   const jm={}; (jobs||[]).forEach(j=>jm[j.id]=j);
   const cm={}; (custs||[]).forEach(x=>cm[x.id]=x.firma);
@@ -8091,7 +8440,7 @@ const orgRoleLabel=v=>(ORG_ROLES.find(r=>r[0]===v)||[null,v])[1];
 
    Fiziksel tablolar değişmedi: Organization = `customers`, Person =
    `contacts`, ilişki = yeni `contact_affiliations` (D-227/§4/§5). */
-const HAFTABS=[['tumu','Tümü'],['kurumlar','Kurumlar'],['kisiler','Kişiler']];
+const HAFTABS=[['tumu','Tümü'],['kurumlar','Kurumlar'],['kisiler','Kişiler'],['belgeler','Belgeler']];
 
 /* Telefon normalizasyonu (§12): "0532 123 45 67" ile "+90 (532) 123-4567"
    aynı numaradır. Rakam dışı her şey atılır, Türkiye için baştaki 90/0
@@ -8121,6 +8470,7 @@ function hafTemizle(){ hafYaz({...hafDurum(),q:'',rol:''}); renderSection(); }
 /* Tek turda dört toplu okuma; kurum/kişi başına sorgu YOK (§14/§35). */
 async function kurumlar(c){
   const st=hafDurum();
+  if(st.tab==='belgeler') return hafBelgeler(c);
   const [orgs,kisiler,affs,jobs,ents]=await Promise.all([
     api('orgs_overview'), api('contacts_list'), api('affiliations_all'),
     api('jobs_list').catch(()=>[]), api('entries_list&limit=400').catch(()=>[])]);
@@ -8174,7 +8524,7 @@ async function kurumlar(c){
     </div>
 
     <div class="ws-switch inline" role="group" aria-label="Hafıza görünümü" style="margin-bottom:10px">
-      ${tab('tumu','Tümü')}${tab('kurumlar','Kurumlar',ui._haf.orgs.length)}${tab('kisiler','Kişiler',ui._haf.kisiler.length)}
+      ${tab('tumu','Tümü')}${tab('kurumlar','Kurumlar',ui._haf.orgs.length)}${tab('kisiler','Kişiler',ui._haf.kisiler.length)}${tab('belgeler','Belgeler')}
     </div>
     <div id="hafBody"></div>`;
   hafCiz();
@@ -8292,6 +8642,173 @@ function hafCiz(){
     :'<p class="empty">Eşleşen kayıt yok.</p>');
 }
 function hafSay(n,birim){ return `<p class="haf-say">${n} ${esc(birim)}</p>`; }
+
+/* ============ HAFIZA > BELGELER (S10 §3) ================================
+   Ayrı bir modül ya da ikinci dosya deposu DEĞİL: mevcut `documents` +
+   `document_links` kayıtları, aynı kimlik ve bağlantılarla, `document_index`
+   görünümünden okunur. Bir dosyanın her görünüm için ayrı kopyası yoktur.
+   Varsayılan kompakt liste; resimde küçük önizleme, diğerlerinde biçim
+   simgesi. Sunucu tarafı süzme + sayfalama (20/sayfa). */
+const BL_DEF={q:'',kat:'',kurum:'',is:'',iliskisiz:false,from:'',to:'',p:1};
+function blDurum(){ let d; try{ d=JSON.parse(sessionStorage.getItem('mp_belge')||'null'); }catch(e){ d=null; }
+  d={...BL_DEF,...(d||{})}; d.p=Math.max(1,+d.p||1); return d; }
+function blYaz(d){ try{ sessionStorage.setItem('mp_belge',JSON.stringify(d)); }catch(e){} }
+/* Süzgeç değişimi 1. sayfaya döner (S4.1 kuralı); yalnız liste yeniden
+   çizilir — arama kutusu odağını kaybetmez. */
+function blFiltre(patch){ blYaz({...blDurum(),...patch,p:1}); blKontrolTazele(); blListeCiz(); }
+let _blAraT=null;
+function blAra(v){ clearTimeout(_blAraT); _blAraT=setTimeout(()=>blFiltre({q:v}),250); }
+function blSayfa(p){ blYaz({...blDurum(),p:Math.max(1,p)}); blListeCiz();
+  const b=document.getElementById('blListe'); if(b) b.scrollIntoView({block:'start'}); }
+function blTemizle(){ blYaz({...BL_DEF}); renderSection(); }
+function blListeTazele(){ if(document.getElementById('blListe')) blListeCiz(); }
+/* Tarih süzgeci: yarım/geçersiz değer UYGULANMAZ (S10 §1 ile aynı kural). */
+function blTarih(el,k){
+  const h=document.getElementById('blTarihHata');
+  if(!el.value&&el.validity&&el.validity.badInput){ if(h){ h.textContent='Tarih eksik yazıldı.'; h.hidden=false; } return; }
+  if(el.value){ const v=mdTarihDogrula(el.value,k==='from'?'Başlangıç':'Bitiş');
+    if(v.hata){ if(h){ h.textContent=v.hata; h.hidden=false; } return; } }
+  const st=blDurum(); const y={...st,[k]:el.value||''};
+  if(y.from&&y.to&&y.from>y.to){ if(h){ h.textContent='Başlangıç bitişten sonra olamaz.'; h.hidden=false; } return; }
+  if(h){ h.hidden=true; h.textContent=''; }
+  blFiltre({[k]:el.value||''});
+}
+
+async function hafBelgeler(c){
+  const st=blDurum();
+  const [cu,jobs,team,fac]=await Promise.all([api('customers_min'),api('jobs_list'),
+    (ui._team&&ui._team.length)?Promise.resolve(ui._team):api('team_list'),
+    api('documents_facets').catch(()=>({kurumlar:[],isler:[],toplam:0}))]);
+  ui._team=team||ui._team;
+  const cm={}; (cu||[]).forEach(x=>cm[x.id]=x.firma);
+  const jm={}; (jobs||[]).forEach(j=>jm[j.id]=j);
+  ui._bl={cm,jm,fac};
+  const tab=(k,l,say)=>`<button type="button" class="${k==='belgeler'?'on':''}" aria-pressed="${k==='belgeler'}"
+    onclick="hafTab('${k}')">${esc(l)}${say!=null?` <span class="tabn mono">${say}</span>`:''}</button>`;
+  c.innerHTML=`<div class="sec-head">
+      <div><h3>Hafıza</h3><p class="sub">Kurumlar, kişiler, ilişkiler ve belgeler — kurumsal bellek</p></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-sm act act-mem" onclick="belgeForm()">${ic('plus',15)} Belge ekle</button></div></div>
+    <div class="ws-switch inline" role="group" aria-label="Hafıza görünümü" style="margin-bottom:10px">
+      ${tab('tumu','Tümü')}${tab('kurumlar','Kurumlar')}${tab('kisiler','Kişiler')}${tab('belgeler','Belgeler',fac.toplam)}
+    </div>
+    <div class="sec-card fbar bl-fbar">
+      <div class="fbar-row">
+        <input class="inp bl-q" id="blQ" value="${esc(st.q)}" autocomplete="off" oninput="blAra(this.value)"
+          placeholder="Belge adı, açıklama, iş ya da kurum adı…" aria-label="Belgelerde ara">
+        <select class="inp" id="blKat" onchange="blFiltre({kat:this.value})" aria-label="Belge kategorisi"></select>
+        <select class="inp" id="blKurum" onchange="blFiltre({kurum:this.value,is:''})" aria-label="Kurum"></select>
+        <select class="inp" id="blIs" onchange="blFiltre({is:this.value})" aria-label="İş"></select>
+      </div>
+      <div class="fbar-row bl-f2">
+        <label class="md-ms-f"><span>Eklenme · başlangıç</span>
+          <input class="inp inp-sm" type="date" id="blFrom" value="${esc(st.from)}" min="${MD_TARIH_MIN}" max="${MD_TARIH_MAX}" onchange="blTarih(this,'from')"></label>
+        <label class="md-ms-f"><span>Bitiş</span>
+          <input class="inp inp-sm" type="date" id="blTo" value="${esc(st.to)}" min="${MD_TARIH_MIN}" max="${MD_TARIH_MAX}" onchange="blTarih(this,'to')"></label>
+        <label class="qc-who bl-il"><input type="checkbox" id="blIl" ${st.iliskisiz?'checked':''} onchange="blFiltre({iliskisiz:this.checked})">
+          <span>Yalnız ilişkilendirilmemiş</span></label>
+        <span class="fhint bl-not">Arama belge adı, açıklama ve bağlı iş/kurum/sözleşme adlarında yapılır; dosya içeriği aranmaz.</span>
+      </div>
+      <p class="md-ms-hata" id="blTarihHata" role="alert" hidden></p>
+    </div>
+    <div id="blAfilt"></div>
+    <div id="blListe" class="sec-card bl-kart" aria-live="polite"></div>`;
+  blKontrolTazele();
+  blListeCiz();
+  const f=document.getElementById('blQ'); if(f&&st.q){ f.focus(); f.setSelectionRange(st.q.length,st.q.length); }
+}
+/* Seçenekler: yalnız belgesi OLAN kurum/işler; İş kurumla daralır. */
+function blKontrolTazele(){
+  const st=blDurum(), B=ui._bl; if(!B) return;
+  const kat=document.getElementById('blKat');
+  if(kat) kat.innerHTML='<option value="">Tüm kategoriler</option>'+BELGE_KAT.map(k=>
+    `<option value="${k[0]}" ${st.kat===k[0]?'selected':''}>${esc(k[1])}</option>`).join('');
+  const kr=document.getElementById('blKurum');
+  if(kr) kr.innerHTML='<option value="">Tüm kurumlar</option>'+(B.fac.kurumlar||[])
+    .map(id=>({id,ad:B.cm[id]||('#'+id)})).sort((a,b)=>a.ad.localeCompare(b.ad,'tr'))
+    .map(x=>`<option value="${x.id}" ${String(st.kurum)===String(x.id)?'selected':''}>${esc(orgKisa(x.ad,44))}</option>`).join('');
+  const is=document.getElementById('blIs');
+  if(is) is.innerHTML='<option value="">Tüm işler</option>'+(B.fac.isler||[])
+    .map(id=>B.jm[id]).filter(Boolean).filter(j=>!st.kurum||String(j.customer_id)===String(st.kurum))
+    .sort((a,b)=>String(a.title).localeCompare(String(b.title),'tr'))
+    .map(j=>`<option value="${j.id}" ${String(st.is)===String(j.id)?'selected':''}>${esc(j.title)}</option>`).join('');
+  [['blKat','kat'],['blKurum','kurum'],['blIs','is']].forEach(([id,k])=>{ const el=document.getElementById(id); if(el) el.classList.toggle('inp-on',!!st[k]); });
+  const il=document.getElementById('blIl'); if(il) il.checked=!!st.iliskisiz;
+  /* Aktif süzgeçler: tek tek kaldırılabilir (S9 kompakt etiket kalıbı). */
+  const box=document.getElementById('blAfilt'); if(!box) return;
+  const p=[];
+  if(st.q) p.push(['Arama',st.q,'q']);
+  if(st.kat) p.push(['Kategori',(BELGE_KAT.find(k=>k[0]===st.kat)||[])[1]||st.kat,'kat']);
+  if(st.kurum) p.push(['Kurum',orgKisa(B.cm[st.kurum]||('#'+st.kurum),40),'kurum']);
+  if(st.is) p.push(['İş',(B.jm[st.is]||{}).title||('#'+st.is),'is']);
+  if(st.from||st.to) p.push(['Eklenme',`${st.from?trTarih(st.from):'…'} – ${st.to?trTarih(st.to):'…'}`,'tarih']);
+  if(st.iliskisiz) p.push(['Durum','İlişkilendirilmemiş','iliskisiz']);
+  box.innerHTML=p.length?`<div class="md-filtreler">
+    ${p.map(([k,v,a])=>`<span class="md-fchip">${esc(k)}: <b>${esc(v)}</b>
+      <button type="button" aria-label="${esc(k)} süzgecini kaldır" onclick="blFiltreKaldir('${a}')">✕</button></span>`).join('')}
+    ${p.length>1?`<button type="button" class="btn-link" onclick="blTemizle()">Tümünü temizle</button>`:''}</div>`:'';
+}
+function blFiltreKaldir(a){
+  const y=a==='tarih'?{from:'',to:''}:a==='iliskisiz'?{iliskisiz:false}:{[a]:''};
+  if(a==='q'){ const f=document.getElementById('blQ'); if(f) f.value=''; }
+  if(a==='tarih'){ ['blFrom','blTo'].forEach(id=>{ const el=document.getElementById(id); if(el) el.value=''; }); }
+  blFiltre(y);
+}
+let _blIstek=0;
+async function blListeCiz(){
+  const box=document.getElementById('blListe'); if(!box) return;
+  const st=blDurum(), B=ui._bl||{cm:{},jm:{}};
+  const benim=++_blIstek;
+  /* encodeURIComponent: URLSearchParams boşluğu "+" yapar, api() ise
+     decodeURIComponent ile çözer ("+" boşluğa DÖNMEZ) — çok kelimeli arama
+     tek kelime sanılıyordu. */
+  const qs=Object.entries({sayfa:st.p,adet:20,q:st.q||'',kat:st.kat||'',kurum:st.kurum||'',is:st.is||'',
+    iliskisiz:st.iliskisiz?'1':'',from:st.from||'',to:st.to||''})
+    .map(([a,v])=>a+'='+encodeURIComponent(v)).join('&');
+  box.classList.add('yukleniyor');
+  let v;
+  try{ v=await api('documents_index&'+qs); }
+  catch(e){ if(benim!==_blIstek) return; box.classList.remove('yukleniyor');
+    box.innerHTML=`<p class="empty">Belgeler okunamadı: ${esc(e.message||String(e))}</p>`; return; }
+  if(benim!==_blIstek) return;                 // eski istek yeni sonucu ezmesin
+  box.classList.remove('yukleniyor');
+  const tm={}; (ui._team||[]).forEach(t=>tm[t.id]=t.name);
+  const {satirlar,toplam,adet}=v;
+  const sayfaAdet=Math.max(1,Math.ceil(toplam/adet)), sayfa=Math.min(st.p,sayfaAdet), bas=(sayfa-1)*adet;
+  const suzgecli=!!(st.q||st.kat||st.kurum||st.is||st.from||st.to||st.iliskisiz);
+  if(!satirlar.length){
+    box.innerHTML=toplam?`<p class="empty">Bu sayfa artık boş. <button type="button" class="btn-link" onclick="blSayfa(1)">İlk sayfaya dön</button></p>`
+      :suzgecli?`<p class="empty">Bu süzgeçlerle eşleşen belge yok. <button type="button" class="btn-link" onclick="blTemizle()">Süzgeçleri temizle</button></p>`
+      :`<p class="empty">Henüz belge yok. <button type="button" class="btn-link" onclick="belgeForm()">Belge ekle</button></p>`;
+    return;
+  }
+  const ad=(ids,map,f)=>{ const l=(ids||[]).map(id=>map[id]).filter(Boolean); if(!l.length) return '';
+    return esc(f(l[0]))+(l.length>1?` <span class="muted">+${l.length-1}</span>`:''); };
+  const satir=d=>{ belgeKaydet(d);
+    const resim=belgeResimMi(d), kat=belgeKat(d.doc_type);
+    const kur=ad(d.customer_ids,B.cm,x=>orgKisa(x,34)), is=ad(d.job_ids,B.jm,j=>j.title);
+    return `<div class="bx-row" role="listitem">
+      <button type="button" class="bx-main" onclick="belgeDetay(${d.id})" title="${esc(d.ad)}${d.ad!==d.original_name?' · '+esc(d.original_name):''}">
+        ${resim?`<span class="bl-th sm bx-th"><img data-belge-yol="${esc(d.storage_path)}" alt="" loading="lazy"></span>`
+          :`<span class="bl-ext ${d.provider==='external'?'dis':''}">${esc(belgeUzanti(d))}</span>`}
+        <span class="bx-b"><span class="bx-t">${esc(d.ad)}</span>
+          <span class="bx-s"><span class="pill">${esc(kat[1])}</span>
+            ${d.iliskisiz?'<span class="pill sand">İlişkilendirilmemiş</span>'
+              :`${kur?`<span class="bx-k">${kur}</span>`:''}${is?`<span class="bx-i">${is}</span>`:''}${!kur&&!is&&(d.contract_ids||[]).length?'<span class="bx-k">Sözleşme kaydı</span>':''}`}
+          </span></span>
+        <span class="bx-m"><time datetime="${esc(d.created_at)}">${esc(trTarih(d.created_at))}</time>${tm[d.uploaded_by_team_id]?`<em>${esc(tm[d.uploaded_by_team_id])}</em>`:''}</span>
+      </button>
+      <button type="button" class="btn btn-outline btn-sm bx-ac" onclick="belgeAc(${d.id})"
+        aria-label="${esc(d.ad)} — ${resim?'önizle':'aç'}">${resim?'Önizle':d.provider==='external'?'Aç ↗':'Aç'}</button>
+    </div>`; };
+  box.innerHTML=`<p class="haf-say">${toplam} belge${suzgecli?' · süzgeçli':''}</p>
+    <div class="bx-list" role="list">${satirlar.map(satir).join('')}</div>
+    ${toplam>adet?`<div class="pgr">
+      <button class="btn btn-outline btn-sm" ${sayfa<=1?'disabled':''} onclick="blSayfa(${sayfa-1})" aria-label="Önceki sayfa">‹ Önceki</button>
+      <span class="pgr-n" aria-live="polite"><b>${sayfa}</b> / ${sayfaAdet}<em>${bas+1}–${bas+satirlar.length} · ${toplam} belge</em></span>
+      <button class="btn btn-outline btn-sm" ${sayfa>=sayfaAdet?'disabled':''} onclick="blSayfa(${sayfa+1})" aria-label="Sonraki sayfa">Sonraki ›</button>
+    </div>`:''}`;
+}
 
 /* Eski `orgListe` çağrıları (varsa) Hafıza çizimine yönlendirilir. */
 function orgListe(){ hafCiz(); }
@@ -8411,6 +8928,8 @@ function hafEkle(){
         <b>Kişi</b><span>Bir insan — telefon, e-posta, kurum bağlantıları</span></button>
       <button type="button" class="haf-pick-b" onclick="orgQuickForm()">
         <b>Kurum</b><span>Bir şirket, ajans, kurum veya işletme</span></button>
+      <button type="button" class="haf-pick-b" onclick="belgeForm()">
+        <b>Belge</b><span>Sözleşme, teklif, tasarım, fotoğraf, fatura, katalog — işe bağlamak zorunlu değil</span></button>
     </div>
     <div style="display:flex;justify-content:flex-end;margin-top:14px">
       <button class="btn btn-ghost btn-sm" onclick="closeModal()">Vazgeç</button></div>`);

@@ -2258,3 +2258,111 @@ button.rcell{border:0;padding:0;font-family:inherit;position:relative;}
 .md-lejant .rg-legend{margin-top:4px;padding-top:0;border-top:0;}
 .md-lejant{margin:2px 0 0;padding:10px 14px;background:var(--c-card,#fff);border-radius:12px;
   box-shadow:0 1px 2px rgba(0,0,0,.05);}
+
+/* =====================================================================
+   S10 — Müsaitlik araması, Bugüne git, Hafıza > Belgeler, belge formu
+   ve detayı. Mevcut tokenlar ve bileşen dili (fbar, md-fchip, bl-ext,
+   bl-th, pill, pgr, sz-sec) yeniden kullanılır.
+   ===================================================================== */
+/* Müsaitlik: tek kompakt grup — Başlangıç | Bitiş | Müsaitlik ara | Temizle */
+form.md-ms{display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap;margin:8px 0 0;
+  padding-top:10px;border-top:1px solid var(--c-hair,#eceef1);}
+form.md-ms .md-ms-l{align-self:center;margin-right:2px;}
+.md-ms-f{display:flex;flex-direction:column;gap:3px;font-size:11.5px;font-weight:600;color:var(--c-ink3,#86868b);}
+.md-ms-f .inp-sm{width:160px;max-width:none;}
+form.md-ms .btn{height:34px;}
+.md-ms-hata{flex-basis:100%;margin:2px 0 0;font-size:12.5px;font-weight:600;color:#b3272b;}
+.md-ms-hata[hidden]{display:none;}
+.md-ms-ozet{display:flex;flex-direction:column;gap:4px;}
+.md-ms-ozet.hata{background:rgba(229,72,77,.08);box-shadow:inset 0 0 0 1px rgba(229,72,77,.35);}
+.md-ms-ozet.hata span{color:var(--c-ink2,#6e6e73);}
+.md-ms-uyari{padding:6px 8px;border-radius:7px;background:rgba(245,166,35,.12);color:var(--c-ink,#1d1d1f);font-size:12.5px;}
+/* Aranan dönem takvimde işaretlenir: başlıkta etiketli bant, satırlarda zemin. */
+.mtl-ms-bant{position:absolute;top:0;bottom:0;background:rgba(52,168,83,.10);
+  box-shadow:inset 1px 0 0 rgba(52,168,83,.55),inset -1px 0 0 rgba(52,168,83,.55);pointer-events:none;z-index:1;}
+.mtl-ms-bant.b{background:rgba(52,168,83,.18);}
+/* Bugüne git: bugün zaten görünüyorsa sakin, kısa vurgu (sıçrama yok). */
+@keyframes mtlBugunVurgu{0%{box-shadow:0 0 0 0 rgba(31,111,235,.0);}30%{box-shadow:0 0 0 4px rgba(31,111,235,.28);opacity:1;}100%{box-shadow:0 0 0 0 rgba(31,111,235,0);}}
+.mtl-bugun.vurgu,.mtl-bugun-l.vurgu{animation:mtlBugunVurgu 1.4s ease-out 1;opacity:1;width:2px;}
+@media (prefers-reduced-motion: reduce){.mtl-bugun.vurgu,.mtl-bugun-l.vurgu{animation:none;width:3px;}}
+
+/* Hafıza > Belgeler — kompakt liste */
+.bl-fbar .fbar-row{gap:8px;flex-wrap:wrap;}
+.bl-fbar .bl-q{flex:1 1 260px;min-width:200px;}
+.bl-fbar select.inp{flex:0 1 210px;min-width:150px;}
+.bl-f2{align-items:flex-end;margin-top:8px;}
+.bl-f2 .bl-il{align-self:center;margin:0;}
+.bl-f2 .bl-not{margin:0 0 0 auto;align-self:center;max-width:420px;}
+.bl-kart{padding:12px 14px;}
+.bl-kart.yukleniyor{opacity:.6;transition:opacity .15s;}
+.bx-list{display:flex;flex-direction:column;}
+.bx-row{display:flex;align-items:center;gap:10px;border-top:1px solid var(--c-hair,#eceef1);}
+.bx-list .bx-row:first-child{border-top:0;}
+.bx-main{flex:1;min-width:0;display:flex;align-items:center;gap:12px;padding:9px 4px;border:0;background:transparent;
+  text-align:left;cursor:pointer;border-radius:8px;color:inherit;font:inherit;}
+.bx-main:hover{background:var(--c-bg2,#f4f5f7);}
+.bx-main:focus-visible{outline:2px solid var(--c-accent);outline-offset:1px;}
+.bx-th{flex:0 0 auto;}
+.bx-b{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px;}
+.bx-t{font-weight:700;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.bx-s{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12.5px;color:var(--c-ink2,#6e6e73);min-width:0;}
+.bx-k,.bx-i{max-width:260px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.bx-k::before{content:'Kurum · ';color:var(--c-ink3,#86868b);}
+.bx-i::before{content:'İş · ';color:var(--c-ink3,#86868b);}
+.bx-m{flex:0 0 auto;display:flex;flex-direction:column;align-items:flex-end;gap:2px;font-size:12.5px;color:var(--c-ink2,#6e6e73);}
+.bx-m em{font-style:normal;color:var(--c-ink3,#86868b);}
+.bx-ac{flex:0 0 auto;}
+
+/* Belge formu */
+.bf-rel{border:1px solid var(--c-hair,#eceef1);border-radius:10px;padding:10px 12px 4px;margin:6px 0 0;}
+.bf-rel legend{font-size:12.5px;font-weight:700;color:var(--c-ink2,#6e6e73);padding:0 4px;}
+.bf-ozet{margin:2px 0 6px;}
+.bf-dur{margin:10px 0 0;font-size:12.5px;color:var(--c-ink2,#6e6e73);min-height:1em;}
+.bf-dur.hata{color:#b3272b;font-weight:600;}
+
+/* Belge detayı */
+.bd-h{display:flex;align-items:flex-start;gap:10px;margin:0 0 10px;}
+.bd-t{margin:0;font-size:17px;line-height:1.3;overflow-wrap:anywhere;}
+.bd-onz{border:1px solid var(--c-hair,#eceef1);border-radius:10px;background:var(--c-bg2,#f4f5f7);
+  display:flex;align-items:center;justify-content:center;overflow:hidden;min-height:120px;}
+.bd-onz img{max-width:100%;max-height:420px;display:block;object-fit:contain;}
+.bd-onz iframe{width:100%;height:440px;border:0;background:#fff;}
+.bd-onz.bos{flex-direction:column;gap:8px;padding:18px;font-size:13px;color:var(--c-ink2,#6e6e73);text-align:center;}
+.bd-ac{display:flex;align-items:center;gap:8px;margin:10px 0 4px;flex-wrap:wrap;}
+.bd-dl .bd-kir{overflow-wrap:anywhere;font-weight:500;}
+.bd-duz{display:flex;flex-direction:column;gap:2px;}
+.bd-bags{list-style:none;margin:4px 0 0;padding:0;}
+.bd-bag{display:flex;align-items:center;gap:10px;padding:6px 0;border-top:1px solid var(--c-hair,#eceef1);}
+.bd-bags .bd-bag:first-child{border-top:0;}
+.bd-bt{flex:0 0 108px;font-size:12px;font-weight:700;color:var(--c-ink3,#86868b);text-transform:uppercase;letter-spacing:.02em;}
+.bd-bn{flex:1;min-width:0;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.bd-bf{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;}
+.bd-bf select{flex:1 1 180px;}
+.bd-hist{list-style:none;margin:4px 0 0;padding:0;font-size:12.5px;}
+.bd-hist li{display:flex;gap:8px;flex-wrap:wrap;padding:5px 0;border-top:1px solid var(--c-hair,#eceef1);}
+.bd-hist li:first-child{border-top:0;}
+.bd-hist time{color:var(--c-ink3,#86868b);}
+.bd-hist span{flex-basis:100%;color:var(--c-ink2,#6e6e73);}
+
+@media (max-width:760px){
+  form.md-ms{align-items:stretch;}
+  form.md-ms .md-ms-l{flex-basis:100%;}
+  .md-ms-f{flex:1 1 140px;}
+  .md-ms-f .inp-sm{width:100%;}
+  form.md-ms .btn{flex:1 1 auto;}
+  .bl-fbar select.inp{flex:1 1 100%;}
+  .bl-f2 .bl-not{margin:0;max-width:none;}
+  .bx-main{flex-wrap:wrap;gap:8px 10px;}
+  .bx-m{flex-direction:row;gap:8px;align-items:center;width:100%;padding-left:50px;}
+  .bx-k,.bx-i{max-width:100%;}
+  .bd-bt{flex-basis:80px;}
+  .bd-onz iframe{height:360px;}
+}
+/* Etiketli tarih alanı sütun flex'tir: genel `.fbar-row .inp{flex:1}` onu
+   DİKEY büyütmesin. */
+.md-ms-f input.inp{flex:0 0 auto;height:34px;min-width:0;}
+.bl-f2{align-items:flex-end;}
+/* `.qc-who{display:flex}` HTML `hidden` niteliğini ezmesin. */
+#bfOrgSar[hidden]{display:none;}
+/* Belge formunda kategori seçimi okunur genişlikte. */
+#ek_bf .ek-tur{min-width:200px;max-width:none;}

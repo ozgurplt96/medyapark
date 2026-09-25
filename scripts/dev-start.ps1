@@ -161,6 +161,14 @@ if (-not $st -or -not $st.SECRET_KEY) {
     }
 }
 
+# ------------------------------------------ PS10 örnek belgeler (idempotent)
+# SQL seed'i depoya dosya koyamaz; örnek zincirlerin açılabilir belgeleri
+# burada yüklenir ve bağlanır. Yalnız eksik olan yapılır; local değilse
+# betik hiçbir şey yapmaz.
+Write-Step 'Ensuring PS10 sample documents'
+try { & (Join-Path $PSScriptRoot 'dev-seed-documents.ps1') }
+catch { Write-Warn2 "PS10 sample documents skipped: $($_.Exception.Message)" }
+
 # --------------------------------------------------------------- Summary
 $siteUrl = "http://localhost:$Port"
 

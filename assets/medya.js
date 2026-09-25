@@ -28,7 +28,11 @@ const AY_DE=["'ta","'ta","'ta","'da","'ta","'da","'da","'ta","'de","'de","'da","
    'YYYY-MM-DD' HİÇBİR yerde `new Date(iso)` ile ayrıştırılmaz: o UTC
    gece yarısıdır ve UTC'nin gerisindeki bir saat diliminde bir gün geri
    kayar. Tüm karşılaştırmalar yerel ISO dizgeleri üzerinde yapılır. */
-function mdGun(iso){ const [y,m,d]=String(iso).slice(0,10).split('-').map(Number); return new Date(y,m-1,d); }
+/* `new Date(y,m,d)` 0–99 yıllarını 1900+y'ye çevirir ("0002" → 1902).
+   setFullYear bu eşlemeyi yapmaz; yıl ne yazıldıysa odur. Geçersiz yıl
+   ayrıca giriş katmanında (mdTarihDogrula) reddedilir. */
+function mdGun(iso){ const [y,m,d]=String(iso).slice(0,10).split('-').map(Number);
+  const t=new Date(2000,0,1); t.setFullYear(y,m-1,d); return t; }
 function mdBugun(){ return _cIso(new Date()); }
 function mdEkle(iso,n){ const d=mdGun(iso); d.setDate(d.getDate()+n); return _cIso(d); }
 function mdAySonu(iso){ const d=mdGun(iso); return _cIso(new Date(d.getFullYear(),d.getMonth()+1,0)); }
@@ -288,6 +292,11 @@ function mdDurum(){ let d={}; try{ d=JSON.parse(sessionStorage.getItem('mp_medya
   /* `acik` her çağrıda YENİ nesne: paylaşılan bir varsayılanı mutasyona
      açmak oturum boyunca sızan durum yaratırdı. */
   const o={...MD_DEF,...d,acik:(d.acik&&typeof d.acik==='object'&&!Array.isArray(d.acik))?{...d.acik}:{}};
+  /* Önceki sürümün yarım girişten yazdığı ("0002-09-21") ya da ters sıralı
+     arama durumu UYGULANMIŞ arama sayılmaz; sessizce düşürülür. */
+  if(o.msBas||o.msBit){
+    if(mdTarihDogrula(o.msBas).hata||mdTarihDogrula(o.msBit).hata||o.msBas>o.msBit){ o.msBas=''; o.msBit=''; }
+  }
   /* Uyumluluk: eski oturum durumunda ya da eski bir derin bağlantıda
      kalmış `gor` anahtarı düşürülür. Yönlendirme sessizdir; kullanıcı
      kaldırılmış tabloya GÖTÜRÜLMEZ. */
@@ -432,16 +441,19 @@ async function listeler(c,o){
           <option value="confirmed" ${st.tur==='confirmed'?'selected':''}>Rezervasyon</option>
           <option value="reserved" ${st.tur==='reserved'?'selected':''}>Opsiyon</option></select>
       </div>
-      <div class="fbar-row md-ms">
-        <span class="md-ms-l">Müsaitlik ara</span>
-        <input class="inp inp-sm" type="date" id="mdMsBas" value="${esc(st.msBas)}" aria-label="Müsaitlik başlangıç"
-          onchange="mdSet({msBas:this.value})">
-        <span class="muted">–</span>
-        <input class="inp inp-sm" type="date" id="mdMsBit" value="${esc(st.msBit)}" aria-label="Müsaitlik bitiş"
-          onchange="mdSet({msBit:this.value})">
-        ${(st.msBas||st.msBit)?`<button type="button" class="btn-link" onclick="mdSet({msBas:'',msBit:''})">Aramayı kaldır</button>`:
-          `<span class="fhint" style="margin:0">Seçilen dönemin TAMAMINDA boş olan statik yüzeyleri gösterir.</span>`}
-      </div>
+      <form class="md-ms" role="search" aria-label="Müsaitlik ara" novalidate
+          onsubmit="event.preventDefault();mdMsAra()">
+        <span class="md-ms-l">Müsaitlik</span>
+        <label class="md-ms-f"><span>Başlangıç</span>
+          <input class="inp inp-sm" type="date" id="mdMsBas" value="${esc(st.msBas)}"
+            min="${MD_TARIH_MIN}" max="${MD_TARIH_MAX}" oninput="mdMsHataGizle()"></label>
+        <label class="md-ms-f"><span>Bitiş</span>
+          <input class="inp inp-sm" type="date" id="mdMsBit" value="${esc(st.msBit)}"
+            min="${MD_TARIH_MIN}" max="${MD_TARIH_MAX}" oninput="mdMsHataGizle()"></label>
+        <button type="submit" class="btn btn-primary btn-sm md-ms-go">Müsaitlik ara</button>
+        ${(st.msBas&&st.msBit)?`<button type="button" class="btn btn-ghost btn-sm" onclick="mdMsTemizle()">Temizle</button>`:''}
+        <p class="md-ms-hata" id="mdMsHata" role="alert" hidden></p>
+      </form>
     </div>`:''}
     <div id="mdAfilt"></div>
     <div id="mdOdak"></div>
@@ -487,12 +499,46 @@ function mdKaydir(d){
   st.yil=+st.ank.slice(0,4);
   mdDurumYaz(st); mdYenidenCiz();
 }
+/* "Bugüne git" (S10 §2) — öngörülebilir:
+     · bugün görünen pencerede DEĞİLSE: ölçek korunur; 12 ayda bugünün
+       yılı, 3/6 ayda bugünü içeren pencere (bir önceki aydan başlar ki
+       bugünün öncesi de bağlam olarak görünsün),
+     · bugün zaten görünüyorsa pencere DEĞİŞMEZ (ekran sıçramaz),
+     · her iki durumda yatay kaydırılmış takvim bugünün çizgisini görünür
+       alana alır ve çizgi kısa, sakin bir vurgu alır.
+   Mecra, açık gruplar, kurum/iş süzgeçleri ve müsaitlik araması
+   DOKUNULMADAN kalır; arama farklı bir dönemdeyse özet bunu açıkça
+   söyler (mdYilCiz). */
 function mdBuguneGit(){
-  const st=mdDurum(); const bu=mdYm(mdBugun());
-  st.ank=(+st.olcek===12)?`${bu.slice(0,4)}-01`:bu;
+  const st=mdDurum(); const bugun=mdBugun(); const ek=mdEksen(st);
+  if(bugun>=ek.bas&&bugun<=ek.bit){ mdBugunGoster(); return; }
+  const n=+st.olcek||12, bu=mdYm(bugun);
+  st.ank=n===12?`${bu.slice(0,4)}-01`:mdAyEkle(bu,-1);
   st.yil=+bu.slice(0,4);
-  mdDurumYaz(st); mdYenidenCiz();
+  mdDurumYaz(st);
+  Promise.resolve(mdYenidenCiz()).then(()=>mdBugunGoster());
 }
+function mdBugunGoster(){
+  const ciz=[...document.querySelectorAll('#mdGovde .mtl-wrap')];
+  let ilk=null;
+  ciz.forEach(w=>{
+    const cizgi=w.querySelector('.mtl-bugun'); if(!cizgi) return;
+    const wb=w.getBoundingClientRect(), cb=cizgi.getBoundingClientRect();
+    const x=cb.left-wb.left+w.scrollLeft;
+    const lbl=(w.querySelector('.mtl-head .mtl-lbl')||{}).offsetWidth||0;
+    const gorunur=x>=w.scrollLeft+lbl+8&&x<=w.scrollLeft+w.clientWidth-8;
+    if(!gorunur) w.scrollTo({left:Math.max(0,x-lbl-(w.clientWidth-lbl)/2),behavior:mdHareketAz()?'auto':'smooth'});
+    if(!ilk) ilk=cizgi;
+  });
+  if(ilk){
+    const r=ilk.getBoundingClientRect();
+    if(r.bottom<0||r.top>window.innerHeight) ilk.scrollIntoView({block:'center',behavior:mdHareketAz()?'auto':'smooth'});
+  }
+  const hepsi=document.querySelectorAll('#mdGovde .mtl-bugun, #mdGovde .mtl-bugun-l');
+  hepsi.forEach(el=>{ el.classList.remove('vurgu'); void el.offsetWidth; el.classList.add('vurgu'); });
+  setTimeout(()=>hepsi.forEach(el=>el.classList.remove('vurgu')),1600);
+}
+function mdHareketAz(){ try{ return matchMedia('(prefers-reduced-motion: reduce)').matches; }catch(e){ return false; } }
 function mdYil(d){ const st=mdDurum(); st.yil=(st.yil||new Date().getFullYear())+d;
   st.ank=`${st.yil}-01`; mdDurumYaz(st); mdYenidenCiz(); }
 function mdSet(ek){ mdDurumYaz({...mdDurum(),...ek}); mdYenidenCiz(); }
@@ -517,7 +563,7 @@ function mdAfiltCiz(M,st){
   if(st.urun) p.push(['Mecra türü',M.pm[st.urun]||('#'+st.urun),'urun']);
   if(st.tur) p.push(['Kayıt türü',st.tur==='reserved'?'Opsiyon':'Rezervasyon','tur']);
   const ms=mdMsAralik(st);
-  if(ms) p.push(['Müsaitlik',`${mdKisa(ms.bas,true)} – ${mdKisa(ms.bit,true)}`,'ms']);
+  if(ms) p.push(['Müsaitlik',mdMsAd(ms),'ms']);
   if(st.q) p.push(['Arama',st.q,'q']);
   /* §3: büyük kırmızı alarm bandı DEĞİL — kompakt, tek tek
      kaldırılabilir etiketler. */
@@ -543,7 +589,11 @@ function mdCiz(){
   /* Gösterge her çizimde sıfırlanır: bir önceki kapsamda görülen bir
      durumun açıklaması yeni kapsamda ASILI KALMAZ. */
   _mdLeg={ab:false,kes:false,ops:false,gecmis:false,suresiz:false,musait:false};
-  if(mdFiltreli(st)) box.innerHTML=mdBaglamCiz(M,st,gun);
+  _mdMsBant=mdMsAralik(st);
+  /* Müsaitlik araması bir YÜZEY sorusudur: kurum/iş bağlam kesitine
+     değil, seçili mecranın (ya da tüm mecraların) yüzey takvimine çizilir. */
+  if(mdMsAralik(st)&&(st.site!=null||mdFiltreli(st))) box.innerHTML=mdYilCiz(M,st);
+  else if(mdFiltreli(st)) box.innerHTML=mdBaglamCiz(M,st,gun);
   else if(st.site==null) box.innerHTML=mdSiteSec(M,st,gun);
   else box.innerHTML=mdYilCiz(M,st);
   /* Lejant ekran başına TEKTİR (§4). Gövde çizildikten sonra eklenir:
@@ -678,13 +728,110 @@ function mdMusaitMi(M,u,ar){
    SAYILMAZ. */
 function mdMsAralik(st){
   if(!st.msBas||!st.msBit) return null;
-  return st.msBas<=st.msBit?{bas:st.msBas,bit:st.msBit}:{bas:st.msBit,bit:st.msBas};
+  if(mdTarihDogrula(st.msBas).hata||mdTarihDogrula(st.msBit).hata||st.msBas>st.msBit) return null;
+  return {bas:st.msBas,bit:st.msBit};
+}
+
+/* ---------- Müsaitlik araması: giriş (S10 §1) ----------
+   Kök neden (yeniden üretildi): tarih kutusu `onchange` ile her tuşta
+   aramayı UYGULUYORDU. Chrome yıl alanına "2" yazıldığı anda değeri
+   "0002-09-21" olarak geçerli sayar ve `change` üretir; ekran yeniden
+   çizilince kutu da yeniden kurulup kullanıcının yazması yarıda kalıyordu.
+   Ardından `new Date(2,8,21)` 0–99 yılını 1900'e taşıdı (etiket "1902"),
+   karşılaştırma ise "0002-…" dizgesiyle yapıldığı için her yüzey müsait
+   çıktı (82/82). Artık:
+     · tarih yazarken hiçbir şey uygulanmaz; arama yalnız düğmeyle / Enter,
+     · iki tarih TAM ve DESTEKLENEN aralıktaysa uygulanır,
+     · yıl ASLA sessizce dönüştürülmez; hata açıkça yazılır. */
+const MD_TARIH_MIN='2000-01-01', MD_TARIH_MAX='2099-12-31';
+function mdTarihDogrula(v,ad){
+  ad=ad||'Tarih';
+  if(!v) return {hata:`${ad} seçilmedi.`};
+  const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(String(v));
+  if(!m) return {hata:`${ad} eksik ya da geçersiz.`};
+  const y=+m[1], a=+m[2], g=+m[3];
+  if(v<MD_TARIH_MIN||v>MD_TARIH_MAX) return {hata:`${ad}: yıl ${MD_TARIH_MIN.slice(0,4)}–${MD_TARIH_MAX.slice(0,4)} arasında olmalı (girilen: ${y}).`};
+  const d=mdGun(v);
+  if(d.getFullYear()!==y||d.getMonth()!==a-1||d.getDate()!==g) return {hata:`${ad} takvimde yok.`};
+  return {ok:true};
+}
+function mdMsHataGizle(){ const h=document.getElementById('mdMsHata'); if(h){ h.hidden=true; h.textContent=''; } }
+function mdMsHata(msg,alan){
+  const h=document.getElementById('mdMsHata');
+  if(h){ h.textContent=msg+' Arama uygulanmadı.'; h.hidden=false; }
+  const el=alan&&document.getElementById(alan); if(el) el.focus();
+}
+/* Yarım yazılmış tarih kutusunun `value`'su BOŞTUR; tarayıcı bunu
+   `validity.badInput` ile bildirir. "Seçilmedi" ile "eksik yazıldı"
+   ayrı mesajdır. */
+function mdMsOku(id,ad){
+  const el=document.getElementById(id); if(!el) return {hata:`${ad} bulunamadı.`};
+  if(!el.value&&el.validity&&el.validity.badInput) return {hata:`${ad} eksik yazıldı (gün, ay ve dört haneli yıl gerekli).`};
+  const v=mdTarihDogrula(el.value,ad); if(v.hata) return v;
+  return {v:el.value};
+}
+function mdMsAra(){
+  const b=mdMsOku('mdMsBas','Başlangıç'); if(b.hata){ mdMsHata(b.hata,'mdMsBas'); return; }
+  const e=mdMsOku('mdMsBit','Bitiş');     if(e.hata){ mdMsHata(e.hata,'mdMsBit'); return; }
+  if(b.v>e.v){ mdMsHata('Başlangıç bitişten sonra olamaz.','mdMsBit'); return; }
+  /* Takvim aranan döneme gider (§1): sonuç, etiket ve takvim AYNI dönemi
+     gösterir. Ölçek korunur. */
+  const st={...mdDurum(),msBas:b.v,msBit:e.v};
+  const ek=mdEksen(st);
+  if(!(b.v>=ek.bas&&b.v<=ek.bit)){
+    const n=+st.olcek||12;
+    st.ank=n===12?`${b.v.slice(0,4)}-01`:mdYm(b.v);
+    st.yil=+b.v.slice(0,4);
+  }
+  /* Geçmiş ayları gizlemek aranan dönemi saklayamaz. */
+  if(st.gecmisGizle&&b.v<mdYm(mdBugun())+'-01') st.gecmisGizle=false;
+  mdDurumYaz(st); mdYenidenCiz();
+}
+function mdMsTemizle(){ mdSet({msBas:'',msBit:''}); }
+function mdMsDonemeGit(){
+  const st=mdDurum(), ms=mdMsAralik(st); if(!ms) return;
+  const n=+st.olcek||12;
+  st.ank=n===12?`${ms.bas.slice(0,4)}-01`:mdYm(ms.bas); st.yil=+ms.bas.slice(0,4);
+  if(st.gecmisGizle&&ms.bas<mdYm(mdBugun())+'-01') st.gecmisGizle=false;
+  mdDurumYaz(st); mdYenidenCiz();
+}
+/* Aralığın insan okunur adı — özet, aktif filtre etiketi ve takvim
+   işareti AYNI biçimi kullanır. Yıl her zaman yazılır. */
+function mdMsAd(ms){ return `${mdKisa(ms.bas,true)} – ${mdKisa(ms.bit,true)}`; }
+
+/* ---------- Müsaitlik: TEK hesap (S10 §1) ----------
+   Sayaç ve liste aynı fonksiyondan beslenir. Kapsam yalnız YÜZEY
+   düzeyindedir: mecra (site), alan, mecra türü, pozisyon adı araması.
+   Kurum / iş / kayıt türü süzgeçleri bir KAYIT sorusudur; başka
+   müşterinin doluluğunu hesaptan çıkaramaz ve yüzey kümesini daraltmaz.
+   LED (eşzamanlı) alanlar kapsam dışıdır. */
+function mdMusaitHesap(M,st,ms){
+  const siteler=st.site!=null?[M.mecById[st.site]].filter(mdKapsamda):M.mecs.filter(mdKapsamda);
+  const q=String(st.q||'').toLocaleLowerCase('tr').trim();
+  const out={toplam:0,set:new Set(),hata:!Array.isArray(M.recs)||!!M.recsHata};
+  siteler.forEach(m=>{
+    const alanlar=[...(M.altByMec[m.id]||[])].filter(a=>!mdArsiv(a)&&!mdEszamanli(a));
+    const yetim=M.orphanByMec[m.id]||[];
+    if(yetim.length) alanlar.push({id:'x'+m.id,name:'Diğer pozisyonlar',_sahte:true,mecra_id:m.id});
+    alanlar.filter(a=>mdAlanGecer(M,a,st)).forEach(a=>{
+      (a._sahte?yetim:(M.unitsByAlt[a.id]||[])).filter(u=>u.active!==false).forEach(u=>{
+        if(q&&![u.name,a.name,m.name,mdAile(M,a)].some(v=>String(v||'').toLocaleLowerCase('tr').includes(q))) return;
+        out.toplam++;
+        if(mdMusaitMi(M,u,ms)) out.set.add(u.id);
+      });
+    });
+  });
+  return out;
 }
 
 function mdYilCiz(M,st,filtre){
   filtre=filtre||{};
   const ek=mdEksen(st);
   const msAralik=mdMsAralik(st);
+  const MS=msAralik?mdMusaitHesap(M,st,msAralik):null;
+  /* Veri okunamadıysa "hepsi müsait" sonucuna DÜŞÜLMEZ (§1). */
+  if(MS&&MS.hata) return `<div class="md-ms-ozet hata" role="alert"><b>Müsaitlik hesaplanamadı</b>
+      <span>Doluluk kayıtları okunamadı; sonuç gösterilmiyor. Sayfayı yenileyip tekrar deneyin.</span></div>`;
   const gun=mdBugun(), buYm=mdYm(gun);
   const aylar=ek.aylar;
   const yb=ek.bas, ye=ek.bit;
@@ -696,7 +843,7 @@ function mdYilCiz(M,st,filtre){
   /* Kurum/İş bağlamında sonuç kümesi zaten küçüktür — orada gruplar
      açık gelir. Serbest Yıl görünümünde ağır matris yalnız AÇIK grup
      için üretilir (S8.1 §14). */
-  const daralt=!!(filtre.kurum||filtre.is||q);
+  const daralt=!!(filtre.kurum||filtre.is||q)||!!MS;
   let html='';
   siteler.forEach(m=>{
     const alanlar=[...(M.altByMec[m.id]||[])].filter(a=>!mdArsiv(a));
@@ -718,22 +865,27 @@ function mdYilCiz(M,st,filtre){
         ic_+=mdLedZaman(M,a,l,ek,acik); return;
       }
       const us=a._sahte?yetim:(M.unitsByAlt[a.id]||[]);
-      let satirlar=us.map(u=>({u,l:(M.byUnit[u.id]||[]).filter(r=>r.commitment!=='cancelled'
-          &&r.block_start<=ye&&(r.block_end==null||r.block_end>=yb))}))
-        .filter(x=>!daralt||x.l.some(kFiltre)||(q&&String(x.u.name).toLocaleLowerCase('tr').includes(q)));
-      /* KAYIT TÜRÜ (§3): GÖRÜNEN takvim aralığıyla kesişen kayıtlar
-         üzerinden çalışır — arka planda "bugün" sorusu sorulmaz. Eşleşen
-         kayıtları OLAN yüzeyler gösterilir; aynı yüzeydeki diğer
-         doluluklar soluk bağlam olarak KORUNUR (yüzey boşmuş gibi
-         gösterilmez). */
-      if(st.tur) satirlar=satirlar.filter(x=>x.l.some(r=>r.commitment===st.tur));
-      /* MÜSAİTLİK ARAMASI (§3): ayrı ve açık bir soru. Yalnız seçilen
-         dönemin TAMAMINDA bloke edici kaydı olmayan statik yüzeyler.
-         Kurum/iş süzgeci burada UYGULANMAZ — başka müşterinin kaydı da
-         yüzeyi bloke eder. */
-      if(msAralik) satirlar=satirlar.filter(x=>mdMusaitMi(M,x.u,msAralik));
+      const kayitlar=u=>(M.byUnit[u.id]||[]).filter(r=>r.commitment!=='cancelled'
+          &&r.block_start<=ye&&(r.block_end==null||r.block_end>=yb));
+      let satirlar;
+      if(MS){
+        /* MÜSAİTLİK ARAMASI (S10 §1): satırlar sayaçla AYNI kümeden
+           gelir (mdMusaitHesap). Kurum/iş/kayıt türü burada yüzey
+           kümesini daraltmaz; yüzeydeki diğer kayıtlar bağlam olarak
+           çizilir. */
+        satirlar=us.filter(u=>MS.set.has(u.id)).map(u=>({u,l:kayitlar(u)}));
+      } else {
+        satirlar=us.map(u=>({u,l:kayitlar(u)}))
+          .filter(x=>!daralt||x.l.some(kFiltre)||(q&&String(x.u.name).toLocaleLowerCase('tr').includes(q)));
+        /* KAYIT TÜRÜ (§3): GÖRÜNEN takvim aralığıyla kesişen kayıtlar
+           üzerinden çalışır — arka planda "bugün" sorusu sorulmaz. Eşleşen
+           kayıtları OLAN yüzeyler gösterilir; aynı yüzeydeki diğer
+           doluluklar soluk bağlam olarak KORUNUR (yüzey boşmuş gibi
+           gösterilmez). */
+        if(st.tur) satirlar=satirlar.filter(x=>x.l.some(r=>r.commitment===st.tur));
+      }
       if(!satirlar.length) return;
-      ic_+=mdStatikZaman(M,a,satirlar,ek,kFiltre,filtre,acik,{tur:st.tur,ms:msAralik});
+      ic_+=mdStatikZaman(M,a,satirlar,ek,MS?(()=>true):kFiltre,MS?{}:filtre,acik,{tur:MS?'':st.tur,ms:msAralik});
     });
     if(!ic_) return;
     html+=`<div class="md-yil-site"><h3 class="md-yil-t">${esc(m.name)}</h3>${ic_}</div>`;
@@ -741,14 +893,19 @@ function mdYilCiz(M,st,filtre){
   /* Müsaitlik özeti: tarih ve PAYDA açıkça yazılır (§3). Payda,
      kapsamdaki statik YÜZ sayısıdır — fiziksel pano ile karıştırılmaz. */
   let ozet='';
-  if(msAralik){
-    let toplam=0, musait=0;
-    siteler.forEach(m=>[...(M.altByMec[m.id]||[])].filter(a=>!mdArsiv(a)&&!mdEszamanli(a)&&mdAlanGecer(M,a,st))
-      .forEach(a=>(M.unitsByAlt[a.id]||[]).filter(u=>u.active!==false).forEach(u=>{
-        toplam++; if(mdMusaitMi(M,u,msAralik)) musait++; })));
-    ozet=`<div class="md-ms-ozet"><b>${esc(mdKisa(msAralik.bas,true))} – ${esc(mdKisa(msAralik.bit,true))}</b>
-      için <b>${toplam} yüzeyden ${musait} tanesi müsait</b>
-      <span class="muted">· dönemin tamamında boş olan statik yüzeyler; LED kapsam dışı</span></div>`;
+  if(MS){
+    const musait=MS.set.size;
+    /* Takvim aranan dönemi göstermiyorsa (ör. "Bugüne git" sonrası)
+       sonuç bugünün sonucu gibi SUNULMAZ; açık eylem verilir (§2). */
+    const gorunur=msAralik.bas<=ek.bit&&msAralik.bit>=ek.bas;
+    const kayitSuzgec=[st.kurum&&'kurum',st.is&&'iş',st.tur&&'kayıt türü'].filter(Boolean);
+    ozet=`<div class="md-ms-ozet" role="status"><div><b>${esc(mdMsAd(msAralik))}</b>
+      için <b>${MS.toplam} yüzeyden ${musait} tanesi müsait</b>
+      <span class="muted">· dönemin herhangi bir gününde dolu/opsiyonlu olan yüzey sayılmaz; LED kapsam dışı</span></div>
+      ${kayitSuzgec.length?`<div class="muted">${esc(kayitSuzgec.join(', '))} süzgeci müsaitlik sonucunu daraltmaz — başka müşterilerin kayıtları da yüzeyi bloklar.</div>`:''}
+      ${gorunur?'':`<div class="md-ms-uyari">Takvim şu an aranan dönemi göstermiyor; yukarıdaki sonuç aranan dönem içindir.
+        <button type="button" class="btn-link" onclick="mdMsDonemeGit()">Aranan döneme git</button> ·
+        <button type="button" class="btn-link" onclick="mdMsTemizle()">Bugüne dönmek için müsaitlik aramasını temizle</button></div>`}</div>`;
     if(!musait) return ozet+`<div class="sec-card"><p class="empty">Seçilen dönemin tamamında boş statik yüzey yok.</p></div>`;
   }
   if(!html){
@@ -810,6 +967,17 @@ function mdAlanGecer(M,a,st){
 
 /* ---------- Eksen başlığı: ay adları + bugün çizgisi ----------
    Ay sütunları gün sayısıyla orantılıdır; içinde bulunulan ay vurgulanır. */
+/* Uygulanmış müsaitlik aralığı takvimde işaretlenir (S10 §1): başlıkta
+   etiketli bir bant, her satırın arka planında aynı konumda ince bir
+   zemin. Çizim başına mdCiz belirler. */
+let _mdMsBant=null;
+function mdMsBant(ek,baslik){
+  const ms=_mdMsBant; if(!ms||ms.bas>ek.bit||ms.bit<ek.bas) return '';
+  const b=ms.bas<ek.bas?ek.bas:ms.bas, e=ms.bit>ek.bit?ek.bit:ms.bit;
+  const sol=ek.gunNo(b)/ek.toplam*100, gen=(ek.gunNo(e)-ek.gunNo(b)+1)/ek.toplam*100;
+  return `<span class="mtl-ms-bant${baslik?' b':''}" style="left:${sol.toFixed(3)}%;width:${gen.toFixed(3)}%"
+    ${baslik?`title="Müsaitlik araması: ${esc(mdMsAd(ms))}"`:'aria-hidden="true"'}></span>`;
+}
 function mdEksenBaslik(ek,o){
   const gun=mdBugun(), buYm=mdYm(gun);
   const icinde=gun>=ek.bas&&gun<=ek.bit;
@@ -819,6 +987,7 @@ function mdEksenBaslik(ek,o){
     <div class="mtl-trk mtl-trk-g" style="grid-template-columns:${ek.kol}">
       ${ek.aylar.map(ym=>`<div class="mtl-mh ${ym===buYm?'bu':''}">
         <span>${esc(AY_KISA[+ym.slice(5,7)-1])}</span>${ek.n<=6||ym.endsWith('-01')?`<em>${esc(ym.slice(2,4))}</em>`:''}</div>`).join('')}
+      ${mdMsBant(ek,true)}
       ${icinde?`<span class="mtl-bugun" style="left:${ek.yuzde(gun)}%" title="Bugün"><i>Bugün</i></span>`:''}
     </div></div>`;
 }
@@ -995,6 +1164,7 @@ function mdStatikZaman(M,a,satirlar,ek,kFiltre,filtre,acik,o){
       <div class="mtl-trk">
         <div class="mtl-bg" style="grid-template-columns:${ek.kol}" aria-hidden="true">
           ${ek.aylar.map(ym=>`<i class="mtl-gl ${ym===mdYm(gun)?'bu':''}"></i>`).join('')}
+          ${mdMsBant(ek)}
           ${gun>=ek.bas&&gun<=ek.bit?`<span class="mtl-bugun-l" style="left:${ek.yuzde(gun)}%"></span>`:''}
         </div>
         <div class="mtl-lanes">${cift?lane(g.A)+lane(g.B):lane(g.A||g.B)}</div>
@@ -1171,9 +1341,9 @@ async function mForm(o){
       <label class="flabel" for="mfOpsSon">Opsiyon son geçerlilik tarihi <span class="muted">(opsiyonel)</span></label>
       <input class="inp" type="date" id="mfOpsSon" value="${esc(r&&r.option_expires_at||'')}">
       <p class="fhint" style="margin:4px 0 0">Opsiyonun ne zaman düşeceği — reklam dönemi değil. Süresi geçen opsiyon yüzeyi bloklamaya devam eder.</p></div>`}
-    <div class="field"><label class="flabel" for="mfSoz">Sözleşmeye bağla <span class="muted">— isteğe bağlı</span></label>
+    <div class="field"><label class="flabel" for="mfSoz">Sözleşme kalemi <span class="muted">— isteğe bağlı</span></label>
       <select class="inp" id="mfSoz"><option value="">Bağlı değil</option></select>
-      <p class="fhint" style="margin:4px 0 0">Varsa mevcut bir sözleşme kalemine bağlar. Bağlamak sözleşmenin imzalandığı anlamına gelmez.</p></div>
+      <p class="fhint" style="margin:4px 0 0">Bu rezervasyonu mevcut bir sözleşme kalemiyle ilişkilendirir.</p></div>
     <div class="field"><label class="flabel" for="mfNot">Not</label>
       <input class="inp" id="mfNot" value="${esc(r&&r.note||'')}" placeholder="İç not (herkese açık sitede görünmez)"></div>
     <div id="mfSorun" aria-live="polite"></div>
@@ -1483,7 +1653,7 @@ async function mKayitAc(pid){
       ${r.option_expires_at?`<span>Opsiyon geçerliliği</span><b class="${r.option_expires_at<mdBugun()?'md-yk':''}">${esc(mdNokta(r.option_expires_at))}${r.option_expires_at<mdBugun()?' · süresi doldu':''}
         <span class="muted">— reklam dönemi değil</span></b>`:''}
       ${esz&&a.creative_seconds?`<span>Kreatif</span><b>${a.creative_seconds} sn <span class="muted">(mecra kuralı)</span></b>`:''}
-      ${r.contract_item_id?`<span>Sözleşme</span><b>Kalem #${r.contract_item_id}</b>`:''}
+      ${r.contract_item_id?`<span>Sözleşme</span><b id="mkSoz" class="muted">yükleniyor…</b>`:''}
       ${r.source_quote_id?`<span>Teklif</span><b>#${r.source_quote_id}</b>`:''}
       ${r.legacy_lane?`<span>Kaynak</span><b>Eski tablo şeridi <span class="mono">${esc(r.legacy_lane)}</span> <span class="muted">— yalnız köken; ekran ya da slot değildir</span></b>`:''}
       ${r.note?`<span>Not</span><b>${esc(r.note)}</b>`:''}
@@ -1494,6 +1664,24 @@ async function mKayitAc(pid){
       <span style="flex:1"></span>
       ${r.commitment!=='cancelled'?`<button class="btn btn-outline btn-sm" onclick="mForm({kayit:ui._M.recs.find(x=>x.placement_id===${pid})})">Düzenle</button>`:''}
       <button class="btn btn-ghost btn-sm" onclick="closeModal()">Kapat</button></div>`);
+  if(r.contract_item_id) mKayitSozCiz(r.contract_item_id);
+}
+/* S10 §6: bağlı sözleşme kalemi anlaşılır adla; sözleşmeye ve belgesine
+   buradan ulaşılır. Belge yüklemek sözleşme kalemi SEÇMEK değildir — bu
+   yalnız mevcut ilişkiyi gösterir. */
+async function mKayitSozCiz(kid){
+  const el=document.getElementById('mkSoz'); if(!el) return;
+  let k=null; try{ k=await api('contract_item_ctx&id='+kid); }catch(e){ k=null; }
+  if(!document.getElementById('mkSoz')) return;
+  if(!k||!k.contracts){ el.textContent='Sözleşme kalemi okunamadı'; return; }
+  const c=k.contracts, g=v=>v?String(v).slice(0,10).split('-').reverse().join('.'):'';
+  const docs=(c.document_links||[]).map(l=>l.documents).filter(Boolean).map(belgeKaydet);
+  el.className='';
+  el.innerHTML=`<button type="button" class="btn-link" onclick="closeModal();sozAc(${c.id})">${esc(c.title||c.reference_no||('Sözleşme #'+c.id))}</button>
+    <span class="muted"> · ${esc(k.description||sozKalemLbl(k.item_type))}${k.start_date?` · ${esc(g(k.start_date))}${k.end_date?'–'+esc(g(k.end_date)):''}`:''}${c.status==='taslak'?' · taslak':''}</span>
+    ${docs.length?`<div class="bl-strip" style="margin-top:6px">${docs.map(d=>`<button type="button" class="bl-doc" onclick="belgeDetay(${d.id})" title="${esc(belgeAd(d))}">
+        <span class="bl-ext ${d.provider==='external'?'dis':''}">${esc(belgeUzanti(d))}</span><span class="bl-nm">${esc(belgeAd(d))}</span></button>`).join('')}</div>`
+      :'<div class="muted" style="margin-top:4px">Sözleşmeye bağlı belge yok.</div>'}`;
 }
 
 /* Yüz detayı: şimdi / sıradaki / geçmiş + admin envanter kontrolü. */
