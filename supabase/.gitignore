@@ -63,6 +63,13 @@ seeds/*
 # uretir).
 !seeds/99_zzzzz_ps9_media_usage.sql
 
+# PS10: birbirine bağlı yaşam döngüsü zincirleri (teklif → sözleşme →
+# baskı → montaj → yayın → kapanış, yenileme, LED, kaybedilen teklif).
+# Deterministik, idempotent, ŞİRKET VERİSİ İÇERMEZ. Açılabilir örnek
+# dosyalar seed-files/ps10/ altında ("ÖRNEK" damgalı, imzasız); onları
+# scripts/dev-seed-documents.ps1 yükler.
+!seeds/99_zzzzzz_ps10_lifecycle_chains.sql
+
 # Eski düzen (seeds/ öncesi) — geri gelmesin
 seed.sql
 seed_local_auth.sql
