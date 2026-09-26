@@ -75,6 +75,10 @@ seeds/*
 # kalkar). İdempotent, ŞİRKET VERİSİ İÇERMEZ.
 !seeds/99_zzzzzzz_ps11_kullanim_dili.sql
 
+# PS12: rapor kabul senaryoları (örnek paket işi, teknik alanlar, demo
+# uygulayıcı kurumlar). İdempotent, ŞİRKET VERİSİ İÇERMEZ.
+!seeds/99_zzzzzzzz_ps12_rapor_ornekleri.sql
+
 # Eski düzen (seeds/ öncesi) — geri gelmesin
 seed.sql
 seed_local_auth.sql
