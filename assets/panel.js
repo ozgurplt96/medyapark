@@ -2764,7 +2764,7 @@ async function isTakibi(c){
   const D=await coordVeri();
   ui._coord=D; ui._acikAks=D.acikAks;          /* mevcut okuyucular korunur */
   const f=isFiltre();
-  const ust={pano:['Pano','aşamalar arasında oklarla taşıyın'],
+  const ust={pano:['Pano','oklar yeni aşamayı iş ekranında onaya sunar'],
              liste:['Liste','işler tek tabloda — sıralanabilir, filtrelenebilir'],
              takvim:['Takvim','son tarihler ve baskı/montaj planları']}[tab];
   c.innerHTML=`<div class="sec-head">
@@ -2795,8 +2795,8 @@ function isPano(box,D,f){
       <div class="kc-t">${j.is_urgent?'<span class="pu-b acil" title="Acil">⚡</span> ':''}${esc(j.title)}${j.assignee_id?ekipRozet(j.assignee_id):''}</div>
       <div class="kc-m">${ls!=='acik'?`<span class="pill">${esc(LIFELBL[ls])}</span> `:''}${aks?`<span class="pill" title="Açık aksiyon">${aks} aksiyon</span> `:''}${esc(D.cm[j.customer_id]||j.note||'')}</div>
       <div class="kc-a" onclick="event.stopPropagation()">
-        ${idx>0?`<button title="Geri al: ${esc(JOBST[idx-1][1])}" onclick="jobMove(${j.id},'${JOBST[idx-1][0]}')">${ic('left',15)}</button>`:'<span></span>'}
-        ${idx<JOBST.length-1?`<button title="İlerlet: ${esc(JOBST[idx+1][1])}" onclick="jobMove(${j.id},'${JOBST[idx+1][0]}')">${ic('right',15)}</button>`:'<span></span>'}
+        ${idx>0?`<button title="Aşamayı öner: ${esc(JOBST[idx-1][1])} (iş ekranında Kaydet ile uygulanır)" onclick="jobMove(${j.id},'${JOBST[idx-1][0]}')">${ic('left',15)}</button>`:'<span></span>'}
+        ${idx<JOBST.length-1?`<button title="Aşamayı öner: ${esc(JOBST[idx+1][1])} (iş ekranında Kaydet ile uygulanır)" onclick="jobMove(${j.id},'${JOBST[idx+1][0]}')">${ic('right',15)}</button>`:'<span></span>'}
         <button title="Güncelleme ekle" onclick="qcAc({jobId:${j.id}})">${ic('notes',15)}</button>
         <button title="Aç" onclick="workAc(${j.id})">${ic('pages',15)}</button>
         ${isAdmin()?`<button class="del" title="Sil" onclick="jobDelete(${j.id})">${ic('trash',15)}</button>`:'<span></span>'}
@@ -2807,7 +2807,7 @@ function isPano(box,D,f){
       <button class="kadd" onclick="jobForm('${st}')">${ic('plus',14)} Ekle</button>
     </section>`;}).join('');
   const sub=document.getElementById('coordSub');
-  if(sub) sub.textContent=`${list.length} iş gösteriliyor · aşamalar arasında oklarla taşıyın`;
+  if(sub) sub.textContent=`${list.length} iş gösteriliyor · oklar yeni aşamayı iş ekranında onaya sunar`;
   box.innerHTML=`<div class="kanban">${cols}</div>`;
 }
 
@@ -3564,11 +3564,14 @@ function coordKisayol(aktif){
       onclick="go('${r}')">${ic(i,15)}<span>${esc(l)}</span></button>`).join('')}</div>`;
 }
 
+/* S11.2: Pano okları artık tıklandığı anda YAZMAZ. Önerilen aşama, Work
+   Detail'deki mevcut aşama taslağı olarak açılır; Kaydet (yetki + eşzamanlı
+   değişiklik denetimi + çift gönderim engeli + tek Hareket) ya da Vazgeç
+   orada karar verir. Ayrı bir Pano taslak yönetimi yoktur. */
 async function jobMove(id,status){
-  const j=(ui._jobs||[]).find(x=>x.id===id)||{};
-  await api('job_move',{id,status});
-  /* S4.4: sistem hareketi artik VERITABANI tetikleyicisinden gelir (trg_jobs_hareket). */
-  renderSection();
+  if(ui._dirty && !(await dirtyGuard())) return;
+  ui._fazTaslak={id,st:status}; ui._dirty=true;
+  await workAc(id,{bolum:'faz'});
 }
 async function jobDelete(id){ if(await mpConfirm('Bu iş kaydı silinsin mi? Bağlı güncellemeler de silinir. Belgeler silinmez; Hafıza > Belgeler\'de kalır.','İşi Sil')){ await api('job_delete&id='+id); renderSection(); } }
 
@@ -3595,6 +3598,7 @@ async function workAc(id,odak){
   const takipEdiyorum=folBu.some(r=>r.team_id===benim);
   const folAdlari=folBu.map(r=>((tm||[]).find(t=>t.id===r.team_id)||{}).name).filter(Boolean);
   ui._work=d.job; ui._workParties=d.parties; ui._workEntries=d.entries;
+  if(ui._fazTaslak&&ui._fazTaslak.id===d.job.id&&ui._fazTaslak.st===d.job.status){ ui._fazTaslak=null; ui._dirty=false; }
   ui._workQuotes=d.quotes||[]; ui._workMedya=d.medya||[]; ui._workDetay=d;
   ui._workOps=d.ops||[];
   ui._opCust=ui._opCust||{}; (cu||[]).forEach(x=>ui._opCust[x.id]=x.firma);
@@ -4734,12 +4738,18 @@ function workTimelineCiz(){
 }
 /* PS1.1 §16: acik niyet. Bildirim aboneligi, gorunurluk degisikligi ya
    da sorumluluk YARATMAZ - yalnizca Panelim listene ekler/cikarir. */
+let _takipUcus=false;
 async function workTakip(id,takipEt){
-  const r=await guard(()=>api(takipEt?'work_follow':'work_unfollow',{id}),
-    takipEt?'Takibe alınamadı':'Takip bırakılamadı');
-  if(r===null)return;
-  toast(takipEt?'Takibe alındı.':'Takip bırakıldı.');
-  workAc(id);
+  if(_takipUcus) return;                      /* çift tıklama: tek istek */
+  _takipUcus=true;
+  const b=document.getElementById('wFol'); if(b) b.disabled=true;
+  try{
+    const r=await guard(()=>api(takipEt?'work_follow':'work_unfollow',{id}),
+      takipEt?'Takibe alınamadı':'Takip bırakılamadı');
+    if(r===null){ if(b) b.disabled=false; return; }   /* başarısız: etiket DEĞİŞMEZ */
+    toast(takipEt?'Takibe alındı.':'Takip bırakıldı.');
+    await workAc(id);
+  } finally { _takipUcus=false; }
 }
 function entryForm(id,jobId,aksiyon){
   const x=(ui._workEntries||[]).find(e=>e.id===id)||{};
