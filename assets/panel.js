@@ -1391,9 +1391,18 @@ async function api(action, body){
       const r=await saveRow('work_operations',row); logYaz(act,body); return ok(r); }
     /* S7.1: cok satirli olusturma TEK islemde (RPC). Ya tum satirlar ve
        ortak belge baglantilari yazilir ya hicbiri - yarim "basari" yok. */
+    /* S12: paket bedeli — birden çok işlemi kapsayan TEK tutar. */
+    case 'price_groups_list':{
+      let sel=sb.from('operation_price_groups').select('*');
+      if(q.job_id) sel=sel.eq('job_id',q.job_id);
+      const {data,error}=await sel.order('id'); if(error)throw error; return ok(data); }
+    case 'price_group_save':{
+      const row={...body};
+      if(!row.id) row.created_by_team_id=(ui._me&&ui._me.id)||null; else row.updated_at=new Date().toISOString();
+      const r=await saveRow('operation_price_groups',row); logYaz('operation_save',{job_id:body.job_id}); return ok(r); }
     case 'operations_batch':{
       const {data,error}=await sb.rpc('operations_batch_create',
-        {p_job:body.job_id, p_rows:body.rows||[], p_docs:body.docs||[]});
+        {p_job:body.job_id, p_rows:body.rows||[], p_docs:body.docs||[], p_package:body.package||null});
       if(error)throw error; logYaz('operation_save',{job_id:body.job_id,sayi:(body.rows||[]).length}); return ok(data); }
 
     /* ---- Kurumlar / Kişiler (Sprint 02) ----
@@ -1782,6 +1791,7 @@ function navEtiket(v,s,id,ad){
   if(v==='org')  return ad||'Kurum';
   if(v==='kisi') return ad||'Kişi';
   if(v==='ajanda') return 'Ajandam';
+  if(v==='rapor') return ad||'Rapor';
   return TITLES[s]||'Panel';
 }
 const navAyni=(a,b)=>!!a&&!!b&&a.v===b.v&&String(a.id||'')===String(b.id||'')&&a.s===b.s;
@@ -3619,6 +3629,7 @@ async function workAc(id,odak){
           title="${takipEdiyorum?'Bu iş Panelim → Takip Ettiğim İşler listenden çıkar':'Bu iş Panelim → Takip Ettiğim İşler listene eklenir'}">
           ${takipEdiyorum?'★ Takibi Bırak':'☆ Takibe Al'}</button>
         <button class="btn btn-outline btn-sm" onclick="jobForm(null,${j.id})">Düzenle</button>
+        <button class="btn btn-ghost btn-sm" onclick="rpAc('is',{is:${j.id}})" title="Bu işin durumunu ve geçmişini PDF olarak paylaşın">${ic('download',15)} İş özeti</button>
       </div></div>
 
     ${workFazHtml(j)}
@@ -3650,7 +3661,8 @@ async function workAc(id,odak){
 
     ${wBolum({id:'wOpKart',baslik:'Baskı &amp; Montaj',sayiId:'wOpSayi',sayi:opN,govde:'wOps',
       bos:!opN,ipucu:'Bu işe bağlı baskı/montaj kaydı yok.',
-      eylem:`<button class="btn btn-sm act act-ops" onclick="opForm(0,${j.id})">${ic('plus',15)} Kayıt Ekle</button>`})}
+      eylem:`${opN?`<button class="btn btn-ghost btn-sm" onclick="rpAc('baski',{kurum:${j.customer_id||0},isler:[${j.id}]})" title="Bu işin baskı/montaj dökümü (PDF/Excel)">${ic('download',15)} Döküm</button>`:''}
+        <button class="btn btn-sm act act-ops" onclick="opForm(0,${j.id})">${ic('plus',15)} Kayıt Ekle</button>`})}
 
     ${/* S2 §27: bos bolum sessiz kalir. */''}
     ${d.parties.length?`<div class="sec-card">
@@ -3850,7 +3862,7 @@ function workOpsCiz(){
       <div class="nm"><span class="pill">${esc(opTypeLbl(o.operation_type))}</span>
         ${o.unit_id&&ui._opUnits[o.unit_id]?`<b>${esc(ui._opUnits[o.unit_id].name)}</b>`:''} ${esc(o.description||'')}</div>
       <div class="meta">${o.planned_date?esc(trTarih(o.planned_date)):'tarihsiz'}
-        ${o.quantity!=null?' · '+esc(String(o.quantity).replace(/\.0+$/,''))+' adet':''}${o.dimensions?' · '+esc(o.dimensions):''}
+        ${o.quantity!=null?' · '+esc(String(o.quantity).replace(/\.0+$/,''))+' '+esc(OP_BIRIM[o.quantity_unit]||'adet'):''}${o.dimensions?' · '+esc(o.dimensions):''}
         ${!o.unit_id&&o.location_text?' · '+esc(o.location_text):''}
         ${o.supplier_org_id&&ui._opCust[o.supplier_org_id]?' · '+esc(orgKisa(ui._opCust[o.supplier_org_id],34)):''}
         · <span class="badge-st st-${esc(o.status)}">${esc(opStatLbl(o.status))}</span>
@@ -5181,7 +5193,10 @@ async function jobSave(){
    view'dır (07 §13). Aktif takip artık Excel'de değil burada yaşar
    (BR-X01); Excel yalnız import/export formatıdır (BR-X02).
    ============================================================== */
-const OPTYPE=[['baski','Baskı'],['montaj','Montaj'],['sokum','Söküm'],['diger','Diğer']];
+const OPTYPE=[['baski','Baskı'],['montaj','Montaj'],['sokum','Söküm'],['diger','Diğer hizmet']];
+/* S12: miktar birimi — "4 gün vinç" dört baskı sayılmaz. */
+const OP_BIRIM={adet:'adet',m2:'m²',metre:'metre',gun:'gün',saat:'saat',takim:'takım',hizmet:'hizmet'};
+const OP_PB=[['TRY','₺ TRY'],['USD','$ USD'],['EUR','€ EUR']];
 const OPSTAT=[['planned','Planlandı'],['waiting','Bekliyor'],['in_progress','Devam ediyor'],
               ['done','Tamamlandı'],['cancelled','İptal']];
 const opTypeLbl=v=>(OPTYPE.find(x=>x[0]===v)||[null,v])[1];
@@ -5284,7 +5299,7 @@ async function operasyon(c){
         <span class="muted" style="font-size:12px">${esc(orgKisa(cm[j.customer_id]||''))}</span></td>
       <td><span class="pill">${esc(opTypeLbl(o.operation_type))}</span></td>
       <td>${esc(o.description||'')}</td>
-      <td class="mono">${o.quantity!=null?esc(o.quantity):''}</td>
+      <td class="mono">${o.quantity!=null?esc(String(o.quantity).replace(/\.0+$/,''))+(o.quantity_unit&&o.quantity_unit!=='adet'?' '+esc(OP_BIRIM[o.quantity_unit]||o.quantity_unit):''):''}</td>
       <td>${esc(o.dimensions||'')}</td>
       <td>${esc((um[o.unit_id]||{}).name||o.location_text||'')}</td>
       ${/* Kurum sutunuyla ayni gorunum kurali: tuzel unvan ekleri satiri
@@ -5407,9 +5422,10 @@ async function opForm(id,jobId){
   const isteyiz=(history.state&&history.state.mp&&history.state.v==='work');
   const o=((isteyiz?ui._workOps:ui._ops)||[]).find(x=>x.id===id)
         ||(ui._workOps||[]).find(x=>x.id===id)||(ui._ops||[]).find(x=>x.id===id)||{};
-  const veri=await guard(()=>Promise.all([api('jobs_list'),api('customers_list'),api('units_full').catch(()=>[])]),'Form açılamadı');
+  const veri=await guard(()=>Promise.all([api('jobs_list'),api('customers_list'),api('units_full').catch(()=>[]),api('price_groups_list').catch(()=>[])]),'Form açılamadı');
   if(!veri)return;
-  const [jobs,custs,units]=veri;
+  const [jobs,custs,units,gruplar]=veri;
+  ui._opPg=gruplar||[];
   const jid=jobId||o.job_id||((ui._work||{}).id)||0;
   ekYeni('op',{mevcut:(o.document_links||[]).filter(l=>l.documents).map(l=>({link_id:l.id,doc:l.documents})),
                ...opEkVarsayilan(o.operation_type||'baski')});
@@ -5429,7 +5445,7 @@ async function opForm(id,jobId){
            Once listenin ilk isini secili gosteriyorduk; kullanici fark
            etmeden yanlis ise kayit acabilirdi. Secim artik aciktir. */''}
       <div class="field"><label class="flabel" for="opJob">İş *</label>
-        <select class="inp" id="opJob">
+        <select class="inp" id="opJob" onchange="opPgCiz()">
           ${jid?'':'<option value="">— iş seçin —</option>'}
           ${(jobs||[]).map(j=>`<option value="${j.id}" ${String(jid)===String(j.id)?'selected':''}>${esc(j.title)}</option>`).join('')}</select></div>
       ${/* §13: `diger` gercek kullanimda SIFIR satir tasiyor (canli sayim);
@@ -5440,26 +5456,49 @@ async function opForm(id,jobId){
         <select class="inp" id="opT" onchange="opEkTurGuncelle()">${OPTYPE.filter(t=>t[0]!=='diger'||o.operation_type==='diger')
           .map(t=>`<option value="${t[0]}" ${o.operation_type===t[0]?'selected':''}>${t[1]}</option>`).join('')}</select></div>
     </div>
-    <div class="field"><label class="flabel" for="opDesc">Açıklama</label><input class="inp" id="opDesc" value="${esc(o.description)}" placeholder="ör. M1 AVM megalight baskı"></div>
-    <div class="row2">
-      <div class="field"><label class="flabel" for="opQty">Adet</label><input class="inp" type="number" step="0.01" id="opQty" value="${esc(o.quantity)}"></div>
-      <div class="field"><label class="flabel" for="opDim">Ölçü</label><input class="inp" id="opDim" value="${esc(o.dimensions)}" placeholder="ör. 300x400 cm"></div>
-    </div>
+    <div class="field"><label class="flabel" for="opDesc">Açıklama / ürün</label><input class="inp" id="opDesc" value="${esc(o.description)}" placeholder="ör. M1 AVM megalight baskı"></div>
+    <label class="rp2-chk" style="margin:-4px 0 10px"><input type="checkbox" id="opRe" ${o.reprint?'checked':''}> <span>Yeniden baskı <em>ölçü revizesi, yer değişikliği…</em></span></label>
+    <fieldset class="op-fs"><legend>Teknik</legend>
+      <div class="row2">
+        <div class="field"><label class="flabel" for="opMat">Malzeme / cins</label><input class="inp" id="opMat" value="${esc(o.material)}" placeholder="ör. Önden ışıklı vinil"></div>
+        <div class="field"><label class="flabel" for="opGr">Gramaj (gr/m²)</label><input class="inp" type="number" min="1" step="1" id="opGr" value="${esc(o.grammage_gsm)}"></div></div>
+      <div class="row2">
+        <div class="field"><label class="flabel" for="opDim">Baskı ölçüsü</label><input class="inp" id="opDim" value="${esc(o.dimensions)}" placeholder="ör. 290 x 590 cm"></div>
+        <div class="field"><label class="flabel" for="opVis">Görünen alan</label><input class="inp" id="opVis" value="${esc(o.visible_size)}" placeholder="ör. 282 x 583 cm"></div></div>
+      <div class="row3">
+        <div class="field"><label class="flabel" for="opYz">Yüzey sayısı</label><input class="inp" type="number" min="0" step="1" id="opYz" value="${esc(o.surface_count)}"></div>
+        <div class="field"><label class="flabel" for="opQty">Miktar</label><input class="inp" type="number" step="0.01" id="opQty" value="${esc(o.quantity)}"></div>
+        <div class="field"><label class="flabel" for="opBr">Birim</label><select class="inp" id="opBr">${Object.entries(OP_BIRIM).map(([k,l])=>`<option value="${k}" ${(o.quantity_unit||'adet')===k?'selected':''}>${esc(l)}</option>`).join('')}</select></div></div>
+      <p class="fhint" style="margin-top:-4px">Baskı satırında miktar = baskı adedi. Yüzey sayısı ayrıdır. Hizmetlerde birimi seçin (ör. 4 gün vinç).</p>
+    </fieldset>
     <div class="row2">
       <div class="field"><label class="flabel" for="opUnit">Pozisyon (mecra)</label>
         <select class="inp" id="opUnit"><option value="">— yok —</option>${(units||[]).map(u=>`<option value="${u.id}" ${String(o.unit_id)===String(u.id)?'selected':''}>${esc(u.name)}</option>`).join('')}</select></div>
       <div class="field"><label class="flabel" for="opLoc">Yer (serbest)</label><input class="inp" id="opLoc" value="${esc(o.location_text)}"></div>
     </div>
     <div class="row2">
-      <div class="field"><label class="flabel" for="opSup">Uygulayan / tedarikçi kurum</label>
+      <div class="field"><label class="flabel" for="opSup">Baskı merkezi / uygulayan kurum</label>
         <select class="inp" id="opSup"><option value="">— yok —</option>${(custs||[]).slice(0,800).map(x=>`<option value="${x.id}" ${String(o.supplier_org_id)===String(x.id)?'selected':''}>${esc(x.firma||('#'+x.id))}</option>`).join('')}</select></div>
       <div class="field"><label class="flabel" for="opDate">Planlanan tarih</label><input class="inp" type="date" id="opDate" value="${esc(o.planned_date)}"></div>
     </div>
-    <div class="row2">
-      <div class="field"><label class="flabel" for="opSt">Durum</label>
-        <select class="inp" id="opSt">${OPSTAT.map(t=>`<option value="${t[0]}" ${(o.status||'planned')===t[0]?'selected':''}>${t[1]}</option>`).join('')}</select></div>
-      <div class="field"><label class="flabel" for="opCost">Maliyet (₺)</label><input class="inp" type="number" step="0.01" id="opCost" value="${esc(o.cost)}"></div>
-    </div>
+    <div class="field" style="max-width:260px"><label class="flabel" for="opSt">Durum</label>
+      <select class="inp" id="opSt">${OPSTAT.map(t=>`<option value="${t[0]}" ${(o.status||'planned')===t[0]?'selected':''}>${t[1]}</option>`).join('')}</select></div>
+    <fieldset class="op-fs"><legend>Ticari <em>iç bilgi</em></legend>
+      <div class="row3">
+        <div class="field"><label class="flabel" for="opUc">Birim maliyet</label><input class="inp" type="number" min="0" step="0.01" id="opUc" value="${esc(o.unit_cost)}"></div>
+        <div class="field"><label class="flabel" for="opCost">Maliyet (satır)</label><input class="inp" type="number" min="0" step="0.01" id="opCost" value="${esc(o.cost)}"></div>
+        <div class="field"><label class="flabel" for="opSale">Satış bedeli</label><input class="inp" type="number" min="0" step="0.01" id="opSale" value="${esc(o.sale_amount)}"></div></div>
+      <div class="row2">
+        <div class="field"><label class="flabel" for="opPb">Para birimi</label><select class="inp" id="opPb">${OP_PB.map(([k,l])=>`<option value="${k}" ${(o.currency||'TRY')===k?'selected':''}>${esc(l)}</option>`).join('')}</select></div>
+        <div class="field"><label class="flabel" for="opPg">Paket bedeli</label><select class="inp" id="opPg" data-sec="${esc(o.price_group_id||'')}" onchange="opPgYeniGoster()"></select></div></div>
+      <div id="opPgYeni" hidden>
+        <div class="row3">
+          <div class="field"><label class="flabel" for="opPgAd">Paket adı</label><input class="inp" id="opPgAd" placeholder="ör. Lansman baskı paketi"></div>
+          <div class="field"><label class="flabel" for="opPgM">Paket maliyeti</label><input class="inp" type="number" min="0" step="0.01" id="opPgM"></div>
+          <div class="field"><label class="flabel" for="opPgS">Paket satışı</label><input class="inp" type="number" min="0" step="0.01" id="opPgS"></div></div>
+        <p class="fhint" style="margin-top:-4px">Paket bedeli birden çok işlemi kapsayan TEK tutardır; raporda satırlara dağıtılmaz. Para birimi yukarıdaki seçimdir.</p></div>
+      <p class="fhint" id="opPgBilgi"></p>
+    </fieldset>
     <div class="field"><label class="flabel" for="opNote">Not</label><textarea class="inp" id="opNote">${esc(o.note)}</textarea></div>
     <div class="field"><span class="flabel">Dosyalar — montaj fotoğrafı, baskı provası, ölçü belgesi</span>
       ${ekAlan('op')}</div>
@@ -5474,7 +5513,23 @@ async function opForm(id,jobId){
       ${(id&&isAdmin())?`<button class="btn btn-danger btn-sm" style="margin-right:auto" onclick="opDel(${id})">Sil</button>`:''}
       <button class="btn btn-ghost btn-sm" onclick="modalVazgec()">Vazgeç</button>
       <button class="btn btn-primary btn-sm" onclick="opSave()">Kaydet</button></div>`);
+  opPgCiz();
 }
+/* S12: paket bedeli seçimi yalnız formdaki işin paketlerini gösterir. */
+function opPgCiz(){
+  const el=document.getElementById('opPg'); if(!el) return;
+  const jid=+gv('opJob'); const sec=el.dataset.sec||'';
+  const L=(ui._opPg||[]).filter(g=>g.job_id===jid);
+  el.innerHTML=`<option value="">— paket yok —</option>${L.map(g=>`<option value="${g.id}" ${String(sec)===String(g.id)?'selected':''}>${esc(g.label)}</option>`).join('')}${jid?'<option value="yeni">+ Yeni paket…</option>':''}`;
+  opPgYeniGoster();
+}
+function opPgYeniGoster(){
+  const y=document.getElementById('opPgYeni'); if(y) y.hidden=gv('opPg')!=='yeni';
+  const b=document.getElementById('opPgBilgi'); const g=(ui._opPg||[]).find(x=>String(x.id)===gv('opPg'));
+  const tl=v=>Number(v).toLocaleString('tr-TR',{minimumFractionDigits:2,maximumFractionDigits:2});
+  if(b) b.textContent=g?`Paket: ${[g.cost_amount!=null?'maliyet '+tl(g.cost_amount):'',g.sale_amount!=null?'satış '+tl(g.sale_amount):''].filter(Boolean).join(' · ')} ${g.currency}. Paket bedeli toplamda bir kez sayılır; bu satırın tutarları bilgi amaçlıdır.`:'';
+}
+
 /* S4.4: `opOncekiBul()` kaldirildi. Yalnizca istemci tarafi sysEntry'ye
    "onceki durum" saglamak icin vardi (C4 §16'daki sahte "undefined -> X"
    hatasinin duzeltmesi). Gecis artik tetikleyicide OLD/NEW'den okunuyor;
@@ -5486,11 +5541,29 @@ async function opSave(){
   const num=v=>v!==''&&v!=null?+v:null;
   const id=+gv('opid');
   const st=gv('opSt')||'planned';
+  const pb=gv('opPb')||'TRY';
+  let pg=gv('opPg');
+  if(pg==='yeni'){
+    const ad=(gv('opPgAd')||'').trim(), pm=num(gv('opPgM')), ps=num(gv('opPgS'));
+    if(!ad){ mpAlert('Yeni paket için kısa bir ad girin.','Paket bedeli'); return; }
+    if(pm==null&&ps==null){ mpAlert('Paket için maliyet ya da satış tutarı girin.','Paket bedeli'); return; }
+    modalBusy(true);
+    const g=await guard(()=>api('price_group_save',{job_id:jid,label:ad,cost_amount:pm,sale_amount:ps,currency:pb}),'Paket oluşturulamadı');
+    modalBusy(false);
+    if(g===null) return;
+    /* Paket oluştu; kayıt başarısız olursa yeniden denemede AYNI paket
+       kullanılır (ikinci paket açılmaz). */
+    ui._opPg=[...(ui._opPg||[]),g]; const el=document.getElementById('opPg'); if(el){ el.dataset.sec=String(g.id); opPgCiz(); }
+    pg=String(g.id);
+  }
   modalBusy(true);
   const r=await guard(()=>api('operation_save',{id,job_id:jid,operation_type:gv('opT'),
-    status:st,description:gv('opDesc')||null,quantity:num(gv('opQty')),dimensions:gv('opDim')||null,
+    status:st,description:gv('opDesc')||null,quantity:num(gv('opQty')),quantity_unit:gv('opBr')||'adet',
+    dimensions:gv('opDim')||null,visible_size:gv('opVis')||null,surface_count:num(gv('opYz')),
+    material:gv('opMat')||null,grammage_gsm:num(gv('opGr')),reprint:!!(document.getElementById('opRe')||{}).checked,
     supplier_org_id:+gv('opSup')||null,unit_id:+gv('opUnit')||null,location_text:gv('opLoc')||null,
-    planned_date:gv('opDate')||null,cost:num(gv('opCost')),note:gv('opNote')||null,
+    planned_date:gv('opDate')||null,cost:num(gv('opCost')),unit_cost:num(gv('opUc')),sale_amount:num(gv('opSale')),
+    currency:pb,price_group_id:pg?+pg:null,note:gv('opNote')||null,
     evidence_urls:ev}),'Kayıt kaydedilemedi');
   if(r===null){ modalBusy(false); return; }
   /* S6 §38: operasyon kaydi once yazilir, ekler sonra baglanir. Ek
@@ -5565,6 +5638,16 @@ async function opTopluForm(jobId){
 
     <div class="field"><label class="flabel" for="opbNote">Genel not (tüm satırlara)</label>
       <input class="inp" id="opbNote" placeholder="ör. Vinil germe, gece montajı"></div>
+    <div class="row2">
+      <div class="field"><label class="flabel" for="opbMat">Malzeme / cins (tüm satırlara, isteğe bağlı)</label><input class="inp" id="opbMat" placeholder="ör. Avrupa vinil"></div>
+      <div class="field"><label class="flabel" for="opbPb">Para birimi</label><select class="inp" id="opbPb">${OP_PB.map(([k,l])=>`<option value="${k}">${esc(l)}</option>`).join('')}</select></div></div>
+    <details class="opb-pk"><summary>Paket bedeli <span class="muted">— satırların ortak (tek) bedeli varsa</span></summary>
+      <label class="rp2-chk" style="margin:8px 0"><input type="checkbox" id="opbPkOn"> <span>Bu satırların bedeli tek bir paket tutarıdır</span></label>
+      <div class="row3">
+        <div class="field"><label class="flabel" for="opbPkAd">Paket adı</label><input class="inp" id="opbPkAd" placeholder="ör. Fuar baskı + montaj paketi"></div>
+        <div class="field"><label class="flabel" for="opbPkM">Paket maliyeti</label><input class="inp" type="number" min="0" step="0.01" id="opbPkM"></div>
+        <div class="field"><label class="flabel" for="opbPkS">Paket satışı</label><input class="inp" type="number" min="0" step="0.01" id="opbPkS"></div></div>
+      <p class="fhint">Paket tutarı bir kez saklanır ve raporlarda satırlara dağıtılmaz.</p></details>
     <div class="field"><span class="flabel">Ortak dosyalar — baskı provası, ölçü belgesi (tek dosya, tüm satırlara bağlanır)</span>
       ${ekAlan('opb')}</div>
     <div style="display:flex;gap:8px;justify-content:flex-end">
@@ -5574,7 +5657,7 @@ async function opTopluForm(jobId){
   opbPkCiz(); opbSatirCiz();
 }
 let _opbSay=0;
-function opbYeniSatir(t,unit){ return {k:'r'+(++_opbSay),operation_type:t||'baski',unit_id:unit||'',description:'',quantity:'',dimensions:'',location_text:'',cost:''}; }
+function opbYeniSatir(t,unit){ return {k:'r'+(++_opbSay),operation_type:t||'baski',unit_id:unit||'',description:'',quantity:'',quantity_unit:'adet',dimensions:'',location_text:'',cost:''}; }
 const opbBos=s=>!s.unit_id&&!String(s.description||'').trim()&&!String(s.location_text||'').trim()
   &&s.quantity===''&&!String(s.dimensions||'').trim()&&s.cost==='';
 const opbUnitAd=u=>u?`${u.name}${u.urun?' · '+u.urun:''}`:'';
@@ -5634,7 +5717,8 @@ function opbSatirCiz(){
       <select class="inp inp-sm" data-f="operation_type" aria-label="Satır ${ix+1} tür" onchange="opbOzet()">${OPB_TUR.concat(s.operation_type==='diger'?[['diger','Diğer']]:[]).map(t=>`<option value="${t[0]}" ${s.operation_type===t[0]?'selected':''}>${t[1]}</option>`).join('')}</select>
       <select class="inp inp-sm opb-u" data-f="unit_id" aria-label="Satır ${ix+1} pozisyon">${uOpt(s.unit_id)}</select>
       <input class="inp inp-sm opb-d" data-f="description" aria-label="Satır ${ix+1} açıklama" placeholder="Açıklama" value="${esc(s.description)}">
-      <input class="inp inp-sm" data-f="quantity" type="number" min="0.01" step="0.01" aria-label="Satır ${ix+1} adet" placeholder="Adet" value="${esc(s.quantity)}">
+      <span class="opb-qu"><input class="inp inp-sm" data-f="quantity" type="number" min="0.01" step="0.01" aria-label="Satır ${ix+1} miktar" placeholder="Miktar" value="${esc(s.quantity)}">
+        <select class="inp inp-sm" data-f="quantity_unit" aria-label="Satır ${ix+1} birim">${Object.entries(OP_BIRIM).map(([k,l])=>`<option value="${k}" ${(s.quantity_unit||'adet')===k?'selected':''}>${esc(l)}</option>`).join('')}</select></span>
       <input class="inp inp-sm" data-f="dimensions" aria-label="Satır ${ix+1} ölçü" placeholder="Ölçü" value="${esc(s.dimensions)}">
       <input class="inp inp-sm" data-f="location_text" aria-label="Satır ${ix+1} serbest yer" placeholder="Yer (serbest)" value="${esc(s.location_text)}">
       <input class="inp inp-sm" data-f="cost" type="number" min="0" step="0.01" aria-label="Satır ${ix+1} maliyet" placeholder="Maliyet ₺" value="${esc(s.cost)}">
@@ -5676,17 +5760,24 @@ async function opbKaydet(){
   if(ekTurEksik('opb')){ mpAlert('Eklenen her dosya için belge türünü seçin.','Dosya'); return; }
   const num=v=>v===''||v==null?null:+v;
   const ort={supplier_org_id:+gv('opbSup')||null, planned_date:gv('opbDate')||null,
-             status:gv('opbSt')||'planned', note:(gv('opbNote')||'').trim()||null};
+             status:gv('opbSt')||'planned', note:(gv('opbNote')||'').trim()||null,
+             material:(gv('opbMat')||'').trim()||null, currency:gv('opbPb')||'TRY'};
   const rows=ui._opb.satir.map(s=>({...ort, operation_type:s.operation_type, unit_id:+s.unit_id||null,
-    description:String(s.description).trim()||null, quantity:num(s.quantity),
+    description:String(s.description).trim()||null, quantity:num(s.quantity), quantity_unit:s.quantity_unit||'adet',
     dimensions:String(s.dimensions).trim()||null, location_text:String(s.location_text).trim()||null,
     cost:num(s.cost)}));
+  let paket=null;
+  if((document.getElementById('opbPkOn')||{}).checked){
+    paket={label:(gv('opbPkAd')||'').trim(),cost_amount:num(gv('opbPkM')),sale_amount:num(gv('opbPkS')),currency:ort.currency};
+    if(!paket.label){ mpAlert('Paket bedeli için kısa bir ad girin. Hiçbir kayıt oluşturulmadı.','Paket bedeli'); return; }
+    if(paket.cost_amount==null&&paket.sale_amount==null){ mpAlert('Paket için maliyet ya da satış tutarı girin. Hiçbir kayıt oluşturulmadı.','Paket bedeli'); return; }
+  }
   modalBusy(true,'Kaydediliyor…');
   /* Once dosyalar (varsa) depolamaya; sonra TEK islem: satirlar + baglantilar. */
   if(!await ekYukle('opb')){ modalBusy(false); mpAlert('Bazı dosyalar yüklenemedi. Hiçbir kayıt oluşturulmadı; tekrar deneyin.','Dosya'); return; }
   const docs=ekGovde('opb',[]);
   let r=null;
-  try{ r=await api('operations_batch',{job_id:jid,rows,docs}); }
+  try{ r=await api('operations_batch',{job_id:jid,rows,docs,package:paket}); }
   catch(err){
     await ekGeriAl('opb','Kaydedilemedi.');
     modalBusy(false);
@@ -5719,7 +5810,8 @@ const OP_COLS=[
   {key:'kurum',label:'Kurum',w:26,get:o=>(ui._opCust||{})[(((ui._opJobs||{})[o.job_id])||{}).customer_id]||''},
   {key:'operation_type',label:'Tür',w:10,get:o=>opTypeLbl(o.operation_type)},
   {key:'description',label:'Açıklama',w:32},
-  {key:'quantity',label:'Adet',w:8},
+  {key:'quantity',label:'Miktar',w:8},
+  {key:'quantity_unit',label:'Birim',w:8,get:o=>OP_BIRIM[o.quantity_unit]||''},
   {key:'dimensions',label:'Ölçü',w:14},
   {key:'yer',label:'Yer / Pozisyon',w:22,get:o=>((ui._opUnits||{})[o.unit_id]||{}).name||o.location_text||''},
   {key:'uygulayan',label:'Uygulayan',w:24,get:o=>(ui._opCust||{})[o.supplier_org_id]||''},
@@ -6473,6 +6565,7 @@ async function workspaceHome(c){
           <div class="card-h"><h3>Ajandam</h3>
             <div style="display:flex;gap:8px;align-items:center">
               <button class="btn-link ekle" onclick="keForm(0)" title="Yalnız sizin göreceğiniz bir etkinlik ekleyin">+ Kişisel</button>
+              <button class="btn-link" onclick="rpAc('plan')" title="Günlük ya da haftalık planı PDF olarak indirin">Plan PDF</button>
               ${ajandaAnahtar('liste')}
             </div></div>
           <div class="card-b pa-list">${tkvHtml}</div></section>
@@ -7442,7 +7535,10 @@ const RAPOR=[
     {key:'kaynak',label:'Kaynak',w:12},{key:'tel',label:'Telefon',w:15},{key:'mail',label:'E-posta',w:24}]}
 ];
 
-async function raporlar(c){
+/* S12: eski S5 çoklu Excel sayfası. Raporlar girişinde "Hızlı Excel
+   tabloları" altında ikincil olarak yaşar (iş takibi, aksiyon planı,
+   teklifler, aylık doluluk). Yeni biçimli raporlar assets/rapor.js'te. */
+async function raporTablolari(c){
   const [b,e]=haftaAraligi(0);
   c.innerHTML=`<div class="sec-head">
       <div><h3>Raporlar</h3><p class="sub">Uygulamadaki kayıtların seçtiğiniz dönem için anlık görüntüsü — önizleyin, Excel'e aktarın</p></div></div>
@@ -9062,7 +9158,8 @@ async function orgAc(id){
       <div style="display:flex;gap:8px">
         <button class="btn btn-primary btn-sm" onclick="qcAc({custId:${o.id}})">${ic('plus',15)} Güncelleme</button>
         <button class="btn btn-sm act act-work" onclick="jobForm(null,null,{custId:${o.id}})">${ic('plus',15)} Yeni İş</button>
-        <button class="btn btn-outline btn-sm" onclick="custForm(${o.id})">Düzenle</button></div></div>
+        <button class="btn btn-outline btn-sm" onclick="custForm(${o.id})">Düzenle</button>
+        <button class="btn btn-ghost btn-sm" onclick="rpAc('baski',{kurum:${o.id}})" title="Bu kurumun baskı/montaj dökümü">${ic('download',15)} Baskı/montaj dökümü</button></div></div>
 
     ${kimlik||o.relationship_evidence?`<div class="sec-card">
       <div class="sec-head" style="margin-bottom:8px"><h4 style="font-size:14px;margin:0">Kimlik</h4>

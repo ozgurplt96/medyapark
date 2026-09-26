@@ -440,6 +440,7 @@ async function listeler(c,o){
       <p class="sub">Statik yüzeyler kesin dönemle, LED yayınları eşzamanlı kampanya olarak yönetilir.</p></div>
     <div class="md-head-r">
       ${secili?mdEksenKontrol(st):''}
+      <button class="btn btn-ghost btn-sm" onclick="mdRaporAc()" title="Müsaitlik / çizelge raporu (PDF, Excel)">${ic('download',15)} Rapor</button>
       <button class="btn btn-ghost btn-sm" onclick="mdDisaAktar()">${ic('download',15)} Excel'e Aktar</button>
       ${isAdmin()?`<button class="btn btn-ghost btn-sm" onclick="bookImport()" title="Eski tablolardan ay bazlı kayıt aktarımı — kesin dönemli yerleşim oluşturmaz">${ic('upload',15)} Eski ay kaydı al</button>`:''}
     </div></div>
@@ -2082,6 +2083,12 @@ const MD_DISA_SUTUN=[
   {key:'ay',label:'Ay',w:9},{key:'durum',label:'Durum',w:10},{key:'kurum',label:'Kurum',w:28},{key:'is',label:'İş',w:28},
   {key:'donem',label:'Gerçek dönem',w:24},{key:'kesinlik',label:'Kesinlik',w:24},{key:'bosalma',label:'Boşalma (statik)',w:16},
   {key:'sure',label:'Kreatif süre',w:10},{key:'kaynak',label:'Kaynak ifade / şerit',w:22},{key:'not',label:'Not',w:28}];
+/* S12: Doluluk ekranından müsaitlik raporuna geçiş — seçili lokasyon ve
+   uygulanmış müsaitlik aralığı rapora taşınır; ekranın kendisi değişmez. */
+function mdRaporAc(){ const st=mdDurum(); const ms=mdMsAralik(st);
+  const p={}; if(st.site!=null) p.siteler=[+st.site]; if(st.urun) p.urun=String(st.urun);
+  if(ms){ p.bas=ms.bas; p.bit=ms.bit; p.cikti='tam'; }
+  rpAc('mecra',p); }
 async function mdDisaAktar(){
   const M=ui._M||await mdYukle(); const st=mdDurum();
   const y=st.yil||new Date().getFullYear();
