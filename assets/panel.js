@@ -632,16 +632,24 @@ function logYaz(act, body, q){
 /* ---- Veri katmanı köprüsü: eski api(action,body) -> Supabase ---- */
 const DELMAP={product_delete:'products',mecra_delete:'mecralar',alt_delete:'alt_mecralar',unit_delete:'units',customer_delete:'customers',contact_delete:'contacts',team_delete:'team',note_delete:'notes',quote_delete:'quotes',job_delete:'jobs',entry_delete:'entries',work_party_delete:'work_parties',operation_delete:'work_operations'};
 /* ---- Tema uyumlu diyaloglar (tarayıcı alert/confirm yerine) ---- */
+/* S13 — onay penceresi erişilebilirliği:
+   · başlık/ileti aria ile bağlı;
+   · YIKICI ya da veri kaybettiren onaylarda (danger / o.guvenli) odak
+     GÜVENLİ düğmededir — önceden Esc+Enter kaydedilmemiş formu silip
+     atabiliyordu;
+   · Enter artık odaktaki düğmeyi çalıştırır (her zaman "Tamam" değil);
+   · kapanınca odak açıldığı yere döner. */
 function mpDlg(o){ return new Promise(res=>{
   const eski=document.getElementById('mpDlgBg'); if(eski)eski.remove();
+  const onceki=document.activeElement;
   const bg=document.createElement('div'); bg.id='mpDlgBg'; bg.className='mpdlg-bg';
   const dg=!!o.danger;
-  bg.innerHTML=`<div class="mpdlg" role="dialog" aria-modal="true">
+  bg.innerHTML=`<div class="mpdlg" role="${o.tek?'alertdialog':'dialog'}" aria-modal="true" aria-labelledby="mpDlgT" aria-describedby="mpDlgM">
     <div class="mpdlg-ic ${dg?'dg':''}">${dg
       ?'<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 9v4m0 4h.01"/><path d="M10.3 3.6 1.9 18a2 2 0 0 0 1.7 3h16.8a2 2 0 0 0 1.7-3L13.7 3.6a2 2 0 0 0-3.4 0z"/></svg>'
       :'<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v5h1"/></svg>'}</div>
-    <div class="mpdlg-t">${esc(o.baslik||'Onay')}</div>
-    <div class="mpdlg-m">${esc(o.msg||'')}</div>
+    <div class="mpdlg-t" id="mpDlgT">${esc(o.baslik||'Onay')}</div>
+    <div class="mpdlg-m" id="mpDlgM">${esc(o.msg||'')}</div>
     <div class="mpdlg-b">
       ${o.tek?'':`<button class="btn btn-ghost" id="mpDlgNo">${esc(o.noText||'Vazgeç')}</button>`}
       <button class="btn ${dg?'btn-danger':'btn-primary'}" id="mpDlgOk">${esc(o.okText||'Tamam')}</button>
@@ -649,12 +657,15 @@ function mpDlg(o){ return new Promise(res=>{
   document.body.appendChild(bg);
   requestAnimationFrame(()=>bg.classList.add('on'));
   const kapat=v=>{ bg.classList.remove('on'); document.removeEventListener('keydown',tus);
-    setTimeout(()=>bg.remove(),140); res(v); };
-  const tus=e=>{ if(e.key==='Escape')kapat(!o.tek?false:true); if(e.key==='Enter')kapat(true); };
+    setTimeout(()=>bg.remove(),140);
+    if(onceki&&document.body.contains(onceki)){ try{ onceki.focus(); }catch(e){} }
+    res(v); };
+  const tus=e=>{ if(e.key==='Escape'){ e.preventDefault(); kapat(!o.tek?false:true); } };
   document.addEventListener('keydown',tus);
   bg.addEventListener('mousedown',e=>{ if(e.target===bg && !o.tek)kapat(false); });
   const no=bg.querySelector('#mpDlgNo'); if(no)no.onclick=()=>kapat(false);
-  const okB=bg.querySelector('#mpDlgOk'); okB.onclick=()=>kapat(true); okB.focus();
+  const okB=bg.querySelector('#mpDlgOk'); okB.onclick=()=>kapat(true);
+  ((no&&(dg||o.guvenli))?no:okB).focus();
 });}
 function mpAlert(msg,baslik){ return mpDlg({msg,baslik:baslik||'Bilgi',tek:true}); }
 /* Tek satirlik metin sorar. Tarayicinin prompt()'u KULLANILMAZ: panel
@@ -686,7 +697,7 @@ function mpPrompt(msg,baslik,varsayilan){ return new Promise(res=>{
 });}
 function mpConfirm(msg,baslik,opt){ opt=opt||{};
   const dg=opt.danger!==undefined?opt.danger:/sil|kald(ı|i)r/i.test(String(msg));
-  return mpDlg({msg,baslik:baslik||(dg?'Emin misiniz?':'Onay'),danger:dg,
+  return mpDlg({msg,baslik:baslik||(dg?'Emin misiniz?':'Onay'),danger:dg,guvenli:!!opt.guvenli,
     okText:opt.ok||(dg?'Evet, Sil':'Evet'),noText:opt.no||'Vazgeç'}); }
 
 /* Form kaydetmelerini saran ortak yardimci: hata olursa artik sessizce
@@ -694,8 +705,7 @@ function mpConfirm(msg,baslik,opt){ opt=opt||{};
 async function guard(fn, hataBasligi){
   try{ return await fn(); }
   catch(e){
-    const ham=(e&&(e.message||e.hint||e.details))||String(e);
-    const msg=/Failed to fetch|NetworkError|Load failed/i.test(ham)?hataMetni(e):ham;
+    const msg=hataMetni(e)||(e&&(e.hint||e.details))||String(e);
     console.error(hataBasligi||'Islem hatasi:', e);
     mpAlert(msg,(hataBasligi||'İşlem başarısız'));
     return null;
@@ -808,7 +818,7 @@ async function api(action, body){
        taşıyorsa güncellenir. Başka biri arada aynı alanı değiştirdiyse 0
        satır döner: sessizce EZİLMEZ, çakışma olarak bildirilir. */
     case 'row_update_cas':{
-      const tablo=({jobs:'jobs',documents:'documents'})[body.tablo]; if(!tablo) throw new Error('Geçersiz tablo.');
+      const tablo=({jobs:'jobs',documents:'documents',operation_price_groups:'operation_price_groups',customers:'customers'})[body.tablo]; if(!tablo) throw new Error('Geçersiz tablo.');
       let s=sb.from(tablo).update(body.patch).eq('id',body.id);
       Object.entries(body.eski||{}).forEach(([k,v])=>{ s=(v===null||v===undefined)?s.is(k,null):s.eq(k,v); });
       const {data,error}=await s.select('*'); if(error)throw error;
@@ -819,7 +829,7 @@ async function api(action, body){
         if(!deg.length) throw Object.assign(new Error('Bu kaydı değiştirme yetkiniz yok.'),{kod:'yetki'});
         throw Object.assign(new Error('cakisma'),{kod:'cakisma',alanlar:deg,guncel:g});
       }
-      logYaz(tablo==='jobs'?'job_save':'document_update',{id:body.id,...body.patch}); return ok(data[0]); }
+      logYaz(({jobs:'job_save',documents:'document_update',customers:'customer_save'})[tablo]||'operation_save',{id:body.id,...body.patch}); return ok(data[0]); }
     case 'job_create':{
       const {data,error}=await sb.rpc('job_create',{p_job:body.job,p_followers:body.followers||[]});
       if(error)throw error; logYaz('job_save',{id:data,...body.job}); return ok({id:data}); }
@@ -1415,12 +1425,15 @@ async function api(action, body){
       const {data,error}=await sel.order('is_primary',{ascending:false}).order('name');
       if(error)throw error; return ok(data); }
     case 'contact_save':{
-      const row={...body};
+      /* S13: `ana_kurum` yalnız "kurumun ana kişisi" düşürmesi içindir; satıra
+         yazılmaz (düzenlemede customer_id artık gönderilmez). */
+      const {ana_kurum,...row}=body;
+      const anaKurum=row.customer_id||ana_kurum;
       /* Tek primary kuralı DB'de partial unique index ile korunur; burada
          önce eskisini düşürüp yarış durumunu engelliyoruz. */
-      if(row.is_primary && row.customer_id){
+      if(row.is_primary && anaKurum){
         const {error:e0}=await sb.from('contacts').update({is_primary:false})
-          .eq('customer_id',row.customer_id).neq('id',row.id||0);
+          .eq('customer_id',anaKurum).neq('id',row.id||0);
         if(e0)throw e0; }
       const r=await saveRow('contacts',row); logYaz(act,body); return ok(r); }
     case 'org_detail':{
@@ -1582,12 +1595,12 @@ function showLogin(err){
       <div class="box ${err?'shake':''}">
         <div class="lg-hi">Tekrar hoş geldiniz</div>
         <p class="muted" style="margin:0 0 22px">Yönetim paneline giriş yapın</p>
-        <div class="field"><label class="flabel">E-posta</label>
+        <div class="field"><label class="flabel" for="lu">E-posta</label>
           <input class="inp" id="lu" type="email" placeholder="ornek@medyapark.com" autocomplete="username"></div>
-        <div class="field"><label class="flabel">Şifre</label>
+        <div class="field"><label class="flabel" for="lp">Şifre</label>
           <div class="lg-pw"><input class="inp" id="lp" type="password" placeholder="••••••••" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()">
-          <button type="button" class="lg-eye" onclick="const p=document.getElementById('lp');p.type=p.type==='password'?'text':'password';this.classList.toggle('on')" title="Şifreyi göster/gizle"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg></button></div></div>
-        ${err?`<div class="lg-err">${esc(err)}</div>`:''}
+          <button type="button" class="lg-eye" onclick="const p=document.getElementById('lp');p.type=p.type==='password'?'text':'password';this.classList.toggle('on')" title="Şifreyi göster/gizle" aria-label="Şifreyi göster/gizle"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg></button></div></div>
+        ${err?`<div class="lg-err" role="alert">${esc(err)}</div>`:''}
         <button class="btn btn-primary lg-btn" id="lgBtn" onclick="doLogin()">Giriş Yap</button>
       </div>
     </div></div>`;
@@ -1596,7 +1609,7 @@ function showLogin(err){
 async function doLogin(){
   const b=document.getElementById('lgBtn'); if(b){b.disabled=true;b.textContent='Giriş yapılıyor…';}
   const {error}=await sb.auth.signInWithPassword({email:gv('lu'),password:gv('lp')});
-  if(error){ showLogin(error.message); return; }
+  if(error){ showLogin(girisHataMetni(error)); return; }
   ui._email=gv('lu');
   /* Kimlik önce çözülür: activity_log artık aktif iç kullanıcı ister,
      bu yüzden log kaydı kimlik doğrulandıktan sonra yazılır. */
@@ -1604,7 +1617,68 @@ async function doLogin(){
   sb.from('activity_log').insert({kullanici:(ui._me&&ui._me.name)||ui._email,islem:'giriş yaptı',bolum:'Oturum',detay:''}).then(()=>{},()=>{});
   try{ ui._settings=await api('settings_get'); }catch(e){ ui._settings={}; }
   showApp(); }
-async function logout(){ await sb.auth.signOut(); ui._me=null; ui._role=null; showLogin(); }
+async function logout(){ ui._cikiyor=true; await sb.auth.signOut(); ui._me=null; ui._role=null; ui._cikiyor=false; showLogin(); }
+
+/* ---- S13: oturum ve yetki kaybı ----
+   Önceden oturum başka bir sekmede kapatılınca, jeton yenilenemeyince ya da
+   hesap pasife alınınca açık panel ANONİM çalışmaya devam ediyordu: RLS boş
+   liste döndürdüğü için ekranlar "Kayıt yok" gösteriyor, veri silinmiş gibi
+   görünüyordu. Artık bu durum yakalanır ve üstte bir giriş penceresi açılır.
+   Sayfa DOM'u korunur (açık form kaybolmaz); aynı kullanıcı yeniden girince
+   çalışma kaldığı yerden sürer. Farklı kullanıcı girerse sayfa yenilenir. */
+let _oturumAcik=false, _kdSon=0;
+function oturumKorumaKur(){
+  if(window._oturumKorumasi) return; window._oturumKorumasi=true;
+  sb.auth.onAuthStateChange((ev,session)=>{
+    if(!ui._me||ui._cikiyor) return;
+    if(ev==='SIGNED_OUT'||(!session&&ev!=='INITIAL_SESSION'))
+      oturumBitti('Oturumunuz sona erdi. Başka bir sekmede çıkış yapılmış ya da oturum süresi dolmuş olabilir.');
+    else if(session&&ui._me.auth_user_id&&session.user&&session.user.id!==ui._me.auth_user_id) location.reload();
+  });
+  document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible') kimlikDogrula(); });
+  window.addEventListener('focus',()=>kimlikDogrula());
+}
+async function kimlikDogrula(hemen){
+  if(!ui._me||_oturumAcik||ui._cikiyor) return;
+  const t=Date.now(); if(!hemen&&t-_kdSon<20000) return; _kdSon=t;
+  let s=null; try{ s=(await sb.auth.getSession()).data.session; }catch(e){ return; }
+  if(!s){ oturumBitti('Oturumunuz sona erdi. Devam etmek için yeniden giriş yapın.'); return; }
+  let me; try{ me=await api('me'); }catch(e){ return; }      /* ağ hatası: karar verilmez */
+  if(!me||me.active===false) oturumBitti('Bu hesabın panel erişimi artık etkin değil. Yöneticinizle iletişime geçin.',true);
+}
+function oturumBitti(msg,kalici){
+  if(_oturumAcik) return; _oturumAcik=true;
+  const bg=document.createElement('div'); bg.id='oturumBg'; bg.className='mpdlg-bg on';
+  bg.innerHTML=`<div class="mpdlg" role="alertdialog" aria-modal="true" aria-labelledby="otT" aria-describedby="otM">
+    <div class="mpdlg-t" id="otT">${kalici?'Erişim kapandı':'Oturum sona erdi'}</div>
+    <div class="mpdlg-m" id="otM">${esc(msg)}${kalici?'':' Açık formunuz korunuyor; aynı hesapla giriş yapınca kaldığınız yerden devam edebilirsiniz.'}</div>
+    ${kalici?'':`<div class="field"><label class="flabel" for="otE">E-posta</label><input class="inp" id="otE" type="email" autocomplete="username" value="${esc(ui._email||'')}"></div>
+    <div class="field"><label class="flabel" for="otP">Şifre</label><input class="inp" id="otP" type="password" autocomplete="current-password"></div>
+    <div class="lg-err" id="otH" role="alert" hidden></div>`}
+    <div class="mpdlg-b">${kalici?'<button class="btn btn-primary" onclick="location.reload()">Giriş ekranına dön</button>'
+      :'<button class="btn btn-ghost" onclick="location.reload()">Sayfayı yenile</button><button class="btn btn-primary" id="otB" onclick="oturumYenidenGir()">Giriş yap</button>'}</div></div>`;
+  document.body.appendChild(bg);
+  const p=document.getElementById('otP'); if(p){ p.addEventListener('keydown',e=>{ if(e.key==='Enter') oturumYenidenGir(); }); p.focus(); }
+  else bg.querySelector('button').focus();
+}
+async function oturumYenidenGir(){
+  const b=document.getElementById('otB'); if(b&&b.disabled) return; if(b){ b.disabled=true; b.textContent='Giriş yapılıyor…'; }
+  const eskiId=ui._me&&ui._me.auth_user_id;
+  const {data,error}=await sb.auth.signInWithPassword({email:gv('otE'),password:gv('otP')});
+  const h=document.getElementById('otH');
+  if(error){ if(b){ b.disabled=false; b.textContent='Giriş yap'; } if(h){ h.hidden=false; h.textContent=girisHataMetni(error); } return; }
+  if(data.user&&eskiId&&data.user.id!==eskiId){ location.reload(); return; }
+  const me=await api('me').catch(()=>null);
+  if(!me||me.active===false){ location.reload(); return; }
+  ui._me=me; _oturumAcik=false; const bg=document.getElementById('oturumBg'); if(bg) bg.remove();
+  toast('Yeniden giriş yapıldı. Kaldığınız yerden devam edebilirsiniz.');
+}
+function girisHataMetni(e){ const m=String((e&&e.message)||e||'');
+  if(/Invalid login credentials/i.test(m)) return 'E-posta ya da şifre hatalı.';
+  if(/Email not confirmed/i.test(m)) return 'E-posta adresi doğrulanmamış.';
+  if(/Failed to fetch|NetworkError|Load failed/i.test(m)) return 'Sunucuya ulaşılamadı. Bağlantınızı kontrol edin.';
+  if(/rate limit|too many/i.test(m)) return 'Çok fazla deneme yapıldı. Bir süre sonra tekrar deneyin.';
+  return m; }
 
 const NAVG=[
  ['Genel','dashboard',[
@@ -1695,6 +1769,7 @@ function userChip(){
     <div class="uc-b"><b>${esc(ad)}</b><span>${esc(rol)}</span></div></button>`;
 }
 function showApp(){
+  oturumKorumaKur();
   const st=ui._settings||{};
   const logo = st.logoImage
     ? `<img src="${esc(st.logoImage)}" alt="logo">`
@@ -1727,7 +1802,7 @@ function showApp(){
                  child'idir; Work Detail'den acildiginda Is on-secilidir. */''}
             <button class="btn btn-sm act act-ops" onclick="opForm(0)" title="Baskı veya montaj kaydı ekle">${ic('plus',15)}<span class="act-l">Baskı/Montaj</span></button>
           </div>
-          <a class="btn btn-outline btn-sm" href="index.html" target="_blank">${ic('ext',15)} Siteyi Aç</a>
+          <a class="btn btn-outline btn-sm tb-site" href="index.html" target="_blank" aria-label="Siteyi aç (yeni sekmede)">${ic('ext',15)} <span class="tb-site-l">Siteyi Aç</span></a>
           ${userChip()}
         </div>
       </header>
@@ -1917,16 +1992,29 @@ function canliArama(id,uygula,gecikme){
   },gecikme||200);
 }
 
+/* S13 — ekran yarışı. Yavaş bağlantıda kullanıcı bir ekrandan hızla
+   diğerine geçince, önce istenen ekranın geç gelen verisi yeni ekranın
+   ÜSTÜNE çiziliyordu (başlık "İşler", içerik Panelim; ayrıntı ekranında
+   tarayıcı geçmişine yanlış girdi). Her gezinme bir ekran numarası alır:
+   ayrıntı ekranları (iş/kurum/kişi) veri geldiğinde numarası güncel
+   değilse hiçbir şey çizmez ve geçmişe yazmaz; bölüm ekranları kendi iç
+   kaplarına çizer, yeni ekran o kabı sayfadan ayırır. */
+let _ekranNo=0;
+const ekranBasla=()=>++_ekranNo;
 async function renderSection(){
-  const c=document.getElementById('content'); c.innerHTML='<p class="muted">Yükleniyor…</p>';
+  ekranBasla();
+  const kok=document.getElementById('content');
+  const c=document.createElement('div'); c.className='ekran';
+  c.innerHTML='<p class="muted">Yükleniyor…</p>';
+  kok.replaceChildren(c);
   const F={dashboard,'is-takibi':isTakibi,urunler,mecralar,listeler,musteriler,kurumlar,teklifler,ekip,
            sayfalar,notlar,anasayfa:anasayfaBolum,tedarikciler,raporlar,harita,ayarlar,talepler,
            ikonlar,aboneler,operasyon,muhasebe,'workspace-home':workspaceHome,'ws-mecralar':wsMecralarHub};
   try{
     const fn=F[ui.section]; if(!fn)return;
     await fn(c);
-    collapsify(c,ui.section);
-  }catch(e){ c.innerHTML='<div class="banner">Hata: '+esc(e.message||e)+'</div>'; }
+    if(c.isConnected) collapsify(c,ui.section);
+  }catch(e){ if(c.isConnected) c.innerHTML='<div class="banner">Hata: '+esc(e.message||e)+'</div>'; }
 }
 
 /* modal — 07 §19: role=dialog, Escape ile kapanır, odak yönetimi */
@@ -1940,12 +2028,42 @@ function modal(html){
   const b=m.querySelector('h3');
   if(b){ if(!b.id) b.id='mdlTitle'; m.setAttribute('aria-labelledby',b.id); }
   else m.removeAttribute('aria-labelledby');
-  _modalOnceki=document.activeElement;
+  if(!bg.classList.contains('open')) _modalOnceki=document.activeElement;
   bg.classList.add('open');
+  document.body.classList.add('mdl-acik');     /* arkadaki sayfa kaymaz */
   /* İlk anlamlı alana odaklan; yoksa diyaloğun kendisine. */
   const ilk=m.querySelector('input:not([type=hidden]):not([disabled]),textarea,select,button');
-  setTimeout(()=>{ (ilk||m).focus(); },30);
+  setTimeout(()=>{ (ilk||m).focus(); _modalIlk=formDegerleri(m); },30);
 }
+/* S13 — "kirli" = kullanıcı GERÇEKTEN bir alana dokundu VE değerler açılıştaki
+   hâlden farklı. Yazıp geri silinen form artık gereksiz uyarı vermez. */
+let _modalIlk='';
+function formDegerleri(kok){
+  if(!kok) return '';
+  return [...kok.querySelectorAll('input,select,textarea')].filter(e=>!e.closest('[data-kirletmez]')&&e.type!=='hidden'||e.dataset.izle!==undefined)
+    .map(e=>e.type==='checkbox'||e.type==='radio'?(e.checked?'1':'0'):e.type==='file'?String(e.files?e.files.length:0):String(e.value)).join('␟')
+    +'|'+(typeof EK==='object'?Object.values(EK).map(x=>x?((x.items||[]).length+'.'+(x.kaldir?x.kaldir.size:0)):0).join(','):'');
+}
+function modalGercektenKirli(){
+  if(!_modalKirli) return false;
+  const m=document.getElementById('modal');
+  return formDegerleri(m)!==_modalIlk;
+}
+/* Açık diyalogda Tab/Shift+Tab odağı diyalog içinde tutar (arka plandaki
+   düğmelere kaçmaz). Üstteki diyalog: oturum > onay > form. */
+document.addEventListener('keydown',e=>{
+  if(e.key!=='Tab') return;
+  const kok=document.getElementById('oturumBg')||document.getElementById('mpDlgBg')
+    ||(modalAcikMi()?document.getElementById('modal'):null);
+  if(!kok) return;
+  const L=[...kok.querySelectorAll('a[href],button:not([disabled]),input:not([disabled]):not([type=hidden]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])')]
+    .filter(x=>x.offsetParent!==null||x===document.activeElement);
+  if(!L.length) return;
+  const ilk=L[0], son=L[L.length-1], a=document.activeElement;
+  if(!kok.contains(a)){ e.preventDefault(); ilk.focus(); return; }
+  if(e.shiftKey&&a===ilk){ e.preventDefault(); son.focus(); }
+  else if(!e.shiftKey&&a===son){ e.preventDefault(); ilk.focus(); }
+},true);
 /* S11 §5 — form taslağı koruması. Formdaki alan değişikliği Kaydet'e kadar
    TASLAKTIR. Kullanıcının GERÇEK girişi (isTrusted) diyaloğu "kirli" yapar;
    programın doldurduğu alanlar yapmaz. Esc, arka plana tıklama, Vazgeç /
@@ -1960,14 +2078,15 @@ let _modalKirli=false;
 },true));
 function modalAcikMi(){ const bg=document.getElementById('modalBg'); return !!(bg&&bg.classList.contains('open')); }
 async function modalVazgec(){
-  if(_modalKirli&&!(await mpConfirm('Kaydedilmemiş değişiklikler var. Kaydetmeden kapatılsın mı?','Değişiklikler kaydedilmedi',
-      {danger:false,ok:'Kaydetmeden kapat',no:'Düzenlemeye dön'}))) return false;
+  if(modalGercektenKirli()&&!(await mpConfirm('Kaydedilmemiş değişiklikler var. Kaydetmeden kapatılsın mı?','Değişiklikler kaydedilmedi',
+      {danger:false,guvenli:true,ok:'Kaydetmeden kapat',no:'Düzenlemeye dön'}))) return false;
   closeModal(); return true;
 }
-window.addEventListener('beforeunload',e=>{ if((_modalKirli&&modalAcikMi())||ui._dirty){ e.preventDefault(); e.returnValue=''; } });
+window.addEventListener('beforeunload',e=>{ if((modalAcikMi()&&modalGercektenKirli())||ui._dirty){ e.preventDefault(); e.returnValue=''; } });
 function closeModal(){
-  _modalKirli=false;
+  _modalKirli=false; _modalIlk='';
   document.getElementById('modalBg').classList.remove('open');
+  document.body.classList.remove('mdl-acik');
   /* S6 §17-§18: formdan cikiliyorsa yuklenmis ama kaydedilmemis dosyalar
      depoda sahipsiz kalmaz. */
   if(typeof ekBirak==='function') Object.keys(EK).forEach(ekBirak);
@@ -2825,10 +2944,13 @@ function isPano(box,D,f){
    Aynı `jobs` satırları; ikinci bir Work modeli değil. Sıralama tıklanan
    başlıkla değişir, oturumda korunur. */
 function isListeSira(){ try{ return JSON.parse(sessionStorage.getItem('mp_is_sira')||'null')||{k:'akt',d:-1}; }catch(e){ return {k:'akt',d:-1}; } }
-function isListeSiraSet(k){
+async function isListeSiraSet(k){
   const s=isListeSira();
+  const klavye=document.activeElement&&document.activeElement.classList.contains('th-srt');
   isListeYaz(s.k===k?{k,d:-s.d}:{k,d:k==='title'||k==='org'?1:-1});
-  renderSection();
+  await renderSection();
+  /* S13: yeniden çizimden sonra klavye odağı aynı sütun düğmesine döner. */
+  if(klavye){ const b=document.querySelector(`button.th-srt[data-srt="${k}"]`); if(b) b.focus(); }
 }
 function isListeYaz(s){ try{ sessionStorage.setItem('mp_is_sira',JSON.stringify(s)); }catch(e){} }
 
@@ -2865,8 +2987,11 @@ function isListeRows(D,f){
 function isListe(box,D,f){
   const rows=isListeRows(D,f);
   const s=isListeSira();
+  /* S13: sıralama klavyeyle de yapılabilir (başlıktaki gerçek düğme) ve
+     ekran okuyucuya yönü söylenir (aria-sort). */
   const th=(k,l,w)=>`<th class="srt${s.k===k?' on':''}" ${w?`style="width:${w}"`:''}
-    onclick="isListeSiraSet('${k}')" title="Sırala">${esc(l)}<i>${s.k===k?(s.d>0?'▲':'▼'):''}</i></th>`;
+    aria-sort="${s.k===k?(s.d>0?'ascending':'descending'):'none'}"><button type="button" class="th-srt" data-srt="${k}"
+    onclick="isListeSiraSet('${k}')" title="${esc(l)} sütununa göre sırala">${esc(l)}<i aria-hidden="true">${s.k===k?(s.d>0?'▲':'▼'):''}</i></button></th>`;
   const body=rows.map(r=>{
     const j=r.j, ls=j.lifecycle_status||'acik';
     const nx=r.nx, gec=nx&&nx.due_at&&gecikti(nx.due_at);
@@ -3247,7 +3372,7 @@ function qcAc(a,b){
     ${kilitliKisi?`<input type="hidden" id="qcKisi" value="${kilitliKisi}">`:''}
     ${baglam}
     <div class="field" style="margin-bottom:10px">
-      <textarea class="inp" id="qcBody" rows="3"
+      <textarea class="inp" id="qcBody" rows="3" aria-label="Güncelleme metni"
         placeholder="Ne oldu? ör. Müşteri M1'i onayladı, stadyumu almadı."
         onkeydown="qcTus(event)">${duz?esc(duz.body):''}</textarea></div>
     <div class="field" style="margin-bottom:10px">${ekAlan('qc')}</div>
@@ -3594,6 +3719,7 @@ async function jobDelete(id){ if(await mpConfirm('Bu iş kaydı silinsin mi? Ba�
    router DEGIL - yalniz bu cizimden sonra hangi bolumun/kaydin one
    cikarilacagini soyler ve bir kez tuketilir. */
 async function workAc(id,odak){
+  const ekran=ekranBasla();
   if(odak) ui._workOdak=odak;
   /* Kaydedilmemiş aşama taslağı yalnız AYNI işte ve kullanıcı ayrılmayı
      onaylamadıysa korunur (dirtyGuard onaylanınca ui._dirty düşer). */
@@ -3601,7 +3727,7 @@ async function workAc(id,odak){
   const veri=await guard(()=>Promise.all([api('work_detail&id='+id),api('team_list'),
     api('customers_list'),api('contacts_list'),
     api('work_followers_all&job_id='+id).catch(()=>[]), sozUnitYukle()]),'İş açılamadı');
-  if(!veri)return;
+  if(!veri||ekran!==_ekranNo)return;           /* bu arada başka ekrana geçildi */
   const [d,tm,cu,ct,fol]=veri; ui._team=tm||[]; ui._cust=cu||[]; ui._contacts=ct||[];
   const benim=(ui._me&&ui._me.id)||0;
   const folBu=(fol||[]).filter(r=>String(r.job_id)===String(id));
@@ -3866,8 +3992,70 @@ function workOpsCiz(){
         ${!o.unit_id&&o.location_text?' · '+esc(o.location_text):''}
         ${o.supplier_org_id&&ui._opCust[o.supplier_org_id]?' · '+esc(orgKisa(ui._opCust[o.supplier_org_id],34)):''}
         · <span class="badge-st st-${esc(o.status)}">${esc(opStatLbl(o.status))}</span>
-        ${(o.document_links||[]).length?` · <span title="Ek dosya">📎 ${(o.document_links||[]).length}</span>`:''}</div>
-    </div>`).join('');
+        ${(o.document_links||[]).length?` · <span title="Ek dosya">📎 ${(o.document_links||[]).length}</span>`:''}
+        ${o.price_group_id?' · <span class="pill">paket</span>':''}</div>
+    </div>`).join('')+'<div id="wPaketler"></div>';
+  if(ops.some(o=>o.price_group_id)) paketOzetCiz(jobId);
+}
+/* ---- S13: paket bedeli görünür ve düzenlenebilir ----
+   S12'de paket yalnız oluşturulabiliyordu; yanlış tutarı düzeltmek için
+   yeni paket açmak gerekiyordu. Paket bir işin birden çok işlemini kapsayan
+   TEK tutardır; düzenleme yalnız paket satırını değiştirir (işlem satırları
+   ve onların kendi tutarları aynen kalır). */
+const tlTR=(v,pb)=>v==null||v===''?'—':Number(v).toLocaleString('tr-TR',{minimumFractionDigits:2,maximumFractionDigits:2})+' '+(pb||'');
+async function paketOzetCiz(jobId){
+  const box=document.getElementById('wPaketler'); if(!box) return;
+  let G; try{ G=await api('price_groups_list&job_id='+jobId); }catch(e){ box.innerHTML='<p class="fhint">Paket bilgisi okunamadı.</p>'; return; }
+  const ops=ui._workOps||[];
+  box.innerHTML=(G||[]).map(g=>{ const kap=ops.filter(o=>o.price_group_id===g.id);
+    return `<div class="w-paket">
+      <div><b>Paket bedeli — ${esc(g.label)}</b>
+        <span class="w-paket-t">${g.cost_amount!=null?'maliyet '+esc(tlTR(g.cost_amount,g.currency)):''}${g.cost_amount!=null&&g.sale_amount!=null?' · ':''}${g.sale_amount!=null?'satış '+esc(tlTR(g.sale_amount,g.currency)):''}</span>
+        <span class="fhint">${kap.length} işlemi kapsar; raporlarda bir kez sayılır.</span></div>
+      <button type="button" class="btn btn-outline btn-sm" onclick="paketDuzenle(${g.id})">Paket bedelini düzenle</button></div>`; }).join('');
+}
+async function paketDuzenle(id){
+  if(modalAcikMi()&&!(await modalVazgec())) return;      /* açık form varsa önce sorar */
+  const veri=await guard(()=>Promise.all([sb.from('operation_price_groups').select('*').eq('id',id).single(),
+    sb.from('work_operations').select('id,operation_type,description,cost,sale_amount,currency,status').eq('price_group_id',id).order('id')]),'Paket açılamadı');
+  if(!veri) return;
+  const [{data:g,error:e1},{data:ops,error:e2}]=veri;
+  if(e1||e2||!g){ mpAlert('Paket bulunamadı ya da görme yetkiniz yok.','Paket bedeli'); return; }
+  ui._paketIlk={label:g.label,cost_amount:g.cost_amount,sale_amount:g.sale_amount,currency:g.currency,note:g.note};
+  ui._paketIs=g.job_id;
+  modal(`<h3 style="margin:0 0 4px">Paket bedelini düzenle</h3>
+    <p class="muted" style="font-size:13px;margin:0 0 12px">Paket, aşağıdaki işlemlerin <b>ortak tek tutarıdır</b>. Değişiklik yalnız paket tutarını etkiler; işlemlerin kendi satır tutarları değişmez. Raporda paket bir kez sayılır.</p>
+    <input type="hidden" id="pkId" value="${g.id}">
+    <div class="field"><label class="flabel" for="pkAd">Paket adı <span class="zor">*</span></label><input class="inp" id="pkAd" value="${esc(g.label)}" maxlength="120"></div>
+    <div class="row3">
+      <div class="field"><label class="flabel" for="pkM">Paket maliyeti</label><input class="inp" type="number" min="0" step="0.01" id="pkM" value="${esc(g.cost_amount)}"></div>
+      <div class="field"><label class="flabel" for="pkS">Paket satışı</label><input class="inp" type="number" min="0" step="0.01" id="pkS" value="${esc(g.sale_amount)}"></div>
+      <div class="field"><label class="flabel" for="pkPb">Para birimi</label><select class="inp" id="pkPb">${OP_PB.map(([k,l])=>`<option value="${k}" ${g.currency===k?'selected':''}>${esc(l)}</option>`).join('')}</select></div></div>
+    <div class="field"><label class="flabel" for="pkNot">Not <span class="ops">isteğe bağlı · iç bilgi</span></label><textarea class="inp" id="pkNot" rows="2">${esc(g.note)}</textarea></div>
+    <div class="fhint" id="pkHata" role="alert" hidden></div>
+    <div class="tc-h" style="margin-top:6px">Etkilenen işlemler <span class="chip">${(ops||[]).length}</span></div>
+    <div class="pk-ops">${(ops||[]).map(o=>`<div class="pk-op"><span class="pill">${esc(opTypeLbl(o.operation_type))}</span> ${esc(o.description||'—')}
+      <span class="muted">${o.cost!=null?' · satır maliyeti '+esc(tlTR(o.cost,o.currency))+' (bilgi amaçlı)':''} · ${esc(opStatLbl(o.status))}</span></div>`).join('')||'<p class="fhint">Bu pakete bağlı işlem yok.</p>'}</div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+      <button class="btn btn-ghost btn-sm" onclick="modalVazgec()">Vazgeç</button>
+      <button class="btn btn-primary btn-sm" id="pkKaydet" onclick="paketKaydet()">Kaydet</button></div>`);
+}
+async function paketKaydet(){
+  const b=document.getElementById('pkKaydet'); if(b&&b.disabled) return;
+  const h=document.getElementById('pkHata'); const hata=t=>{ if(h){ h.hidden=!t; h.textContent=t||''; } };
+  const num=v=>v===''||v==null?null:+v;
+  const yeni={label:(gv('pkAd')||'').trim(),cost_amount:num(gv('pkM')),sale_amount:num(gv('pkS')),currency:gv('pkPb')||'TRY',note:(gv('pkNot')||'').trim()||null};
+  if(!yeni.label){ hata('Paket adı boş olamaz.'); document.getElementById('pkAd').focus(); return; }
+  if(yeni.cost_amount==null&&yeni.sale_amount==null){ hata('Maliyet ya da satış tutarından en az biri girilmeli.'); document.getElementById('pkM').focus(); return; }
+  if([yeni.cost_amount,yeni.sale_amount].some(v=>v!=null&&!(v>=0))){ hata('Tutar negatif olamaz.'); return; }
+  hata('');
+  const f=formFark(ui._paketIlk||{},{id:+gv('pkId'),...yeni});
+  if(f.bos){ closeModal(); toast('Değişiklik yok — kaydedilecek bir şey olmadı.'); return; }
+  modalBusy(true);
+  try{ await api('row_update_cas',{tablo:'operation_price_groups',id:+gv('pkId'),patch:{...f.patch,updated_at:new Date().toISOString()},eski:f.eski}); }
+  catch(e){ modalBusy(false); if(!casHata(e)) hata(hataMetni(e)); return; }
+  modalBusy(false); closeModal(); toast('Paket bedeli güncellendi.');
+  if(ui._paketIs) workAc(ui._paketIs,{bolum:'op'});
 }
 /* ============ SOZLESMELER (S7) =========================================
    Sozlesme = ticari anlasma (baslik + 1..N kalem). Dosya DEGILDIR; dosyalar
@@ -4571,9 +4759,26 @@ function bdCiz(){
   if(s.bagla) bdBaglaCiz();
   if(!dis&&(resim||pdf)) belgeImzali(d.storage_path).then(url=>{
     const img=document.getElementById('bdImg'), fr=document.getElementById('bdPdf');
-    if(img) img.src=url; if(fr) fr.src=url;
+    if(img) img.src=url; if(fr){ iframeOdakKoru(fr); fr.src=url; }
   }).catch(()=>{ const o=document.querySelector('.bd-onz');
     if(o){ o.classList.add('bos'); o.innerHTML='<span>Dosya açılamadı — depoda bulunamadı ya da erişim reddedildi.</span>'; } });
+}
+/* S13: tarayıcının PDF görüntüleyicisi yüklendiği anda odağı kendine alır.
+   Klavye kullanıcısı istemeden önizlemenin içine düşüyor, Esc diyaloğu
+   kapatmıyor, açık onay penceresinin odağı kayboluyordu. Yüklemeden
+   hemen sonraki kısa pencerede odak önizlemeye kaydıysa, kullanıcının
+   son odaklandığı öğeye geri verilir. Önizlemeye tıklamak yine çalışır. */
+let _sonOdak=null;
+document.addEventListener('focusin',e=>{ if(e.target&&e.target.tagName!=='IFRAME') _sonOdak=e.target; });
+function iframeOdakKoru(fr){
+  let bitis=0;
+  const geri=()=>{ if(!bitis||Date.now()>bitis||document.activeElement!==fr) return;
+    const h=(_sonOdak&&document.body.contains(_sonOdak))?_sonOdak:document.getElementById('modal');
+    try{ h&&h.focus(); }catch(e){} };
+  const kontrol=()=>setTimeout(geri,0);
+  fr.addEventListener('load',()=>{ bitis=Date.now()+1500; kontrol(); },{once:true});
+  window.addEventListener('blur',kontrol);
+  setTimeout(()=>window.removeEventListener('blur',kontrol),20000);
 }
 async function bdYenile(){ if(!ui._bd) return; const id=ui._bd.d.id;
   const [d,h]=await Promise.all([api('document_detail&id='+id),api('document_history&id='+id).catch(()=>[])]);
@@ -5113,10 +5318,23 @@ function formFark(ilk,yeni){
 const ALAN_AD={title:'Başlık',status:'Aşama',customer_id:'Kurum',primary_contact_id:'İlgili kişi',is_urgent:'Acil',
   note:'Not',mecra_id:'Mecra',supplier_id:'Tedarikçi',assignee_id:'İş sahibi',start_day:'Başlangıç',end_day:'Bitiş',
   accounting_status:'Muhasebe durumu',accounting_amount:'Tutar',accounting_note:'Muhasebe notu',accounting_sent_at:'Gönderim tarihi',
-  accounting_processed_at:'İşlenme tarihi',doc_type:'Kategori',lifecycle_status:'Durum'};
+  accounting_processed_at:'İşlenme tarihi',doc_type:'Kategori',lifecycle_status:'Durum',
+  label:'Paket adı',cost_amount:'Paket maliyeti',sale_amount:'Paket satışı',currency:'Para birimi'};
 /* Ağ hatası kullanıcıya teknik metinle gösterilmez. */
-function hataMetni(e){ const m=String((e&&e.message)||e||'');
-  if(/Failed to fetch|NetworkError|network|Load failed/i.test(m)) return 'Bağlantı kurulamadı. Değişiklikler kaydedilmedi ve formda duruyor; bağlantıyı kontrol edip tekrar deneyin.';
+/* S13: kullanıcıya ham veritabanı iletisi gösterilmez. Bilinen kodlar
+   anlaşılır Türkçe metne çevrilir; bilinmeyen ileti aynen kalır (sunucunun
+   kendi Türkçe doğrulama iletileri, ör. "Bitiş tarihi başlangıçtan önce
+   olamaz.", bozulmasın). */
+function hataMetni(e){ const m=String((e&&e.message)||e||''); const kod=String((e&&e.code)||'');
+  /* S13: ağ hatasında sunucunun isteği işleyip işlemediği istemciden
+     BİLİNEMEZ (istek ulaşıp yanıt kaybolmuş olabilir). "Kaydedilmedi" diye
+     kesin konuşmak kullanıcıyı tekrar denemeye ve mükerrer kayda iter. */
+  if(/Failed to fetch|NetworkError|network|Load failed/i.test(m)) return 'Sunucudan yanıt alınamadı. İşlemin kaydedilip kaydedilmediği kesin değil; girdiğiniz bilgiler formda duruyor. Tekrar denemeden önce ilgili listeyi yenileyip kaydın oluşup oluşmadığını kontrol edin.';
+  if(kod==='23P01'||/exclusion constraint/i.test(m)) return 'Seçilen tarihlerde bu yüzey az önce başka bir kayıtla doldu. Değişiklik kaydedilmedi; takvimi yenileyip başka bir tarih seçin.';
+  if(kod==='PGRST301'||/JWT expired|invalid JWT/i.test(m)){ setTimeout(()=>kimlikDogrula(true),0); return 'Oturumunuz sona ermiş. Değişiklik kaydedilmedi; yeniden giriş yapıp tekrar deneyin.'; }
+  if(kod==='42501'||/row-level security|permission denied/i.test(m)){ setTimeout(()=>kimlikDogrula(true),0); return 'Bu işlem için yetkiniz yok. Değişiklik kaydedilmedi.'; }
+  if(kod==='23505'||/duplicate key/i.test(m)) return 'Bu kayıt zaten var. Değişiklik kaydedilmedi.';
+  if(kod==='23503'||/foreign key constraint/i.test(m)) return 'Bağlı kayıt artık yok ya da başka bir kayıtta kullanılıyor. Sayfayı yenileyip tekrar deneyin.';
   return m; }
 function casHata(e){
   if(e&&e.kod==='cakisma'){
@@ -5185,7 +5403,15 @@ async function jobSave(){
         +'. “Dosyayı tekrar dene” ile yeniden deneyin ya da Vazgeç ile dosyasız devam edin.','Dosya');
       return; }
   }
-  closeModal(); renderSection(); toast('İş kaydedildi.');
+  closeModal(); toast('İş kaydedildi.');
+  /* S13: kullanıcı bulunduğu bağlamda kalır. Önceden her kayıttan sonra
+     bölüm listesi çiziliyordu: iş detayından düzenleyen kullanıcı Pano'ya
+     atılıyor, tarayıcı geçmişi ise hâlâ "iş detayı" diyordu. Yeni iş
+     oluşturulunca doğrudan o işin detayı açılır (Geri önceki ekrana döner). */
+  const id=(r&&r.id)||row.id;
+  if(yeni&&id) workAc(id);
+  else if(history.state&&history.state.v==='work'&&ui._work&&String(ui._work.id)===String(row.id)) workAc(row.id);
+  else renderSection();
 }
 
 /* ================= BASKI & MONTAJ (Sprint 05) =================
@@ -5527,7 +5753,8 @@ function opPgYeniGoster(){
   const y=document.getElementById('opPgYeni'); if(y) y.hidden=gv('opPg')!=='yeni';
   const b=document.getElementById('opPgBilgi'); const g=(ui._opPg||[]).find(x=>String(x.id)===gv('opPg'));
   const tl=v=>Number(v).toLocaleString('tr-TR',{minimumFractionDigits:2,maximumFractionDigits:2});
-  if(b) b.textContent=g?`Paket: ${[g.cost_amount!=null?'maliyet '+tl(g.cost_amount):'',g.sale_amount!=null?'satış '+tl(g.sale_amount):''].filter(Boolean).join(' · ')} ${g.currency}. Paket bedeli toplamda bir kez sayılır; bu satırın tutarları bilgi amaçlıdır.`:'';
+  if(b) b.innerHTML=g?`${esc(`Paket: ${[g.cost_amount!=null?'maliyet '+tl(g.cost_amount):'',g.sale_amount!=null?'satış '+tl(g.sale_amount):''].filter(Boolean).join(' · ')} ${g.currency}. Paket bedeli toplamda bir kez sayılır; bu satırın tutarları bilgi amaçlıdır.`)}
+    <button type="button" class="btn-link" onclick="paketDuzenle(${g.id})">Paket bedelini düzenle →</button>`:'';
 }
 
 /* S4.4: `opOncekiBul()` kaldirildi. Yalnizca istemci tarafi sysEntry'ye
@@ -5962,7 +6189,8 @@ const PS_AY=['Oca','Şub','Mar','Nis','May','Haz','Tem','Ağu','Eyl','Eki','Kas'
 function psZaman(t){
   if(!t) return '';
   const d=new Date(t);
-  return `${d.getDate()} ${PS_AY[d.getMonth()]} · ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+  /* S13: bu yılın dışındaki tarih yılıyla yazılır ("5 Mar" hangi yıl?). */
+  return `${d.getDate()} ${PS_AY[d.getMonth()]}${d.getFullYear()!==new Date().getFullYear()?' '+d.getFullYear():''} · ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
 }
 /* §8: uzun resmi unvanlar akışı ezmesin. Bu YALNIZCA GÖRÜNTÜLEME içindir —
    kimlik verisine dokunmaz, hiçbir yere geri yazılmaz, tam unvan `title`
@@ -6010,7 +6238,7 @@ function psGecikme(due){
 function psGun(t){
   if(!t) return '';
   const d=new Date(t);
-  return `${d.getDate()} ${PS_AY[d.getMonth()]}`;
+  return `${d.getDate()} ${PS_AY[d.getMonth()]}${d.getFullYear()!==new Date().getFullYear()?' '+d.getFullYear():''}`;
 }
 function wsHafta(){
   const n=new Date(), g=n.getDay();
@@ -6066,7 +6294,7 @@ function hrSayfa(p){ hrYaz({...hrDurum(),p:Math.max(1,p)}); renderSection();
    belge-oncelikli oldugu icin Belgeler altinda. Legacy NULL tur yalniz Tümü. */
 const HR_GRUP={
   isler:['work_created','work_renamed','work_phase','work_lifecycle','quote_revised','quote_approved'],
-  operasyon:['operation_created','operation_status'],
+  operasyon:['operation_created','operation_status','price_group_changed'],
   muhasebe:['work_accounting'],
   belgeler:['document_added','document_linked','document_unlinked','document_changed',
             'contract_created','contract_signed','contract_cancelled','work_contract'],
@@ -6080,6 +6308,7 @@ function hareketHedef(h){
   const k=h.system_kind||'';
   if(k.startsWith('media_')) return {bolum:'medya',placementId:h.media_placement_id||null};
   if(k==='operation_created'||k==='operation_status') return {bolum:'op',opId:h.work_operation_id||null};
+  if(k==='price_group_changed') return {bolum:'op'};
   if(k==='work_accounting') return {bolum:'muhasebe'};
   if(k.startsWith('document_')) return {bolum:'belge',docId:h.document_id||null};
   if(k.startsWith('contract_')||k.startsWith('quote_')||k==='work_contract') return {bolum:'ticari'};
@@ -6098,7 +6327,7 @@ function hareketAc(id){
   workAc(h.job_id,{...hareketHedef(h),entryId:h.id});
 }
 const HR_ROZET={work_created:'Yeni iş',work_renamed:'İş adı',work_phase:'Aşama',work_lifecycle:'Durum',work_contract:'Sözleşme',
-  work_accounting:'Muhasebe',operation_created:'Operasyon',operation_status:'Operasyon',
+  work_accounting:'Muhasebe',operation_created:'Operasyon',operation_status:'Operasyon',price_group_changed:'Paket',
   quote_revised:'Teklif',quote_approved:'Teklif',document_added:'Belge',
   document_linked:'Belge',document_unlinked:'Belge',document_changed:'Belge',
   contract_created:'Sözleşme',contract_signed:'Sözleşme',contract_cancelled:'Sözleşme',
@@ -8712,7 +8941,16 @@ function supImport(){
     }});
 }
 
-function custForm(id){ const x=(ui._cust||[]).find(c=>c.id===id)||{};
+/* S13: düzenleme formu kaydı VERİTABANINDAN tam okur. Önceden ekranın
+   önbelleğinden (ui._cust) okuyordu; Hafıza'nın özet sorgusu vergi dairesini
+   taşımadığı için form o alanı boş açıyor ve Kaydet vergi dairesini
+   sessizce siliyordu. Kaydet artık yalnız değişen alanları, form
+   açıldığındaki değerler hâlâ yerindeyse yazar. */
+async function custForm(id){
+  let x={};
+  if(id){ const r=await guard(async()=>{ const {data,error}=await sb.from('customers').select('*').eq('id',id).maybeSingle(); if(error) throw error; return data; },'Kurum açılamadı');
+    if(r===null) return; if(!r){ mpAlert('Kurum bulunamadı ya da görme yetkiniz yok.','Kurum'); return; } x=r; }
+  ui._custIlk=id?{firma:x.firma,telefon:x.telefon,eposta:x.eposta,adres:x.adres,vergi_no:x.vergi_no,vergi_dairesi:x.vergi_dairesi,puan:x.puan||0}:null;
   modal(`<h3 style="margin:0 0 14px">${id?'Müşteri Düzenle':'Yeni Müşteri'}</h3><input type="hidden" id="cid" value="${id||0}">
     <div class="row2"><div class="field"><label class="flabel" for="cf">Firma</label><input class="inp" id="cf" value="${esc(x.firma)}"></div>
     <div class="field"><label class="flabel" for="cEvid">Kayıt Niteliği</label>
@@ -8727,7 +8965,31 @@ function custForm(id){ const x=(ui._cust||[]).find(c=>c.id===id)||{};
 }
 /* ilgili_kisi bilinçli olarak gönderilmez: raw provenance evidence olarak
    dokunulmadan kalır (S02_001 §2.4). */
-async function custSave(){ await api('customer_save',{id:+gv('cid'),firma:gv('cf'),telefon:gv('ct'),eposta:gv('ce'),adres:gv('ca'),vergi_no:gv('cv'),vergi_dairesi:gv('cvd'),puan:+gv('cp')}); closeModal(); renderSection(); }
+/* S13: önceden hata yakalanmıyordu (başarısız kayıt sessiz kalıyordu), çift
+   tıklama iki istek gönderiyordu ve kurum detayından düzenleyen kullanıcı
+   listeye atılıyordu. */
+async function custSave(){
+  const id=+gv('cid'), firma=(gv('cf')||'').trim();
+  if(!firma){ mpAlert('Kurum adı zorunlu.','Kurum'); return; }
+  const btn=document.querySelector('#modal .btn-primary'); if(btn&&btn.disabled) return;
+  const row={firma,telefon:gv('ct'),eposta:gv('ce'),adres:gv('ca'),vergi_no:gv('cv'),vergi_dairesi:gv('cvd'),puan:+gv('cp')};
+  let r;
+  if(id){
+    const f=formFark(ui._custIlk||{},row);
+    if(f.bos){ closeModal(); toast('Değişiklik yok — kaydedilecek bir şey olmadı.'); return; }
+    modalBusy(true);
+    try{ r=await api('row_update_cas',{tablo:'customers',id,patch:f.patch,eski:f.eski}); }
+    catch(e){ modalBusy(false); if(!casHata(e)) mpAlert(hataMetni(e),'Kurum kaydedilemedi'); return; }
+  } else {
+    modalBusy(true);
+    r=await guard(()=>api('customer_save',{id:0,...row}),'Kurum kaydedilemedi');
+  }
+  modalBusy(false);
+  if(r===null) return;
+  closeModal(); toast('Kurum kaydedildi.');
+  if(id&&history.state&&history.state.v==='org'&&ui._org&&String(ui._org.id)===String(id)) orgAc(id);
+  else renderSection();
+}
 async function custDel(id){ if(!await mpConfirm('Bu müşteri silinsin mi? Doluluk ve iş kayıtlarındaki bağlantıları boşalır.','Müşteriyi Sil'))return;
   await guard(()=>api('customer_delete',{id}),'Müşteri silinemedi'); renderSection(); }
 
@@ -9132,8 +9394,9 @@ function orgListe(){ hafCiz(); }
    kurum ekranı açılmadı. Bilgi hiyerarşisi: Kimlik → Kişiler → Aktif İşler
    → Son Güncellemeler → Geçmiş. Boş bölümler gizlenir (§33). */
 async function orgAc(id){
+  const ekran=ekranBasla();
   const [d]=await guard(()=>Promise.all([api('org_detail&id='+id),sozUnitYukle()]),'Kurum açılamadı')||[];
-  if(!d)return;
+  if(!d||ekran!==_ekranNo)return;
   ui._org=d.org; ui._orgContacts=d.contacts; ui._orgDetay=d;
   navKayit('org',ui.section,d.org.id,orgKisa(d.org.firma,30));
   const o=d.org, roles=Array.isArray(o.relationship_roles)?o.relationship_roles:[];
@@ -9362,7 +9625,8 @@ async function personSave(){
 /* ---- Kişi Detayı (PS3 §17) ----
    "Bu kişi kim ve Medyapark bağlamında nerelerle ilişkili?" */
 async function personAc(id){
-  const d=await guard(()=>api('person_detail&id='+id),'Kişi açılamadı'); if(!d)return;
+  const ekran=ekranBasla();
+  const d=await guard(()=>api('person_detail&id='+id),'Kişi açılamadı'); if(!d||ekran!==_ekranNo)return;
   ui._person=d.person; ui._personAffs=d.affiliations;
   navKayit('kisi',ui.section,d.person.id,d.person.name);
   const k=d.person, affs=d.affiliations||[], jobs=d.jobs||[], ents=d.entries||[];
@@ -9480,8 +9744,17 @@ async function affDel(id,kid){
   toast('Bağlantı kaldırıldı.'); personAc(kid);
 }
 
-function contactForm(id,customerId){
-  const x=(ui._orgContacts||[]).find(k=>k.id===id)||{};
+/* S13: düzenlemede kişi VERİTABANINDAN okunur. Önceden son açılan kurumun
+   kişi önbelleğinden okunuyordu: kişi sayfasından "Düzenle" formu BOŞ
+   açıyor, Kaydet telefon/e-posta/unvanı siliyordu; kurum sayfasında ise
+   "Birincil kişi" kutusu bağlantının (kişinin ana kurumu) bayrağını gösterip
+   kurumun ana kişisi bayrağına yazıyordu. Kaydet yalnız değişen alanları
+   yazar ve kullanıcı bulunduğu ekranda kalır. */
+async function contactForm(id,customerId){
+  let x={};
+  if(id){ const r=await guard(async()=>{ const {data,error}=await sb.from('contacts').select('*').eq('id',id).maybeSingle(); if(error) throw error; return data; },'Kişi açılamadı');
+    if(r===null) return; if(!r){ mpAlert('Kişi bulunamadı ya da görme yetkiniz yok.','Kişi'); return; } x=r; }
+  ui._kisiIlk=id?{name:x.name,title:x.title,department:x.department,phone:x.phone,email:x.email,notes:x.notes,is_primary:!!x.is_primary,active:x.active!==false,_kurum:x.customer_id}:null;
   modal(`<h3 style="margin:0 0 14px">${id?'Kişi Düzenle':'Yeni Kişi'}</h3>
     <input type="hidden" id="kid" value="${id||0}"><input type="hidden" id="kcid" value="${customerId||0}">
     <div class="row2"><div class="field"><label class="flabel" for="kn">Ad Soyad *</label><input class="inp" id="kn" value="${esc(x.name)}"></div>
@@ -9490,7 +9763,7 @@ function contactForm(id,customerId){
     <div class="field"><label class="flabel" for="kp">Telefon</label><input class="inp" id="kp" value="${esc(x.phone)}"></div></div>
     <div class="field"><label class="flabel" for="ke">E-posta</label><input class="inp" id="ke" value="${esc(x.email)}"></div>
     <div class="field"><label class="flabel" for="kno">Not</label><textarea class="inp" id="kno">${esc(x.notes)}</textarea></div>
-    <label class="switch" style="margin-bottom:8px"><input type="checkbox" id="kpr" ${x.is_primary?'checked':''}><span class="sl"></span><span class="txt">Birincil kişi</span></label>
+    <label class="switch" style="margin-bottom:8px"><input type="checkbox" id="kpr" ${x.is_primary?'checked':''}><span class="sl"></span><span class="txt">Kurumun ana kişisi</span></label>
     <label class="switch" style="margin-bottom:14px"><input type="checkbox" id="kak" ${x.active===false?'':'checked'}><span class="sl"></span><span class="txt">Aktif</span></label>
     <div style="display:flex;gap:8px;justify-content:flex-end">
       <button class="btn btn-ghost btn-sm" onclick="modalVazgec()">Vazgeç</button>
@@ -9500,14 +9773,24 @@ function contactForm(id,customerId){
 async function contactSave(){
   const ad=(gv('kn')||'').trim();
   if(!ad){ mpAlert('Ad Soyad zorunlu.'); return; }
-  const cid=+gv('kcid')||null;
+  const cid=+gv('kcid')||null, id=+gv('kid');
+  const btn=document.querySelector('#modal .btn-primary'); if(btn&&btn.disabled) return;
+  const alan={name:ad,title:gv('kt')||null,department:gv('kd')||null,phone:gv('kp')||null,email:gv('ke')||null,notes:gv('kno')||null,
+    is_primary:document.getElementById('kpr').checked,active:document.getElementById('kak').checked};
+  let govde;
+  if(id){
+    const ilk=ui._kisiIlk||{}; const f=formFark(ilk,alan);
+    if(f.bos){ closeModal(); toast('Değişiklik yok — kaydedilecek bir şey olmadı.'); return; }
+    govde={id,...f.patch,ana_kurum:ilk._kurum||null};
+  } else govde={id:0,customer_id:cid,...alan};
   modalBusy(true);
-  const r=await guard(()=>api('contact_save',{id:+gv('kid'),customer_id:cid,name:ad,
-    title:gv('kt')||null,department:gv('kd')||null,phone:gv('kp')||null,email:gv('ke')||null,notes:gv('kno')||null,
-    is_primary:document.getElementById('kpr').checked,active:document.getElementById('kak').checked}),'Kişi kaydedilemedi');
+  const r=await guard(()=>api('contact_save',govde),'Kişi kaydedilemedi');
   modalBusy(false);
   if(r===null)return;
-  closeModal(); toast('Kişi kaydedildi.'); orgAc(cid||(ui._org||{}).id);
+  closeModal(); toast('Kişi kaydedildi.');
+  const st=history.state&&history.state.mp?history.state:null;
+  if(st&&st.v==='kisi'&&id&&String(st.id)===String(id)) personAc(id);
+  else orgAc(cid||(ui._org||{}).id);
 }
 async function contactDel(id){
   if(!await mpConfirm('Bu kişi silinsin mi?','Kişiyi Sil'))return;
