@@ -1589,7 +1589,7 @@ async function mfKaydet(){
       ? await api('media_update',{id:f.kayit.placement_id,patch:{...ortak,end_date:bit||'',
           option_expires_at:opsSon||'',contract_item_id:ortak.contract_item_id||''}})
       : await api('media_create',{common:ortak,targets:f.hedefler});
-  }catch(e){ if(btn){ btn.disabled=false; btn.textContent=btnMetin; } mpAlert(e.message||String(e),'Kaydedilemedi'); return; }
+  }catch(e){ if(btn){ btn.disabled=false; btn.textContent=btnMetin; } mpAlert(hataMetni(e),'Kaydedilemedi'); return; }
   if(btn){ btn.disabled=false; btn.textContent=btnMetin; }
   if(!r||!r.ok){ mfSorunCiz(r&&r.sorunlar||[]); return; }
   closeModal();
@@ -1759,7 +1759,7 @@ async function mdPozKaydet(){
     if(btn){ btn.disabled=false; btn.textContent='Ekle'; }
     hata(/units_alt_name_uniq|duplicate key/i.test(e.message||'')
       ? 'Bu kod bu alanda zaten var (sunucu reddetti). Farklı bir kod girin.'
-      : (e.message||String(e)));
+      : hataMetni(e));
     return;
   }
   if(btn){ btn.disabled=false; btn.textContent='Ekle'; }

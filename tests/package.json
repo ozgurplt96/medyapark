@@ -1,0 +1,12 @@
+{
+  "name": "medyapark-tests",
+  "private": true,
+  "description": "Sprint 13 regresyon paketi — yalnız atılabilir test ortamında (scripts/test-env.ps1) çalışır.",
+  "type": "module",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0"
+  }
+}

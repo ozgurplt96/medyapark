@@ -278,6 +278,7 @@ async function raporlar(c){
 /* Bir rapora bağlamdan girilebilir: preset = {is, kurum, site, bas, bit…}. */
 async function rpAc(tur,preset){
   if(typeof dirtyGuard==='function'&&!(await dirtyGuard())) return;
+  if(typeof ekranBasla==='function') ekranBasla();   /* geç gelen önceki ekran bunu ezmesin (S13) */
   const R=rpDurum();
   if(preset){ R.ayar[tur]={...rpVarsayilan(tur),...preset}; R.secim[tur]=null; R.gordu[tur]=null; R.baslik[tur]=null; }
   if(ui.section!=='raporlar'){ ui.section='raporlar'; navCiz(); const t=document.getElementById('ttl'); if(t) t.textContent=TITLES.raporlar; }
@@ -426,10 +427,32 @@ const rpCb=(tur,key,dahil,etiket)=>`<input type="checkbox" class="rp2-cb" ${dahi
   aria-label="${esc(etiket||'Rapora dahil')}" onchange="rpSec('${tur}','${esc(key)}',this.checked)">`;
 
 let _rpIndiriliyor=false;
+/* S13 — indirme öncesi tazelik denetimi. Önizleme açıkken kaynak kayıtlar
+   (başka ekranda ya da başka kullanıcı tarafından) değişmiş olabilir.
+   Dosya, önizlemenin eski verisiyle "yeni" gibi üretilmez: veri yeniden
+   okunur; model içeriği önizlemeden farklıysa önizleme yenilenir, kullanıcı
+   bilgilendirilir ve indirme DURDURULUR (kullanıcı yeni önizlemeyi görüp
+   tekrar indirir). Aynıysa dosya bu taze veriyle üretilir. */
+function rpImza(m){ const {an,tur,baslik,alici,aciklama,dis,...ic}=m||{};
+  return JSON.stringify(ic,(k,v)=>v instanceof Set?[...v]:(v instanceof Date?v.toISOString():v)); }
+async function rpTazeMi(tur){
+  const R=rpDurum(), D=RPD[tur], a=rpAyar(tur);
+  const onceki=ui._rpModel?rpImza(ui._rpModel):null;
+  let veri; try{ veri=await D.veri(a); veri.okunma=new Date(); }
+  catch(e){ throw new Error('Güncel veri okunamadı; dosya oluşturulmadı. '+rpHataMetni(e)); }
+  const eskiVeri=R.veri[tur]; R.veri[tur]=veri;
+  let m; try{ m=rpModelKur(tur); }catch(e){ R.veri[tur]=eskiVeri; throw e; }
+  if(onceki!==null&&rpImza(m)!==onceki){
+    rpOnizleCiz(tur);
+    rpNot('Önizlemeden sonra kayıtlar değişti. Önizleme güncel veriyle yenilendi; kontrol edip yeniden indirin.','uyari');
+    return false; }
+  return true;
+}
 async function rpIndirPdf(tur){
   if(_rpIndiriliyor) return; _rpIndiriliyor=true;
   const b=document.getElementById('rpPdfB'); if(b){ b.disabled=true; b.textContent='Hazırlanıyor…'; }
   try{
+    if(!(await rpTazeMi(tur))) return;
     const m=rpModelKur(tur); if(!m) throw new Error('Önizleme hazır değil.');
     await rpPdfLib();
     const {icerik,o}=RPD[tur].pdf(m,rpAyar(tur));
@@ -445,6 +468,7 @@ async function rpIndirXls(tur){
   if(_rpIndiriliyor) return; _rpIndiriliyor=true;
   const b=document.getElementById('rpXlsB'); if(b){ b.disabled=true; b.textContent='Hazırlanıyor…'; }
   try{
+    if(!(await rpTazeMi(tur))) return;
     const m=rpModelKur(tur); if(!m) throw new Error('Önizleme hazır değil.');
     const sayfalar=RPD[tur].xlsx(m,rpAyar(tur));
     const blob=await rpXlsDosya(m,sayfalar);
