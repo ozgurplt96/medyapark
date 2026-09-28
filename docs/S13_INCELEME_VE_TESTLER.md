@@ -93,6 +93,9 @@ engelleyen davranış · **P3** hijyen/küçük görsel.
 | B36 | P2 | **S14** · İş aşaması klavyeyle seçilince gösterge yeniden çiziliyor, odak sayfanın başına düşüyordu | odak aynı aşama düğmesine döner | e2e klavye |
 | B37 | P3 | **S14** · Mecralar Doluluk/Harita sekme değişimi ekran-numarası korumasının dışındaydı | korumalı çizim yolu | kod incelemesi |
 | B38 | P3 | **S14** · Hareketler satırı üzerine gelince ok 4.41:1 kontrast | koyu vurgu tonu | ölçüm: 0 |
+| B39 | P2 | **S14** · Belge kaydı yoldayken form kapatılırsa kapanış temizliği dosyayı siliyor, geç tamamlanan kayıt dosyasız belge üretebiliyordu; "Sonucu kontrol et" kayıt bulamayınca "oluşturulmadı" diyor ve dosyayı geri alıyordu | sonucu doğrulanamayan dosya kapanışta ve 409 sonrası silinmez; kayıt bulunamazsa yalnız "bulunamadı, tekrar güvenli" denir; arka plan sorgusu 60 sn'den yeni girişim için hüküm vermez | e2e tekrar: yoldaki istek test tarafından geç gönderilir (koruma kaldırılınca düşüyor) |
+| B40 | P2 | **S14** · Ekip formu (yönetici) önbellekten açılıp `app_role` dahil satırın tamamını yazıyordu: başka yöneticinin yetki değişikliği eski formdan yapılan ilgisiz bir kayıtla sessizce geri alınabiliyordu | DB'den okuma; yalnız değişen alan, açılıştaki değer hâlâ yerindeyse; yetki aynı anda değiştiyse çakışma | e2e yönetim (eski kodda düşüyor) |
+| B41 | P2 | **S14** · Pencere açılışındaki gecikmeli (30 ms) otomatik odak, kullanıcının geçtiği alanı geri çalıyordu; hızlı yazılan metin ilk alana gidiyordu (S13'ten beri aralıklı düşen kişi düzenleme testinin kök nedeni) | odak zaten pencere içindeyse gecikmeli odak uygulanmaz | e2e klavye (eski kodda düşüyor) |
 
 S14'te değişiklik gerektirmeden doğrulananlar: mecra raporu hesapları
 bağımsız beklentiyle (ardışık yenileme sahte boşluk üretmiyor, A/B bağımsız,
@@ -138,7 +141,7 @@ Sabit gelecek dönemler kullanılır (yerleşim/işlem tarihleri 2031, randevu
 2027) — "bugün"e bağlı sonuç yoktur. Sabit bekleme yoktur; testler
 gözlenebilir durumu bekler.
 
-**Kapsam** (`tests/e2e`; S13 44 senaryo, S14 ile toplam §5'te):
+**Kapsam** (`tests/e2e`; S13 44 senaryo, S14 sonunda 87 senaryo):
 
 - iş oluşturma: başarı, çift tık, ağ/sunucu hatası ve kayıp yanıtta yarım kayıt yok
 - Pano aşama taslağı: ok yazmaz, Vazgeç, Kaydet tek Hareket
@@ -180,7 +183,7 @@ veriyle dört raporun PDF/XLSX'i). Çıktı klasörleri Git dışında tutulmal�
 | Kayıp yanıttan sonra mükerrer kayıt (iş, yerleşim, işlem, belge) | **kapandı** — B26, B27 |
 | Adres çubuğunda ekran yok | **kapandı** — B28, B29 |
 | Ekran içi alt panellerde sıra koruması | **kapandı** — B37 (Panelim Hareketler zaten korumalı yoldaydı) |
-| Yönetim formları (tedarikçi, ürün, sayfa, not) | **kapandı** — B31, B32; ekip formu kapsam dışında kaldı (aşağıda) |
+| Yönetim formları (tedarikçi, ürün, sayfa, not, ekip) | **kapandı** — B31, B32, B40 |
 | Kurum seçimi 500+ seçenek | **kapandı** — B30 |
 | Mecra müsaitlik raporu ve PDF içeriği otomatik testte değil | **kısmen** — mecra hesapları ve dış paylaşım modeli testli; PDF'ler sayfa sayfa elle incelendi, içerik otomatik karşılaştırılmıyor |
 | Ekran okuyucuyla gerçek deneme | **açık** — bu ortamda yapılamadı |
@@ -189,9 +192,24 @@ Kalan düşük öncelikli işler (bilinen açık P0/P1 yok):
 
 | Önem | Konu | Not |
 |---|---|---|
-| P3 | Güncelleme (Entry) oluşturmada tekillik anahtarı yok: kayıp yanıttan sonra tekrar ikinci güncelleme üretebilir | S14'ün dört zorunlu yolu dışında; aynı desen `entry_create_with_documents`'e uygulanabilir |
-| P3 | Ekip formu (yalnız yönetici) hâlâ satırın tamamını yazar | kayıt sayısı çok az; aynı ortak koşullu kayıt yoluna taşınabilir |
+| P3 | Güncelleme (Entry) oluşturmada tekillik anahtarı yok: kayıp yanıttan sonra tekrar ikinci güncelleme üretebilir | etkisi mükerrer bir not satırı (yetki/veri kaybı yok, kullanıcı kendi güncellemesini silebilir); aynı desen `entry_create_with_documents`'e uygulanabilir |
+| P3 | Belge kaydı ile aynı anda, aynı kullanıcı tarafından o dosyanın açıkça silinmesi yarışı sunucuda kilitli değil (`document_create` dosyayı kilitsiz doğrular) | arayüzdeki tek otomatik silme yolu (form kapanışı) belirsiz dosyayı artık silmiyor; yarım yükleme temizliği yalnız 2 saatten eski ve belgeye bağlı olmayanları listeler |
 | P3 | Aranabilir seçici yalnız kurum listelerinde; eski tedarikçi, mecra ve iş seçicileri yerel liste | listeler kısa; gerekirse aynı `data-ara` işaretiyle |
 | P3 | PDF içerik doğrulaması otomatik değil | görsel inceleme her sürümde tekrarlanmalı |
 | P3 | Ekran okuyucu denemesi | ayrı erişilebilirlik turu |
 | — | Bilinen, engel olmayan: Google Maps anahtarı localhost'a izinli değil; `/favicon.ico` 404 | yerel ortam |
+
+---
+
+## 5. S14 son test koşusu
+
+| | |
+|---|---|
+| Test edilen commit | `3e3f6cd` (ağaç `6c29c0d`) — `ozgur/s14-guvenilirlik` |
+| Yöntem | `scripts/test-regression.ps1 -Fresh`: atılabilir yığın silinip yalnız Git'e girebilen dosyalardan sıfırdan kuruldu (31 migration + commit'li seed'ler + test kullanıcıları); koşu boyunca çalışma ağacı değişmedi |
+| SQL | access-checks 9/9, media-checks 8/8 |
+| Uçtan uca | **87 / 87 geçti** (4,0 dk) |
+| Önceki koşular | `d03b2e1`: 85/85. `3d36745`: 85/86 — kişi düzenleme testi düştü; kök neden B41 (odak çalma), düzeltildi, `3e3f6cd` ile tam koşu yenilendi |
+
+Yükseltme yolu: çalışma DB'sinin kopyasında iki migration uygulandı ve tekrar
+uygulandı; 37 tabloda satır sayısı birebir, yeni tablo boş, access 9/9, mecra 8/8.
