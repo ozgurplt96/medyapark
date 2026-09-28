@@ -888,7 +888,7 @@ async function api(action, body){
        satır döner: sessizce EZİLMEZ, çakışma olarak bildirilir. */
     case 'row_update_cas':{
       const tablo=({jobs:'jobs',documents:'documents',operation_price_groups:'operation_price_groups',customers:'customers',
-        suppliers:'suppliers',products:'products',pages:'pages',notes:'notes'})[body.tablo]; if(!tablo) throw new Error('Geçersiz tablo.');
+        suppliers:'suppliers',products:'products',pages:'pages',notes:'notes',team:'team'})[body.tablo]; if(!tablo) throw new Error('Geçersiz tablo.');
       const anahtar=(tablo==='pages'&&body.anahtar==='slug')?'slug':'id';
       let s=sb.from(tablo).update(body.patch).eq(anahtar,body.id);
       /* jsonb değer JSON metni olarak karşılaştırılır (sunucuda anlamsal eşitlik). */
@@ -905,7 +905,7 @@ async function api(action, body){
         throw Object.assign(new Error('cakisma'),{kod:'cakisma',alanlar:alanlar.length?alanlar:deg,guncel:g});
       }
       logYaz(({jobs:'job_save',documents:'document_update',customers:'customer_save',suppliers:'supplier_save',
-        products:'product_save',pages:'page_save',notes:'note_save'})[tablo]||'operation_save',{id:body.id,...body.patch}); return ok(data[0]); }
+        products:'product_save',pages:'page_save',notes:'note_save',team:'team_save'})[tablo]||'operation_save',{id:body.id,...body.patch}); return ok(data[0]); }
     case 'job_create':{
       const {data,error}=await sb.rpc('job_create',{p_job:body.job,p_followers:body.followers||[],p_islem:body.islem||null});
       if(error)throw error; logYaz('job_save',{id:data,...body.job}); return ok({id:data}); }
@@ -5657,7 +5657,7 @@ const ALAN_AD={title:'Başlık',status:'Aşama',customer_id:'Kurum',primary_cont
   vergi_no:'Vergi no',vergi_dairesi:'Vergi dairesi',notlar:'Notlar',aktif:'Aktif',puan:'Puan',
   name:'İsim',olcu:'Ölçü',yuzey:'Yüzey',isikli:'Aydınlatma',baski_malzemesi:'Baskı malzemesi',baski_format:'Baskı formatı',
   yayin_format:'Yayın formatı',etiketler:'Arama etiketleri',ikon:'İkon',baski_ucreti:'Baskı ücreti',montaj_ucreti:'Montaj ücreti',
-  extra_ucret:'Ek ücret',prices:'Fiyatlar',blocks:'Sayfa içeriği',in_menu:'Menüde göster',konu:'Konu',body:'İçerik',tarih:'Tarih'};
+  extra_ucret:'Ek ücret',prices:'Fiyatlar',role:'Görev / departman',unvan:'Ünvan',photo:'Fotoğraf',app_role:'Yetki',seviye:'Yetki (eski)',blocks:'Sayfa içeriği',in_menu:'Menüde göster',konu:'Konu',body:'İçerik',tarih:'Tarih'};
 /* Ağ hatası kullanıcıya teknik metinle gösterilmez. */
 /* S13: kullanıcıya ham veritabanı iletisi gösterilmez. Bilinen kodlar
    anlaşılır Türkçe metne çevrilir; bilinmeyen ileti aynen kalır (sunucunun
@@ -10602,7 +10602,16 @@ async function teamNotPaylasKaydet(id){
      self/üye   → yalnız güvenli profil alanları; kimlik/yetki alanları
                   salt okunur gösterilir, forma hiç girmez.
    Ayrı bir workspaceProfile() yoktur. */
-function teamForm(id){ const x=(ui._team||[]).find(t=>t.id===id)||{};
+/* S14: yönetici formu kaydı VERİTABANINDAN okur; Kaydet yalnız değişen
+   alanları, açılıştaki değerleri hâlâ yerindeyse yazar. Önceden önbellekten
+   açılıp satırın tamamını (yetki `app_role` dahil) yazıyordu: başka bir
+   yöneticinin yaptığı yetki değişikliği, eski formdan yapılan ilgisiz bir
+   kayıtla sessizce geri alınabiliyordu. */
+async function teamForm(id){
+  let x=(ui._team||[]).find(t=>t.id===id)||{};
+  if(id&&isAdmin()){ const r=await guard(()=>kayitTazeOku('team','id',id),'Profil açılamadı'); if(r===null) return;
+    if(!r){ mpAlert('Ekip kaydı bulunamadı.','Ekip'); return; } x=r; }
+  ui._teamIlk=(id&&isAdmin())?x:null;
   const foto=`<div class="field"><label class="flabel">Profil fotoğrafı</label>
       <div class="imgf">
         <span class="imgf-pv${x.photo?'':' bos'}" id="tph_pv" onclick="imgAc('tph')">${x.photo?`<img src="${esc(x.photo)}" alt="">`:''}</span>
@@ -10663,6 +10672,16 @@ async function teamSave(){
      kalsın diye güncel tutulur. Çift otorite yoktur. */
   body.app_role=gv('tsv');
   body.seviye=(gv('tsv')==='admin')?'yonetici':'uye';
+  const btn=document.querySelector('#modal .btn-primary'); if(btn&&btn.disabled) return;
+  if(body.id){
+    const {id,...yeni}=body;
+    const f=formFark(ui._teamIlk||{},yeni);
+    if(f.bos){ closeModal(); toast('Değişiklik yok — kaydedilecek bir şey olmadı.'); return; }
+    modalBusy(true);
+    try{ await api('row_update_cas',{tablo:'team',id,patch:f.patch,eski:f.eski}); }
+    catch(e){ modalBusy(false); kayitHata(e,'Kaydedilemedi'); return; }
+    modalBusy(false); closeModal(); renderSection(); toast('Profil kaydedildi.'); return;
+  }
   const r=await guard(()=>api('team_save',body),'Kaydedilemedi');
   if(r===null)return; closeModal(); renderSection(); toast('Profil kaydedildi.');
 }

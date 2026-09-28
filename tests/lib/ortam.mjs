@@ -96,7 +96,7 @@ export function temizle() {
     delete from products where name like 'S13T%';
     delete from pages where slug like 's13t%';
     delete from notes where konu like 'S13T%';
-    update team set active=true where eposta='s13-uye2@test.local';`);
+    update team set active=true, app_role='team_member', seviye='uye', telefon=null where eposta='s13-uye2@test.local';`);
 }
 
 /* Verilen dönemin TAMAMINDA boş, satışta, statik (münhasır) yüzler. */

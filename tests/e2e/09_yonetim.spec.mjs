@@ -103,3 +103,37 @@ test('sunucu doğrulaması ve yetki: boş ad reddedilir; ekip üyesi yönetim ka
   expect(r.veri).toEqual([]);
   expect(sql(`select firma from suppliers where id=${id}`)).toBe('S13T Doğrulama');
 });
+
+test('ekip: eski formdan ilgisiz kayıt başka yöneticinin yetki değişikliğini geri almaz; aynı alan çakışırsa yazılmaz', async ({ page }) => {
+  const id = +sql(`select id from team where eposta='s13-uye2@test.local'`);
+  await girisYap(page, 'admin');
+  await page.evaluate(i => teamForm(i), id);
+  await expect(page.locator('#tsv')).toHaveValue('team_member');
+  sql(`update team set app_role='admin', seviye='yonetici' where id=${id}`);          // başka yönetici yükseltti
+  await page.fill('#tt', '0322 777 77 77');
+  await kaydet(page);
+  await expect(page.locator('#modalBg.open')).toHaveCount(0);
+  expect(sql(`select app_role||'|'||telefon from team where id=${id}`)).toBe('admin|0322 777 77 77');   // yetki geri alınmadı
+
+  await page.evaluate(i => teamForm(i), id);
+  await expect(page.locator('#tsv')).toHaveValue('admin');
+  /* Formda yetki değiştirilmeden kaydedilirse, başkasının yetki değişikliği korunur. */
+  sql(`update team set app_role='team_member', seviye='uye' where id=${id}`);        // başka yönetici geri aldı
+  await page.fill('#tt', '0322 888 88 88');
+  await kaydet(page);
+  await expect(page.locator('#modalBg.open')).toHaveCount(0);
+  expect(sql(`select app_role||'|'||telefon from team where id=${id}`)).toBe('team_member|0322 888 88 88');
+
+  /* Eski form yetkiyi de değiştirirse (açılışta 'team_member' görmüştü, başkası
+     'admin' yaptı): yazılmaz, çakışma söylenir. */
+  await page.evaluate(i => teamForm(i), id);
+  await expect(page.locator('#tsv')).toHaveValue('team_member');
+  sql(`update team set app_role='admin', seviye='yonetici' where id=${id}`);
+  await page.selectOption('#tsv', 'team_member');
+  await page.selectOption('#tsv', 'admin');
+  await page.fill('#tt', '0322 999 99 99');
+  await kaydet(page);
+  await expect(dlg(page)).toContainText('başka biri tarafından değiştirildi');
+  await expect(dlg(page)).toContainText('Yetki');
+  expect(sql(`select app_role||'|'||telefon from team where id=${id}`)).toBe('admin|0322 888 88 88');
+});
