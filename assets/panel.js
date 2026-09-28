@@ -2347,7 +2347,10 @@ function modal(html){
   document.body.classList.add('mdl-acik');     /* arkadaki sayfa kaymaz */
   /* İlk anlamlı alana odaklan; yoksa diyaloğun kendisine. */
   const ilk=m.querySelector('input:not([type=hidden]):not([disabled]),textarea,select,button');
-  setTimeout(()=>{ (ilk||m).focus(); _modalIlk=formDegerleri(m); },30);
+  /* S14: kullanıcı (ya da çağıran form) odağı zaten pencere içinde bir alana
+     taşıdıysa gecikmeli odak onu GERİ ÇALMAZ — aksi halde hızlı yazılan metin
+     ilk alana (ör. kişi adına) gidiyordu. */
+  setTimeout(()=>{ if(!m.contains(document.activeElement)) (ilk||m).focus(); _modalIlk=formDegerleri(m); },30);
 }
 /* S13 — "kirli" = kullanıcı GERÇEKTEN bir alana dokundu VE değerler açılıştaki
    hâlden farklı. Yazıp geri silinen form artık gereksiz uyarı vermez. */

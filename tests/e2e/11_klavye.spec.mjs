@@ -44,6 +44,21 @@ test('yalnız klavye: Yeni İş → başlık → kurum ara/seç → Oluştur →
   expect(sql(`select status from jobs where id=${id}`)).toBe('teklif');
 });
 
+test('pencere açılır açılmaz başka alana geçen kullanıcının odağı gecikmeli otomatik odakla çalınmaz', async ({ page }) => {
+  const k = sql(`insert into contacts (name, title) values ('S13T Odak Kişi', 'Müdür') returning id`);
+  await girisYap(page, 'uye');
+  /* Form açılır açılmaz (30 ms'lik otomatik odaktan önce) ikinci alana geç ve yaz. */
+  await page.evaluate(async i => {
+    await contactForm(+i, 0);
+    const t = document.getElementById('kt'); t.focus(); t.select();
+  }, k);
+  await page.keyboard.type('Genel Müdür');
+  await page.waitForTimeout(120);                                          // otomatik odak zamanlayıcısı geçti
+  await page.keyboard.type(' Yardımcısı');
+  await expect(page.locator('#kt')).toHaveValue('Genel Müdür Yardımcısı');
+  await expect(page.locator('#kn')).toHaveValue('S13T Odak Kişi');
+});
+
 test('yalnız klavye: onay penceresinde Tab dışarı kaçmaz, Esc kapatır ve odak geri döner', async ({ page }) => {
   await girisYap(page, 'uye');
   await page.evaluate(() => jobForm());
