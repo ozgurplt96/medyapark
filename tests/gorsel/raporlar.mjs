@@ -42,10 +42,12 @@ async function ac(tur, preset) {
   await page.waitForFunction(t => ui._rpModel && ui._rpTur === t && !rpDurum().yukleniyor, tur);
 }
 const siteler = sql(`select string_agg(id::text, ',') from mecralar where operational`).split(',').map(Number);
-await ac('mecra', { siteler, bas: '2026-10-01', bit: '2027-03-31', cikti: 'aralik', ozet: true, led: true, _alici: 'dis' });
-await indir('#rpPdfB', 'mecra_musaitlik'); await indir('#rpXlsB', 'mecra_musaitlik');
-await ac('baski', { kurum: kurumId(), isler: [isId], _alici: 'ic', tMaliyet: true, tSatis: true, notlar: true });
-await indir('#rpPdfB', 'baski_montaj'); await indir('#rpXlsB', 'baski_montaj');
+await ac('mecra', { siteler, bas: '2026-10-01', bit: '2027-03-31', _alici: 'dis' });
+await indir('#rpPdfB', 'mecra_doluluk'); await indir('#rpXlsB', 'mecra_doluluk');
+await ac('baski', { sablon: 'takip', donem: 'tum', kurum: kurumId(), _alici: 'ic' });
+await indir('#rpPdfB', 'baski_montaj_takip'); await indir('#rpXlsB', 'baski_montaj_takip');
+await ac('baski', { sablon: 'dokum', kurum: kurumId(), is: isId, _alici: 'dis' });
+await indir('#rpPdfB', 'baski_montaj_dokum'); await indir('#rpXlsB', 'baski_montaj_dokum');
 await ac('plan', { kisi: teamId('uye'), donem: 'hafta' });
 await indir('#rpPdfB', 'kisisel_plan');
 await ac('is', { is: isId, _alici: 'ic', kisiler: true, guncelleme: true, aksiyon: true, muhasebe: true });

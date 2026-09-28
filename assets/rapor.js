@@ -93,7 +93,6 @@ function rpIndir(blob,ad){
 const RPC={ink:'#1d1d1f',ink2:'#55555b',ink3:'#86868b',line:'#d6d6db',soft:'#f3f3f5',
   accent:'#e63333',mavi:'#1f5fb8',maviS:'#e6eefa',amber:'#8a5a00',amberS:'#fbefd4',
   yesil:'#1a7f37',yesilS:'#e2f2e6',kirmizi:'#b3261e',kirmiziS:'#fbe7e5'};
-const RP_TUR_RENK={yayin:[RPC.mavi,RPC.maviS],opsiyon:[RPC.amber,RPC.amberS],musait:[RPC.yesil,RPC.yesilS]};
 
 /* Ortak künye: kim için, hangi dönem, ne zaman üretildi. */
 function rpKunye(m){
@@ -205,6 +204,9 @@ async function rpXlsDosya(m,sayfalar){
       pageSetup:{paperSize:9,orientation:s.yon||'landscape',fitToPage:true,fitToWidth:1,fitToHeight:0,
         margins:{left:0.4,right:0.4,top:0.5,bottom:0.5,header:0.25,footer:0.25}},
       headerFooter:{oddFooter:'&L'+m.baslik.replace(/&/g,'&&')+'&RSayfa &P / &N'}});
+    /* S15: şablon sayfaları (doluluk tablosu, takip tablosu, döküm) kendi
+       düzenini yazar — birleşik hücre, iki satırlı yüzey, bölüm başlığı. */
+    if(s.ozel){ s.ozel(ws); return; }
     ws.getCell('A1').value=m.baslik; ws.getCell('A1').font={bold:true,size:14};
     const alt=[m.tur, ...rpKunye(m).map(([k,v])=>`${k}: ${v}`)].join('   ·   ');
     ws.getCell('A2').value=alt; ws.getCell('A2').font={size:9,color:{argb:'FF55555B'}};
@@ -255,10 +257,10 @@ function rpVarsayilanDisi(tur,key){
    GİRİŞ EKRANI
    ========================================================== */
 const RP_KART=[
-  {tur:'mecra',ad:'Mecra müsaitliği ve yayın durumu',ikon:'media',
-   ac:'Belirli yüzeylerin belirli dönemdeki durumunu ajansa, pazarlamacıya ya da müşteriye gönderin: tam dönem müsaitlik, müsait tarih aralıkları veya yayın/opsiyon çizelgesi.'},
-  {tur:'baski',ad:'Baskı / montaj dökümü',ikon:'truck',
-   ac:'Bir kurumun ya da işin baskı, montaj, söküm ve ilgili hizmetlerinin teknik ve gerektiğinde ticari dökümü.'},
+  {tur:'mecra',ad:'Mecra doluluk tablosu',ikon:'media',
+   ac:'Ürün başına ayrı sayfa, yüzeyler satırlarda, aylar sütunlarda: kurum ya da durum ve kesin tarih aralıkları. İç kullanım ya da dışarıya gönderim için.'},
+  {tur:'baski',ad:'Baskı / montaj',ikon:'truck',
+   ac:'İki hazır şablon: dönemlik baskı-montaj takip tablosu ya da tek işin kalem kalem bedel dökümü.'},
   {tur:'plan',ad:'Kişisel çalışma planı',ikon:'notes',
    ac:'Günlük ya da haftalık planı telefona indirin: tarihli işler, gecikenler, tarihsiz aksiyonlar ve bilmeniz gereken gelişmeler. Çevrimdışı okunur.'},
   {tur:'is',ad:'İş özeti ve geçmişi',ikon:'jobs',
@@ -284,7 +286,9 @@ async function rpAc(tur,preset){
   if(typeof dirtyGuard==='function'&&!(await dirtyGuard())) return;
   if(typeof ekranBasla==='function') ekranBasla();   /* geç gelen önceki ekran bunu ezmesin (S13) */
   const R=rpDurum();
-  if(preset){ R.ayar[tur]={...rpVarsayilan(tur),...preset}; R.secim[tur]=null; R.gordu[tur]=null; R.baslik[tur]=null; }
+  if(preset){ R.ayar[tur]={...rpVarsayilan(tur),...preset}; R.secim[tur]=null; R.gordu[tur]=null; R.baslik[tur]=null;
+    /* Eski bağlam girişi (S12): baskı raporuna iş listesiyle gelinirse tek iş seçimi olur. */
+    if(tur==='baski'&&Array.isArray(preset.isler)&&preset.isler.length===1&&!preset.is) R.ayar[tur].is=+preset.isler[0]; }
   if(ui.section!=='raporlar'){ ui.section='raporlar'; navCiz(); const t=document.getElementById('ttl'); if(t) t.textContent=TITLES.raporlar; }
   navKayit('rapor','raporlar',RP_TURLER.indexOf(tur)+1,(RP_KART.find(k=>k.tur===tur)||{}).ad);
   const c=document.getElementById('content'); window.scrollTo(0,0);
@@ -302,12 +306,16 @@ async function rpEkran(c,tur){
   ui._rpTur=tur;
   c.innerHTML=`<div class="sec-head"><div>${geriBtn('raporlar')}<h3 style="margin-top:6px">${esc(k.ad)}</h3>
       <p class="sub">${esc(D.amac)}</p></div></div>
-    <div class="rp2">
+    ${D.sade?`<div class="rp2">
+      <section class="rp2-card" aria-labelledby="rpK1"><h4 id="rpK1"><span>1</span> Seçimler</h4><div id="rpKapsam"></div><div id="rpAlici"></div></section>
+      <section class="rp2-card rp2-on" aria-labelledby="rpK3"><h4 id="rpK3"><span>2</span> Önizleme ve indirme</h4>
+        <div class="rp2-bar" id="rpBar"></div><div id="rpNot" role="status" aria-live="polite"></div><div id="rpPrev"></div></section>
+    </div>`:`<div class="rp2">
       <section class="rp2-card" aria-labelledby="rpK1"><h4 id="rpK1"><span>1</span> Kapsam</h4><div id="rpKapsam"></div></section>
       <section class="rp2-card" aria-labelledby="rpK2"><h4 id="rpK2"><span>2</span> Alıcı ve başlık</h4><div id="rpAlici"></div></section>
       <section class="rp2-card rp2-on" aria-labelledby="rpK3"><h4 id="rpK3"><span>3</span> Önizleme ve indirme</h4>
         <div class="rp2-bar" id="rpBar"></div><div id="rpNot" role="status" aria-live="polite"></div><div id="rpPrev"></div></section>
-    </div>`;
+    </div>`}`;
   rpKontrolCiz(tur);
   await rpYenile(tur,{veri:true});
 }
@@ -315,6 +323,16 @@ function rpKontrolCiz(tur){
   const D=RPD[tur], a=rpAyar(tur), R=rpDurum();
   const kk=document.getElementById('rpKapsam'); if(kk) kk.innerHTML=D.kontroller(a);
   const al=document.getElementById('rpAlici');
+  /* S15 sade düzen: iç/dış seçimi filtrelerin içindedir; başlık otomatik
+     üretilir, alıcı ve açıklama küçük, kapalı bir bölümde düzenlenir. */
+  if(al&&D.sade){ al.innerHTML=`<details class="rp2-adv" ${R.metinAcik?'open':''} ontoggle="rpDurum().metinAcik=this.open"><summary>Başlık, alıcı ve açıklama <span class="muted">— isteğe bağlı</span></summary>
+      <div class="rp2-grid">
+        <div class="field"><label class="flabel" for="rpBaslik">Rapor başlığı</label>
+          <input class="inp" id="rpBaslik" value="${esc(R.baslik[tur]||'')}" placeholder="${esc(D.baslik(a,R.veri[tur]))}" oninput="rpMetin('${tur}')"></div>
+        <div class="field"><label class="flabel" for="rpAliciAd">Alıcı</label>
+          <input class="inp" id="rpAliciAd" value="${esc(a._aliciAd||'')}" placeholder="ör. ABC Ajans — Medya Planlama" oninput="rpMetin('${tur}')"></div></div>
+      <div class="field"><label class="flabel" for="rpAciklama">Kısa açıklama (yalnız bu rapora ait)</label>
+        <textarea class="inp" id="rpAciklama" rows="2" maxlength="600" oninput="rpMetin('${tur}')" placeholder="Rapora eklenecek bir iki cümle. Kaynak kayıtlardaki notlar değişmez.">${esc(a._aciklama||'')}</textarea></div></details>`; return; }
   if(al) al.innerHTML=`<div class="md-seg rp2-seg" role="radiogroup" aria-label="Rapor kimin için">
       ${[['dis','Dış paylaşım'],['ic','İç kullanım']].map(([v,l])=>`<button type="button" role="radio" aria-checked="${a._alici===v}"
         class="${a._alici===v?'on':''}" onclick="rpAliciSec('${tur}','${v}')">${a._alici===v?'✓ ':''}${l}</button>`).join('')}</div>
@@ -327,6 +345,11 @@ function rpKontrolCiz(tur){
     <div class="field"><label class="flabel" for="rpAciklama">Kısa açıklama (isteğe bağlı, yalnız bu rapora ait)</label>
       <textarea class="inp" id="rpAciklama" rows="2" maxlength="600" oninput="rpMetin('${tur}')" placeholder="Rapora eklenecek bir iki cümle. Kaynak kayıtlardaki notlar değişmez.">${esc(a._aciklama||'')}</textarea></div>`;
 }
+/* İç / dış seçimi (sade düzende filtrelerin içinde). Yetki kazandırmaz;
+   yalnız hangi bilgilerin modele girdiğini belirler. */
+function rpAliciSeg(tur,a){ return `<div class="md-seg rp2-seg sm" role="radiogroup" aria-label="Rapor kimin için">
+  ${[['dis','Dış paylaşım'],['ic','İç kullanım']].map(([v,l])=>`<button type="button" role="radio" aria-checked="${a._alici===v}"
+    class="${a._alici===v?'on':''}" onclick="rpAliciSec('${tur}','${v}')">${a._alici===v?'✓ ':''}${l}</button>`).join('')}</div>`; }
 function rpAliciSec(tur,v){
   const a=rpAyar(tur); if(a._alici===v) return;
   Object.assign(a,RPD[tur].preset(v)); a._alici=v;
@@ -483,13 +506,6 @@ async function rpIndirXls(tur){
   finally{ _rpIndiriliyor=false; rpBarCiz(tur,ui._rpModel); }
 }
 function rpDosyaAdi(tur,m){ return exportDosyaAdi('Medyapark',RPD[tur].dosya(m),_dt()); }
-/* Bilgi sayfası: yalnız rapor kapsamı ve kurallar — kapatılmış bilgi YOK. */
-function rpBilgiSayfa(m,satirlar){
-  return {ad:'Bilgi',yon:'portrait',bilgi:true,kol:[{b:'Başlık',w:28},{b:'Değer',w:90,sar:true}],
-    satir:[['Rapor',m.tur],['Başlık',m.baslik],...rpKunye(m),...(m.aciklama?[['Açıklama',m.aciklama]]:[]),...satirlar,
-      ['Not','Bu dosya oluşturulduğu andaki kayıtların anlık görüntüsüdür; canlı kayıt uygulamadadır.']]};
-}
-
 /* ==========================================================
    ORTAK KONTROL PARÇALARI
    ========================================================== */
@@ -518,22 +534,74 @@ function rpDonemDogrula(b,e,maxGun){
 }
 
 /* ==========================================================
-   1) MECRA MÜSAİTLİĞİ VE YAYIN DURUMU
-   Hesap Mecralar ekranıyla AYNI kurallar:
+   ŞABLON RENKLERİ — Excel, PDF ve önizleme AYNI tonları kullanır
+   (S15). Elle tutulan rezervasyon tablolarındaki okuma alışkanlığı:
+   boş yeşil, dolu kırmızı, opsiyon turuncu. Tonlar açık, yazı koyu;
+   renk tek taşıyıcı değildir — her hücrede durum ya da kurum yazılıdır.
+   ========================================================== */
+const RP_DR={
+  yayin:  {ad:'Dolu',      fill:'#F4C4BE', ink:'#7F1A10', bar:'#D24A3C'},
+  opsiyon:{ad:'Opsiyon',   fill:'#FAD6A0', ink:'#6E3D00', bar:'#E38B12'},
+  musait: {ad:'Müsait',    fill:'#CBEAD2', ink:'#155A2A', bar:'#3AA35A'},
+  disi:   {ad:'Dönem dışı',fill:'#E4E4E8', ink:'#5E5E64', bar:'#BDBDC3'}};
+const rpArgb=h=>'FF'+String(h).replace('#','').toUpperCase();
+const RP_XBORDER={style:'thin',color:{argb:'FFB8B8BF'}};
+const rpXKenar=()=>({top:RP_XBORDER,left:RP_XBORDER,bottom:RP_XBORDER,right:RP_XBORDER});
+/* Dönem gösterimi: aynı yılda "05.07–05.10.2026", yıl geçişinde iki tam tarih. */
+function rpAralik(s,e){ if(!s) return ''; if(!e) return rpTr(s)+' – ?'; if(s===e) return rpTr(s);
+  return s.slice(0,4)===e.slice(0,4)?`${rpTrKisa(s)}–${rpTr(e)}`:`${rpTr(s)}–${rpTr(e)}`; }
+/* Excel sayfa adı: 31 karakter, yasak karakter yok, benzersiz. */
+function rpSayfaAdi(t,kull){
+  const s=String(t||'').replace(/\s*\/\s*/g,'-').replace(/[\[\]:*?\/\\]/g,'-').replace(/\s+/g,' ').replace(/^'+|'+$/g,'').trim().slice(0,31)||'Sayfa';
+  let x=s,i=2; while(kull.has(x.toLocaleLowerCase('tr'))){ const ek=` (${i++})`; x=s.slice(0,31-ek.length)+ek; }
+  kull.add(x.toLocaleLowerCase('tr')); return x; }
+/* Kısa kurum adı (elle tutulan tablolardaki "WORK LOUNGE", "EKİM KOLEJİ"
+   gibi): tüzel ekler atılır, sözcük sınırında en çok `max` karakter;
+   yarım kalan bağlaç ("… VE") ve üç nokta bırakılmaz. Kimlik verisine
+   dokunmaz, yalnız gösterimdir. */
+function rpKisaAd(ad,max){ const w=orgKisa(ad||'',120).replace(/…$/,'').split(/\s+/).filter(Boolean); let o='';
+  for(const x of w){ if(o&&(o+' '+x).length>max) break; o=o?o+' '+x:x; }
+  return o.replace(/\s+(ve|VE|Ve|&|-|İLE|ile)$/,''); }
+const rpMecraKisa=ad=>{ const w=String(ad||'').trim().split(/\s+/).filter(Boolean); return w.length<=2?w.join(' '):w[0]; };
+/* Oranlı renk dilimi → CSS / Excel geçiş durakları (keskin sınır). */
+function rpDurak(dilim){ const top=dilim.reduce((t,d)=>t+d.gun,0)||1; let x=0; const out=[];
+  dilim.forEach(d=>{ const a=x/top; x+=d.gun; const b=x/top; out.push({tip:d.tip,a,b}); }); return out; }
+/* Hücre iki biçimde çizilir (Excel, PDF ve önizleme AYNI kural):
+   · TEK durumlu ay  → durum rengiyle dolu; üstte kurum/durum, altta tarih
+   · AY İÇİNDE DEĞİŞEN → nötr zemin; her dilim kendi renk işaretiyle
+     alt alta ("Müsait · 01.09–04.09", sonra kurum + tarih). Önizleme ve
+     PDF'te üstte günlere oranlı ince bir şerit de vardır. */
+const rpTekDurum=hc=>hc.dilim.length===1;
+function rpDilimSatir(pc){ return pc.tip==='musait'?[{t:pc.alt?`Müsait · ${pc.alt}`:'Müsait',b:true}]:[{t:pc.ust,b:true},...(pc.alt?[{t:pc.alt,b:false}]:[])]; }
+const rpCssSerit=h=>`linear-gradient(90deg,${rpDurak(h.dilim).map(d=>`${RP_DR[d.tip].bar} ${(d.a*100).toFixed(2)}% ${(d.b*100).toFixed(2)}%`).join(',')}) top/100% 5px no-repeat,#fff`;
+
+/* ==========================================================
+   1) MECRA DOLULUK TABLOSU (S15)
+   Referans: elle tutulan "M1 ADANA AVM PANOLAR REZ. LİSTESİ" — ürün
+   ailesi başına ayrı sayfa, yüzey kodları solda (A/B arka arkaya),
+   seçilen dönemin ayları sütunlarda, her yüzey İKİ satır: üstte kurum
+   ya da durum, altta kesin tarih aralığı.
+
+   Hesap Mecralar ekranıyla AYNI kurallar (değişmedi):
      · iptal edilen kayıt bloklamaz; opsiyon ve yayın bloklar
      · süresi dolmuş ama iptal edilmemiş opsiyon bloklamaya DEVAM eder
      · bitişi bilinmeyen kayıt dönem sonuna kadar bloklar
      · A/B yüzleri bağımsız
-     · gün düzeyinde tarama: ardışık yenileme sahte boşluk üretmez,
-       aynı yüzey-gün iki kez sayılmaz (yayın > opsiyon önceliği)
-     · kurum/iş/içerik ayarı hesabı DEĞİŞTİRMEZ; yalnız gösterimi
+     · gün düzeyinde tarama: ardışık yenileme sahte boşluk üretmez
+   Yeni olan yalnız GÖSTERİM:
+     · ayın bir kısmı doluysa ay ne "dolu" ne "müsait" gösterilir —
+       hücrede her dilim kendi durumu ve tarihiyle yazılır; renk günlere
+       göre bölünür
+     · seçilen başlangıç/bitiş dışındaki günler "dönem dışı"dır, müsait
+       sayılmaz (ay başlığı "Eki 2026 (15–31)")
+     · dış paylaşımda kurum adı MODELE HİÇ GİRMEZ; aynı yerleşimde
+       Dolu / Opsiyon / Müsait ve tarihler yazılır
    ========================================================== */
 function rpYuzAyir(name){ const t=String(name||'').trim(); const m=t.match(/^(.*[^\s._-])[\s._-]*([ABab])$/);
   return m?{base:m[1],yuz:m[2].toUpperCase()}:{base:t,yuz:''}; }
 function rpMecraKapsam(M,a){
-  const siteler=(a.siteler&&a.siteler.length?a.siteler.map(id=>M.mecById[id]):M.mecs).filter(mdKapsamda)
+  const siteler=(a.siteler&&a.siteler.length?a.siteler.map(id=>M.mecById[id]):M.mecs).filter(x=>x&&mdKapsamda(x))
     .sort((x,y)=>(x.sort||0)-(y.sort||0)||x.id-y.id);
-  const q=String(a.q||'').toLocaleLowerCase('tr').trim();
   const yuzler=[], led=[]; let pasif=0;
   siteler.forEach(m=>{
     const alanlar=[...(M.altByMec[m.id]||[])].filter(x=>!mdArsiv(x));
@@ -544,11 +612,9 @@ function rpMecraKapsam(M,a){
       if(mdEszamanli(al)){ led.push({m,al}); return; }
       (al._sahte?yetim:(M.unitsByAlt[al.id]||[])).forEach(u=>{
         const p=rpYuzAyir(u.name);
-        if(a.yuz&&p.yuz!==a.yuz) return;
-        if(q&&![u.name,al.name,m.name,mdAile(M,al)].some(v=>String(v||'').toLocaleLowerCase('tr').includes(q))) return;
         if(u.active===false){ pasif++; return; }
         yuzler.push({key:'u'+u.id,u,al,m,kod:u.name,pano:p.base,yuz:p.yuz,aile:al._sahte?'Diğer pozisyonlar':mdAile(M,al),
-          olcu:u.olcu||((M.prods.find(x=>String(x.id)===String(u.product_id||al.product_id))||{}).olcu)||'',konum:u.konum||''});
+          olcu:u.olcu||((M.prods.find(x=>String(x.id)===String(u.product_id||al.product_id))||{}).olcu)||''});
       });
     });
   });
@@ -569,525 +635,848 @@ function rpYuzSerit(M,u,b,e,ref){
     i=j+1; }
   return seg;
 }
-const RP_MECRA_CIKTI=[['tam','Dönemin tamamında müsait'],['aralik','Müsait tarih aralıkları'],['cizelge','Yayın / opsiyon çizelgesi']];
+function rpAyListe(b,e){ const out=[]; let y=+b.slice(0,4), mo=+b.slice(5,7);
+  while(`${y}-${rp2(mo)}`<=e.slice(0,7)){ out.push(`${y}-${rp2(mo)}`); mo++; if(mo>12){mo=1;y++;} } return out; }
+/* Seçilen dönemin ayları: kısmi ilk/son ay açıkça işaretlenir. */
+function rpDonemAylari(b,e){
+  return rpAyListe(b,e).map(ym=>{ const y=+ym.slice(0,4), mo=+ym.slice(5,7);
+    const ayB=ym+'-01', ayE=_cIso(new Date(y,mo,0)); const s=ayB<b?b:ayB, x=ayE>e?e:ayE;
+    const tam=s===ayB&&x===ayE;
+    return {ym,ayB,ayE,s,e:x,tam,once:rpDn(s)-rpDn(ayB),sonra:rpDn(ayE)-rpDn(x),
+      ad:`${RP_AYLAR[mo-1]} ${y}`+(tam?'':` (${+s.slice(8)}–${+x.slice(8)})`),
+      kisa:`${RP_AY3[mo-1]} ${y}`+(tam?'':` (${+s.slice(8)}–${+x.slice(8)})`)}; });
+}
+/* Bir yüzün bir aydaki hücresi. `parca` metin satırları, `dilim` renk oranı. */
+function rpDolHucre(seg,ay){
+  const parca=seg.filter(s=>s.s<=ay.e&&s.e>=ay.s).map(s=>{
+    const s0=s.s<ay.s?ay.s:s.s, e0=s.e>ay.e?ay.e:s.e;
+    const ayTamami=s0===ay.s&&e0===ay.e;
+    let ust, alt;
+    if(s.tip==='musait'){ ust='Müsait'; alt=ayTamami&&ay.tam?'':`${rpTrKisa(s0)}–${rpTrKisa(e0)}`; }
+    else {
+      ust=s.kim?(s.tip==='opsiyon'?'Opsiyon · '+s.kim:s.kim):RP_DR[s.tip].ad;
+      alt=s.aylik?`${RP_AY3[+s.ks.slice(5,7)-1]} ${s.ks.slice(0,4)} · ay bazlı kayıt`
+        :s.ke==null?`${rpTr(s.ks)} – bitiş belirsiz`:rpAralik(s.ks,s.ke);
+      if(s.opsSure) alt+=' · opsiyon süresi doldu';
+    }
+    return {tip:s.tip,s:s0,e:e0,gun:rpDn(e0)-rpDn(s0)+1,ust,alt};
+  });
+  const dilim=[...(ay.once?[{tip:'disi',gun:ay.once}]:[]),...parca.map(p=>({tip:p.tip,gun:p.gun})),...(ay.sonra?[{tip:'disi',gun:ay.sonra}]:[])];
+  const tipler=[...new Set(parca.map(p=>p.tip))];
+  return {parca,dilim,tip:tipler.length===1?tipler[0]:'karma'};
+}
 RPD_MECRA={
-  amac:'Belirli yüzeylerin belirli dönemdeki durumunu dışarıya gönderin. Hesap Mecralar ekranıyla aynı kuralları kullanır.',
-  presetNot:'Dış paylaşımda müşteri adları, iş adları ve iç notlar kapalıdır.',
-  varsayilan(){ const b=rpBugun(); const d=mdGun(b);
-    return {siteler:[],urun:'',yuz:'',q:'',bas:b,bit:_cIso(new Date(d.getFullYear(),d.getMonth()+3,0)),
-      cikti:'aralik',durum:'',minGun:1,led:true,ozet:false,olcu:true,konum:false}; },
-  preset(v){ return v==='dis'?{musteri:false,isAdi:false,notlar:false,ozet:false}:{musteri:true,isAdi:true,notlar:false,ozet:true}; },
+  sade:true,
+  amac:'Seçilen dönemde her yüzeyin ay ay durumu: kurum ya da durum ve kesin tarihler. Hesap Mecralar ekranıyla aynıdır.',
+  presetNot:'Dış paylaşımda kurum adları yazılmaz; aynı yerleşimde Dolu / Opsiyon / Müsait ve tarihler görünür.',
+  varsayilan(){ const d=mdGun(rpBugun());
+    return {siteler:[],urun:'',bas:_cIso(new Date(d.getFullYear(),d.getMonth(),1)),
+      bit:_cIso(new Date(d.getFullYear(),d.getMonth()+6,0)),tamMusait:false}; },
+  preset(){ return {}; },
+  alici:'dis',
   veriAnahtar:()=>'mecra',
   async veri(){ const M=await mdYukle(); return {M}; },
   veriSonra(a,v){ if(!a.siteler.length) a.siteler=v.M.mecs.filter(mdKapsamda).map(m=>m.id); },
   kontrolVeriyle:true,
-  baslik(a){ return a.cikti==='cizelge'?'Yayın ve opsiyon çizelgesi':a.cikti==='tam'?'Müsait yüzeyler':'Müsaitlik durumu'; },
-  dosya(m){ return m.cikti==='cizelge'?'Mecra_Cizelge':'Mecra_Musaitlik'; },
+  baslik(a,v){ const M=v&&v.M; const s=(a.siteler||[]).length===1&&M?M.mecById[a.siteler[0]]:null;
+    return 'Doluluk tablosu'+(s?' — '+s.name:''); },
+  dosya(m){ return 'Doluluk_Tablosu'+(m.tekMecra?'_'+m.tekMecra:''); },
   kontroller(a){
     const v=(rpDurum().veri||{}).mecra, M=v&&v.M, T='mecra';
     const siteler=M?M.mecs.filter(mdKapsamda).sort((x,y)=>(x.sort||0)-(y.sort||0)):[];
-    const urunler=M?[...new Map(M.alts.filter(x=>!mdArsiv(x)&&siteler.some(s=>s.id===x.mecra_id)&&x.product_id!=null)
+    const urunler=M?[...new Map(M.alts.filter(x=>!mdArsiv(x)&&a.siteler.includes(x.mecra_id)&&x.product_id!=null)
       .map(x=>[String(x.product_id),M.pm[x.product_id]||x.name])).entries()].sort((x,y)=>String(x[1]).localeCompare(String(y[1]),'tr')):[];
-    return `<div class="field"><span class="flabel">Çıktı</span>${rpSeg(T,'cikti',a.cikti,RP_MECRA_CIKTI,'Çıktı türü')}
-        <p class="fhint">${a.cikti==='tam'?'Seçilen dönemin HER gününde boş olan statik yüzeyler.'
-          :a.cikti==='aralik'?'Dönem içinde boş kalan tarih aralıkları — ayın yalnız son on günü boşsa o on gün yazılır.'
-          :'Seçilen yüzeylerin dönem boyunca yayın, opsiyon ve müsait dilimleri.'}</p></div>
-      ${rpTarihKontrol(T,a,'bas','bit')}
-      <div class="field"><span class="flabel">Lokasyon</span><div class="rp2-chips">${siteler.map(s=>`<label class="rp2-chk">
+    const hizli=[[3,'3 ay'],[6,'6 ay'],[12,'12 ay']];
+    return `<div class="rp3-f">
+      <div class="field"><span class="flabel">Dönem</span>${rpTarihKontrol(T,a,'bas','bit')}
+        <div class="rp3-hizli" role="group" aria-label="Hızlı dönem">${hizli.map(([n,l])=>`<button type="button" class="btn-link" onclick="rpMecraDonem(${n})">Bu aydan ${l}</button>`).join('')}
+          <button type="button" class="btn-link" onclick="rpMecraDonem('yil')">Bu yıl</button></div></div>
+      <div class="field"><span class="flabel">Mecra</span><div class="rp2-chips">${siteler.map(s=>`<label class="rp2-chk">
           <input type="checkbox" ${a.siteler.includes(s.id)?'checked':''} onchange="rpSiteSec(${s.id},this.checked)"> <span>${esc(s.name)}</span></label>`).join('')||'<span class="muted">Yükleniyor…</span>'}</div></div>
-      <div class="rp2-grid3">
-        <div class="field"><label class="flabel" for="rpUrun">Ürün türü</label><select class="inp ${a.urun?'inp-on':''}" id="rpUrun" onchange="rpSet('mecra','urun',this.value,true)">
+      <div class="rp2-grid">
+        <div class="field"><label class="flabel" for="rpUrun">Ürün</label><select class="inp ${a.urun?'inp-on':''}" id="rpUrun" onchange="rpSet('mecra','urun',this.value,true)">
           <option value="">Tüm ürünler</option>${urunler.map(([id,ad])=>`<option value="${esc(id)}" ${String(a.urun)===id?'selected':''}>${esc(ad)}</option>`).join('')}</select></div>
-        <div class="field"><label class="flabel" for="rpYuz">Yüz</label><select class="inp ${a.yuz?'inp-on':''}" id="rpYuz" onchange="rpSet('mecra','yuz',this.value,true)">
-          <option value="">A ve B</option><option value="A" ${a.yuz==='A'?'selected':''}>Yalnız A</option><option value="B" ${a.yuz==='B'?'selected':''}>Yalnız B</option></select></div>
-        <div class="field"><label class="flabel" for="rpQ">Pozisyon ara</label><input class="inp" id="rpQ" value="${esc(a.q)}" placeholder="P1, Megalight…" oninput="rpAraGecikmeli('mecra','q',this.value)"></div>
-      </div>
-      ${a.cikti==='cizelge'?`<div class="field"><span class="flabel">Durum</span>${rpSeg(T,'durum',a.durum,[['','Tümü'],['yayin','Yayın kaydı olanlar'],['opsiyon','Opsiyon kaydı olanlar'],['musait','Tamamen müsait olanlar']],'Durum süzgeci')}
-        <p class="fhint">Süzgeç yalnız hangi yüzeylerin listeleneceğini seçer; dilimler her zaman bütün kayıtlardan hesaplanır.</p></div>`:''}
-      <details class="rp2-adv" ${rpDurum().adv?'open':''} ontoggle="rpDurum().adv=this.open"><summary>Ayrıntılı ayarlar</summary>
-        ${a.cikti==='aralik'?`<div class="field" style="max-width:260px"><label class="flabel" for="rpMin">En kısa aralık (gün)</label>
-          <input class="inp" type="number" min="1" max="365" id="rpMin" value="${esc(a.minGun)}" onchange="rpSet('mecra','minGun',Math.max(1,+this.value||1))"></div>`:''}
-        <div class="rp2-chips col">
-          ${rpChk(T,'olcu',a.olcu,'Teknik ölçü')}
-          ${rpChk(T,'konum',a.konum,'Konum açıklaması')}
-          ${rpChk(T,'led',a.led,'LED yayın bölümü','statik müsaitliğe katılmaz')}
-          ${rpChk(T,'ozet',a.ozet,'Doluluk özeti','tek gün ve dönem oranları ayrı')}
-          ${a.cikti==='cizelge'||a.led?rpChk(T,'musteri',a.musteri,'Müşteri adları'):''}
-          ${a.cikti==='cizelge'||a.led?rpChk(T,'isAdi',a.isAdi,'İş adları'):''}
-          ${a.cikti==='cizelge'||a.led?rpChk(T,'notlar',a.notlar,'Kayıt notları','iç not içerebilir'):''}
-        </div></details>`;
+        <div class="field"><span class="flabel">Kimin için</span>${rpAliciSeg(T,a)}</div></div>
+      ${rpChk(T,'tamMusait',a.tamMusait,'Yalnız dönemin tamamında müsait yüzeyler')}
+    </div>`;
   },
   model(a,v){
-    const M=v.M, T='mecra';
-    const hata=rpDonemDogrula(a.bas,a.bit,1100);
-    const out={cikti:a.cikti,bas:a.bas,bit:a.bit,gruplar:[],led:[],uyari:[],hata,
-      bilgi:[['Dönem',a.bas&&a.bit?`${rpTr(a.bas)} – ${rpTr(a.bit)}`:''],['Çıktı',(RP_MECRA_CIKTI.find(x=>x[0]===a.cikti)||[])[1]]]};
+    const M=v.M, T='mecra', ic=a._alici==='ic';
+    const hata=rpDonemDogrula(a.bas,a.bit,740);
+    const out={bas:a.bas,bit:a.bit,ic,aylar:[],sayfalar:[],led:[],uyari:[],hata,
+      bilgi:[['Dönem',a.bas&&a.bit?`${rpTr(a.bas)} – ${rpTr(a.bit)}`:'']]};
     if(hata){ out.uyari.push(hata); out.say={dahil:0,filtre:0,cik:0,birim:'yüz'}; return out; }
     const ref=rpBugun();
     const K=rpMecraKapsam(M,a);
-    out.bilgi.push(['Lokasyon',K.siteler.map(s=>s.name).join(', ')]);
-    if(a.urun) out.bilgi.push(['Ürün',M.pm[a.urun]||'']);
-    if(a.yuz) out.bilgi.push(['Yüz',a.yuz==='A'?'Yalnız A':'Yalnız B']);
-    const kisi=r=>{ if(!r) return ''; const p=[];
-      if(a.musteri&&r.customer_id) p.push(orgKisa(M.cmap[r.customer_id]||'',40));
-      if(a.isAdi&&r.work_id&&M.jmap[r.work_id]) p.push(M.jmap[r.work_id].title||'');
-      return p.filter(Boolean).join(' · '); };
-    /* Çizelge hücresi dar: yalnız kısa kurum etiketi (tam ad ve iş adı Excel listesinde). */
-    const kisaKim=r=>!r?'':a.musteri&&r.customer_id?mdOrgEtiket(M.cmap[r.customer_id]||''):(a.isAdi&&r.work_id&&M.jmap[r.work_id]?orgKisa(M.jmap[r.work_id].title||'',22):'');
-    const gorunen=new Set(); let filtre=0;
-    const hepsi=K.yuzler.map(y=>{
-      const seg=rpYuzSerit(M,y.u,a.bas,a.bit,ref);
-      const bos=seg.filter(s=>s.tip==='musait');
-      return {...y,seg,bos,tam:seg.length===1&&seg[0].tip==='musait',
-        aylik:seg.some(s=>s.aylik),acikUc:seg.some(s=>s.acikUc)};
+    out.aylar=rpDonemAylari(a.bas,a.bit);
+    /* Kurum etiketi YALNIZ iç kullanımda kurulur; dış modelde yoktur. */
+    /* Kısa etiket (elle tutulan tablodaki "WORK LOUNGE", "EKİM KOLEJİ"
+       gibi): tüzel ekler atılır, sözcük sınırında en çok 22 karakter,
+       yarım kalan bağlaç ("… VE") ve üç nokta bırakılmaz. */
+    const kisa=t=>rpKisaAd(t,22);
+    const kim=r=>{ if(!ic||!r) return null;
+      if(r.customer_id&&M.cmap[r.customer_id]) return kisa(M.cmap[r.customer_id]);
+      if(r.work_id&&M.jmap[r.work_id]) return kisa(M.jmap[r.work_id].title||'');
+      return null; };
+    const gorunen=new Set();
+    let yuzler=K.yuzler.map(y=>{
+      const seg=rpYuzSerit(M,y.u,a.bas,a.bit,ref).map(s=>({s:s.s,e:s.e,gun:s.gun,tip:s.tip,acikUc:s.acikUc,aylik:s.aylik,
+        opsSure:ic&&s.opsSure,ks:s.r?s.r.block_start:null,ke:s.r?s.r.block_end:null,kim:kim(s.r)}));
+      const bos=seg.filter(s=>s.tip==='musait').map(s=>({s:s.s,e:s.e,gun:s.gun}));
+      return {...y,seg,bos,tam:seg.length===1&&seg[0].tip==='musait'};
     });
-    let liste=hepsi;
-    if(a.cikti==='tam') liste=hepsi.filter(y=>y.tam);
-    else if(a.cikti==='aralik') liste=hepsi.filter(y=>y.bos.some(s=>s.gun>=(a.minGun||1)));
-    else if(a.durum==='yayin') liste=hepsi.filter(y=>y.seg.some(s=>s.tip==='yayin'));
-    else if(a.durum==='opsiyon') liste=hepsi.filter(y=>y.seg.some(s=>s.tip==='opsiyon'));
-    else if(a.durum==='musait') liste=hepsi.filter(y=>y.tam);
-    liste.forEach(y=>gorunen.add(y.key)); filtre=liste.length;
-    /* LED */
+    if(a.tamMusait) yuzler=yuzler.filter(y=>y.tam);
+    yuzler.forEach(y=>gorunen.add(y.key));
+    /* LED — eşzamanlı yayın; statik müsaitliğe ve yüz sayısına katılmaz. */
     const ledSatir=[];
-    if(a.led) K.led.forEach(({m,al})=>{
+    if(!a.tamMusait) K.led.forEach(({m,al})=>{
       (M.byArea[al.id]||[]).filter(r=>r.commitment!=='cancelled'&&r.block_start<=a.bit&&(r.block_end==null||r.block_end>=a.bas))
+        .sort((x,y)=>String(x.block_start).localeCompare(String(y.block_start)))
         .forEach(r=>{ const key='l'+mdKayitKey(r); gorunen.add(key);
-          /* S14: ham kayıt (kurum adı, iş adı, not taşır) modele KOPYALANMAZ;
-             yalnız dönem. Kapalı alan dış paylaşım modelinde bulunmamalı. */
-          ledSatir.push({key,m,al,r:{block_start:r.block_start,block_end:r.block_end},tip:r.commitment==='confirmed'?'yayin':'opsiyon',
-            s:r.block_start<a.bas?a.bas:r.block_start,e:r.block_end==null||r.block_end>a.bit?a.bit:r.block_end,
-            solTasar:r.block_start<a.bas,sagTasar:r.block_end==null||r.block_end>a.bit,acikUc:r.block_end==null,
-            kim:kisi(r),not:a.notlar?(r.note||''):''}); }); });
+          ledSatir.push({key,alan:`${m.name} · ${al.name}`,sure:mdSure(al)||'',tip:r.commitment==='confirmed'?'yayin':'opsiyon',
+            bas:r.block_start,bit:r.block_end,kim:kim(r)||''}); }); });
     out.budanan=rpBuda(T,gorunen);
-    const dahilY=liste.filter(y=>rpDahil(T,y.key));
-    const dahilL=ledSatir.filter(l=>rpDahil(T,l.key));
-    /* Lokasyon → ürün gruplaması */
-    const gm=new Map();
-    liste.forEach(y=>{ const k1=y.m.id; if(!gm.has(k1)) gm.set(k1,{m:y.m,urunler:new Map()});
-      const g=gm.get(k1); const k2=y.aile; if(!g.urunler.has(k2)) g.urunler.set(k2,[]); g.urunler.get(k2).push(y); });
-    out.gruplar=[...gm.values()].map(g=>({ad:g.m.name,urunler:[...g.urunler.entries()].map(([ad,ys])=>({ad,yuzler:ys.map(y=>({
-      key:y.key,dahil:rpDahil(T,y.key),kod:y.kod,pano:y.pano,yuz:y.yuz,olcu:a.olcu?y.olcu:'',konum:a.konum?y.konum:'',
-      tam:y.tam,aylik:y.aylik,acikUc:y.acikUc,
-      bos:y.bos.filter(s=>s.gun>=(a.cikti==='aralik'?(a.minGun||1):1)).map(s=>({s:s.s,e:s.e,gun:s.gun})),
-      seg:y.seg.map(s=>({s:s.s,e:s.e,gun:s.gun,tip:s.tip,acikUc:s.acikUc,aylik:s.aylik,
-        opsSure:a._alici==='ic'&&s.opsSure,kim:kisi(s.r),kisa:kisaKim(s.r),not:a.notlar&&s.r?(s.r.note||''):''}))}))}))}));
-    out.led=a.led?[...new Map(K.led.map(x=>[x.al.id,x])).values()].map(({m,al})=>({ad:`${m.name} · ${al.name}`,
-      sure:mdSure(al),kampanyalar:ledSatir.filter(l=>l.al.id===al.id).map(l=>({...l,dahil:rpDahil(T,l.key)}))})):[];
-    out.toplamYuz=K.yuzler.length; out.pasif=K.pasif;
-    { const lk=[...new Set([...dahilY.map(y=>y.m.name),...dahilL.map(l=>l.m.name)])];
-      const i=out.bilgi.findIndex(x=>x[0]==='Lokasyon'); if(i>=0&&lk.length) out.bilgi[i]=['Lokasyon',lk.join(', ')]; }
-    out.dahilYuzSay=dahilY.length; out.dahilLedSay=dahilL.length;
-    out.panoSay=new Set(dahilY.map(y=>y.m.id+'|'+y.al.id+'|'+y.pano)).size;
-    /* Doluluk özeti — payda: seçili kapsamdaki (kullanıcının çıkarmadığı)
-       aktif statik yüzler × gün. Tek gün oranı ile yüzey-gün oranı ayrıdır. */
-    if(a.ozet){
-      const kap=hepsi.filter(y=>rpDahil(T,y.key)||!gorunen.has(y.key));
-      const gunSay=rpDn(a.bit)-rpDn(a.bas)+1;
-      const tek={yayin:0,opsiyon:0,musait:0}; const donem={yayin:0,opsiyon:0,musait:0}; const lok={};
-      kap.forEach(y=>{ const ilk=y.seg[0]; tek[ilk.tip]++;
-        const L=lok[y.m.name]=lok[y.m.name]||{ad:y.m.name,yuz:0,yayin:0,opsiyon:0,musait:0};
-        L.yuz++; y.seg.forEach(s=>{ donem[s.tip]+=s.gun; L[s.tip]+=s.gun; }); });
-      const n=kap.length, T2=n*gunSay;
-      out.ozet={ref:a.bas,n,gunSay,toplam:T2,tek,donem,lok:Object.values(lok).map(L=>({...L,toplam:L.yuz*gunSay}))};
-    }
-    const birim=a.cikti==='cizelge'?'yüz':'müsait yüz';
-    out.say={dahil:dahilY.length+dahilL.length,filtre:filtre+ledSatir.length,cik:(filtre+ledSatir.length)-(dahilY.length+dahilL.length),
-      birim:ledSatir.length?`kayıt (${birim} + LED kampanyası)`:birim};
-    if(!K.yuzler.length) out.uyari.push('Seçilen kapsamda statik yüz yok.');
+    /* Lokasyon + ürün ailesi = bir sayfa; pano = A/B çifti. */
+    const gm=new Map(), kull=new Set();
+    yuzler.forEach(y=>{ const k=y.m.id+'|'+y.al.id; if(!gm.has(k)) gm.set(k,{m:y.m,al:y.al,aile:y.aile,ys:[]}); gm.get(k).ys.push(y); });
+    const dogal=(x,y)=>String(x).localeCompare(String(y),'tr',{numeric:true});
+    out.sayfalar=[...gm.values()].map(g=>{
+      const pm=new Map(); g.ys.sort((x,y)=>dogal(x.pano,y.pano)||dogal(x.yuz,y.yuz)).forEach(y=>{ if(!pm.has(y.pano)) pm.set(y.pano,[]); pm.get(y.pano).push(y); });
+      let no=0;
+      const panolar=[...pm.entries()].map(([pano,ys])=>{ const yz=ys.map(y=>({key:y.key,kod:y.kod,yuz:y.yuz,dahil:rpDahil(T,y.key),
+          seg:y.seg,bos:y.bos,tam:y.tam,hucre:out.aylar.map(ay=>rpDolHucre(y.seg,ay))}));
+        const dahil=yz.some(f=>f.dahil); return {pano,no:dahil?++no:null,dahil,yuzler:yz}; });
+      const olculer=[...new Set(g.ys.map(y=>y.olcu).filter(Boolean))];
+      return {key:g.m.id+'|'+g.al.id,mecra:g.m.name,aile:g.aile,baslik:`${g.m.name} · ${g.aile}`,
+        ad:rpSayfaAdi(`${rpMecraKisa(g.m.name)} ${g.aile}`,kull),olcu:olculer.length===1?olculer[0]:'',panolar};
+    });
+    out.led=ledSatir.map(l=>({...l,dahil:rpDahil(T,l.key)}));
+    if(out.led.length) out.ledAd=rpSayfaAdi('LED yayınları',kull);
+    const dahilY=yuzler.filter(y=>rpDahil(T,y.key)), dahilL=out.led.filter(l=>l.dahil);
+    out.dahilYuzSay=dahilY.length; out.dahilLedSay=dahilL.length; out.pasif=K.pasif; out.toplamYuz=K.yuzler.length;
+    out.tamMusait=!!a.tamMusait;
+    const lk=[...new Set(dahilY.map(y=>y.m.name).concat(dahilL.map(l=>l.alan.split(' · ')[0])))];
+    if(lk.length) out.bilgi.push(['Mecra',lk.join(', ')]);
+    if(a.urun) out.bilgi.push(['Ürün',M.pm[a.urun]||'']);
+    if(a.tamMusait) out.bilgi.push(['Kapsam','Yalnız dönemin tamamında müsait yüzeyler']);
+    if((a.siteler||[]).length===1&&M.mecById[a.siteler[0]]) out.tekMecra=rpMecraKisa(M.mecById[a.siteler[0]].name);
+    out.say={dahil:dahilY.length+dahilL.length,filtre:yuzler.length+ledSatir.length,cik:(yuzler.length+ledSatir.length)-(dahilY.length+dahilL.length),
+      birim:ledSatir.length?'kayıt (yüz + LED kampanyası)':'yüz'};
+    if(!K.yuzler.length&&!K.led.length) out.uyari.push('Seçilen kapsamda yüzey yok.');
+    else if(a.tamMusait&&!yuzler.length) out.uyari.push('Bu dönemin tamamında müsait yüzey yok.');
     return out;
   },
-  onizle(m,a){
-    const T='mecra';
-    if(m.hata) return '';
-    let h=`<p class="rp2-ozet">${m.cikti==='tam'?`Kapsamdaki <b>${m.toplamYuz}</b> aktif statik yüzden <b>${m.gruplar.reduce((t,g)=>t+g.urunler.reduce((x,u)=>x+u.yuzler.length,0),0)}</b> tanesi ${esc(rpTr(m.bas))} – ${esc(rpTr(m.bit))} döneminin tamamında müsait.`
-      :m.cikti==='aralik'?`Kapsamdaki <b>${m.toplamYuz}</b> aktif statik yüzden <b>${m.gruplar.reduce((t,g)=>t+g.urunler.reduce((x,u)=>x+u.yuzler.length,0),0)}</b> tanesinde dönem içinde müsait aralık var.`
-      :`<b>${m.gruplar.reduce((t,g)=>t+g.urunler.reduce((x,u)=>x+u.yuzler.length,0),0)}</b> yüz listeleniyor.`}
-      ${m.pasif?` <span class="muted">${m.pasif} pasif yüz hesaba katılmadı.</span>`:''}</p>`;
-    if(!m.gruplar.length) h+=`<p class="empty">${m.cikti==='tam'?'Bu dönemin tamamında müsait yüz yok.':m.cikti==='aralik'?'Bu dönemde müsait aralık yok.':'Listelenecek yüz yok.'}</p>`;
-    m.gruplar.forEach(g=>{ h+=`<h5 class="rp2-g1">${esc(g.ad)}</h5>`;
-      g.urunler.forEach(u=>{ const keys=u.yuzler.map(y=>y.key);
-        h+=`<div class="rp2-g2"><span>${esc(u.ad)} <em>${u.yuzler.length} yüz</em></span>
-          <button type="button" class="btn-link" onclick='rpSecTopluKey("mecra",${JSON.stringify(keys)},true)'>tümü</button>
-          <button type="button" class="btn-link" onclick='rpSecTopluKey("mecra",${JSON.stringify(keys)},false)'>hiçbiri</button></div>
-          <div class="rp2-rows">${u.yuzler.map(y=>`<label class="rp2-row ${y.dahil?'':'dis'}">${rpCb(T,y.key,y.dahil,y.kod+' rapora dahil')}
-            <b class="rp2-kod">${esc(y.kod)}</b><span class="rp2-olcu">${esc(y.olcu||'')}</span>
-            <span class="rp2-det">${m.cikti==='tam'?'<span class="rp2-t musait">Dönem boyunca müsait</span>'
-              :m.cikti==='aralik'?(y.tam?'<span class="rp2-t musait">Dönem boyunca müsait</span>':y.bos.map(s=>`<span class="rp2-t musait">${esc(rpTrKisa(s.s))}–${esc(rpTr(s.e))} · ${s.gun} gün</span>`).join(' '))
-              :y.seg.map(s=>`<span class="rp2-t ${s.tip}">${esc(rpTrKisa(s.s))}–${esc(rpTrKisa(s.e))} ${s.tip==='musait'?'Müsait':s.tip==='yayin'?'Yayın':'Opsiyon'}${s.opsSure?' (süresi doldu)':''}${s.kim?' · '+esc(s.kim):''}${s.acikUc?' · bitiş bilinmiyor':''}</span>`).join(' ')}
-              ${y.aylik?' <span class="rp2-t uyari">ay bazlı eski kayıt</span>':''}</span></label>`).join('')}</div>`; }); });
-    if(m.led.length){ h+=`<h5 class="rp2-g1">LED yayın alanları</h5><p class="fhint">LED eşzamanlı yayındır: kampanya sayısı boş kapasite, ekran sayısı ya da doluluk oranı göstermez; statik müsaitlik toplamına katılmaz.</p>`;
-      m.led.forEach(l=>{ h+=`<div class="rp2-g2"><span>${esc(l.ad)}${l.sure?` <em>${esc(l.sure)} kreatif</em>`:''}</span></div>
-        <div class="rp2-rows">${l.kampanyalar.length?l.kampanyalar.map(k=>`<label class="rp2-row ${k.dahil?'':'dis'}">${rpCb(T,k.key,k.dahil,'LED kampanyası rapora dahil')}
-          <span class="rp2-t ${k.tip}">${k.tip==='yayin'?'Yayın':'Opsiyon'}</span> <span>${esc(rpTr(k.r.block_start))} – ${k.acikUc?'bitiş bilinmiyor':esc(rpTr(k.r.block_end))}</span>
-          <span class="rp2-det">${esc(k.kim||'')}${k.not?' · '+esc(k.not):''}</span></label>`).join(''):'<p class="empty">Bu dönemde kampanya yok.</p>'}</div>`; }); }
-    if(m.ozet) h+=rpMecraOzetHtml(m.ozet);
+  onizle(m){
+    const T='mecra'; if(m.hata) return '';
+    let h=`<div class="rp3-lej" aria-label="Renk anahtarı">${['yayin','opsiyon','musait','disi'].map(t=>`<span><i style="background:${RP_DR[t].fill}"></i>${RP_DR[t].ad}</span>`).join('')}
+      <em>Ay içinde durum değişiyorsa hücre beyaz kalır; her dilim kendi rengi ve tarihiyle alt alta yazılır, üstteki şerit günlere göre bölünür.</em></div>`;
+    if(!m.sayfalar.length&&!m.led.length) return h+`<p class="empty">Listelenecek yüzey yok.</p>`;
+    m.sayfalar.forEach(sf=>{ const keys=sf.panolar.flatMap(p=>p.yuzler.map(f=>f.key));
+      h+=`<div class="rp3-sh"><h5 class="rp2-g1">${esc(sf.baslik)}${sf.olcu?` <em>${esc(sf.olcu)}</em>`:''} <span class="rp3-sa">Excel sayfası: ${esc(sf.ad)}</span></h5>
+        <span class="rp3-tum"><button type="button" class="btn-link" onclick='rpSecTopluKey("mecra",${JSON.stringify(keys)},true)'>tümü</button>
+        <button type="button" class="btn-link" onclick='rpSecTopluKey("mecra",${JSON.stringify(keys)},false)'>hiçbiri</button></span></div>
+        <div class="rp3-kap"><table class="rp3-tab rp3-dol"><thead><tr><th scope="col">No</th><th scope="col">Yüz</th>${m.aylar.map(a=>`<th scope="col">${esc(a.kisa)}</th>`).join('')}</tr></thead><tbody>
+        ${sf.panolar.map(p=>p.yuzler.map((f,i)=>`<tr class="${f.dahil?'':'dis'}${i===p.yuzler.length-1?' son':''}">
+          ${i===0?`<td class="rp3-no" rowspan="${p.yuzler.length}">${p.no||''}</td>`:''}
+          <td class="rp3-yuz"><label>${rpCb(T,f.key,f.dahil,f.kod+' rapora dahil')} <b>${esc(f.kod)}</b></label></td>
+          ${f.hucre.map(hc=>rpTekDurum(hc)?`<td style="background:${RP_DR[hc.dilim[0].tip].fill}">${hc.parca.map(pc=>`<div class="rp3-p" style="color:${RP_DR[pc.tip].ink}"><b>${esc(pc.ust)}</b>${pc.alt?`<small>${esc(pc.alt)}</small>`:''}</div>`).join('')}</td>`
+            :`<td class="rp3-karma" style="background:${rpCssSerit(hc)}">${hc.parca.map(pc=>`<div class="rp3-p rp3-dp" style="color:${RP_DR[pc.tip].ink}"><i style="background:${RP_DR[pc.tip].bar}"></i><span>${rpDilimSatir(pc).map(x=>x.b?`<b>${esc(x.t)}</b>`:`<small>${esc(x.t)}</small>`).join('')}</span></div>`).join('')}</td>`).join('')}
+        </tr>`).join('')).join('')}</tbody></table></div>`; });
+    if(m.led.length){ h+=`<div class="rp3-sh"><h5 class="rp2-g1">LED yayınları <span class="rp3-sa">Excel sayfası: ${esc(m.ledAd)}</span></h5></div>
+      <p class="fhint">LED eşzamanlı yayındır: kampanya sayısı boş kapasite ya da doluluk göstermez; statik müsaitliğe katılmaz.</p>
+      <div class="rp2-rows">${m.led.map(l=>`<label class="rp2-row ${l.dahil?'':'dis'}">${rpCb(T,l.key,l.dahil,'LED kampanyası rapora dahil')}
+        <b>${esc(l.alan)}</b><span class="rp2-t ${l.tip}">${l.tip==='yayin'?'Yayın':'Opsiyon'}</span> <span>${esc(rpAralik(l.bas,l.bit))}</span>
+        <span class="rp2-det">${esc(l.kim)}</span></label>`).join('')}</div>`; }
     return h;
   },
-  pdf(m,a){
+  pdf(m){
     const ic=[];
-    const liste=m.gruplar.map(g=>({...g,urunler:g.urunler.map(u=>({...u,yuzler:u.yuzler.filter(y=>y.dahil)})).filter(u=>u.yuzler.length)})).filter(g=>g.urunler.length);
-    const yuzN=liste.reduce((t,g)=>t+g.urunler.reduce((x,u)=>x+u.yuzler.length,0),0);
-    ic.push({text:m.cikti==='tam'?`${yuzN} yüz, ${rpTr(m.bas)} – ${rpTr(m.bit)} döneminin tamamında müsait.`
-      :m.cikti==='aralik'?`${yuzN} yüzde dönem içinde müsait tarih aralığı var. Aralıklar başlangıç ve bitiş günlerini kapsar.`
-      :`${yuzN} yüzün ${rpTr(m.bas)} – ${rpTr(m.bit)} dönemindeki yayın, opsiyon ve müsait dilimleri.`,margin:[0,0,0,6]});
-    if(!liste.length) ic.push({text:m.cikti==='cizelge'?'Listelenecek yüz yok.':'Bu kapsam ve dönemde müsait yüz bulunmuyor.',style:'bos'});
-    const cizelge=m.cikti==='cizelge';
-    liste.forEach(g=>{
-      g.urunler.forEach((u,ui)=>{ const ust=[ui===0?{text:g.ad,stil:'h2'}:null,{text:`${u.ad}  ·  ${u.yuzler.length} yüz`}];
-        if(cizelge){ ic.push(...rpCizelgePdf(m,u.yuzler,ust)); return; }
-        const kol=[{b:'Pozisyon',g:60},{b:'Yüz',g:28},...(a.olcu?[{b:'Ölçü',g:90}]:[]),
-          {b:m.cikti==='tam'?'Durum':'Müsait tarih aralıkları',g:'*'},...(m.cikti==='aralik'?[{b:'Müsait gün',g:52,sag:true}]:[]),...(a.konum?[{b:'Konum',g:110}]:[])];
-        ic.push(rpTablo(kol,u.yuzler.map(y=>[{text:y.pano,bold:true},y.yuz||'—',...(a.olcu?[y.olcu||'—']:[]),
-          m.cikti==='tam'?{text:'Dönem boyunca müsait',color:RPC.yesil}
-            :{stack:[...(y.tam?[{text:'Dönem boyunca müsait',color:RPC.yesil}]:y.bos.map(s=>({text:`${rpTr(s.s)} – ${rpTr(s.e)}  (${s.gun} gün)`}))),
-              ...(y.aylik?[{text:'Sınır, ay bazlı eski bir kayda dayanır; kesin gün bilgisi yok.',style:'not'}]:[])]},
-          ...(m.cikti==='aralik'?[String(y.bos.reduce((t,s)=>t+s.gun,0))]:[]),...(a.konum?[y.konum||'']:[])]),{ust}));
+    ic.push({text:['yayin','opsiyon','musait','disi'].flatMap(t=>[{text:'  '+RP_DR[t].ad+'  ',background:RP_DR[t].fill,color:RP_DR[t].ink,bold:true},'   '])
+      .concat([{text:'Ay içinde durum değişiyorsa hücre beyaz kalır; dilimler alt alta, üstteki şerit günlere göre.',color:RPC.ink3}]),fontSize:8.5,margin:[0,0,0,8]});
+    const say=m.sayfalar.reduce((t,s)=>t+s.panolar.reduce((x,p)=>x+p.yuzler.filter(f=>f.dahil).length,0),0);
+    if(!say&&!m.led.some(l=>l.dahil)) ic.push({text:'Listelenecek yüzey yok.',style:'bos'});
+    const W=770, noW=20, yuzW=46, LH=10.2, FS=8.3;
+    const blok=[]; for(let i=0;i<m.aylar.length;i+=6) blok.push(m.aylar.slice(i,i+6).map((a,k)=>({a,i:i+k})));
+    /* Yüz hücreleri A ve B için tüm ay sütunlarında AYNI yükseklikte tutulur
+       (iç tablo `heights`), böylece bir pano tek tablo satırında kalır ve
+       A/B çifti sayfa sonunda bölünmez. Yükseklik metin uzunluğundan tahmin edilir. */
+    const satirSay=(t,kap)=>t?Math.max(1,Math.ceil(String(t).length/kap)):0;
+    m.sayfalar.forEach(sf=>{ const panolar=sf.panolar.map(p=>({...p,yuzler:p.yuzler.filter(f=>f.dahil)})).filter(p=>p.yuzler.length);
+      if(!panolar.length) return;
+      blok.forEach((ay,bi)=>{
+        const colW=Math.floor((W-noW-yuzW)/ay.length), kap=Math.floor((colW-8)/(FS*0.58));
+        const hucreSatir=hc=>rpTekDurum(hc)?hc.parca.reduce((t,p)=>t+satirSay(p.ust,kap)+satirSay(p.alt,kap),0)
+          :0.6+hc.parca.reduce((t,p)=>t+rpDilimSatir(p).reduce((x,l)=>x+satirSay(l.t,kap-2),0),0);
+        const yuk=f=>Math.max(2,...ay.map(({i})=>hucreSatir(f.hucre[i])))*LH+6;
+        const govde=panolar.map(p=>{ const hs=p.yuzler.map(yuk);
+          const icT=(icerik,fill)=>({table:{widths:['*'],heights:hs,body:icerik.map((c,k)=>[{...c,fillColor:fill?fill(k):null}])},
+            layout:{hLineWidth:(i,n)=>i>0&&i<n.table.body.length?0.5:0,vLineWidth:()=>0,hLineColor:()=>'#9c9ca3',
+              paddingLeft:()=>3,paddingRight:()=>3,paddingTop:()=>2,paddingBottom:()=>2}});
+          const sonFill=i=>{ const hc=p.yuzler[p.yuzler.length-1].hucre[i]; return rpTekDurum(hc)?RP_DR[hc.dilim[0].tip].fill:'#ffffff'; };
+          return [{text:String(p.no),alignment:'center',bold:true,margin:[0,4,0,0]},
+            icT(p.yuzler.map(f=>({text:f.kod,bold:true}))),
+            ...ay.map(({i})=>({...icT(p.yuzler.map(f=>{ const hc=f.hucre[i];
+                if(rpTekDurum(hc)) return {stack:hc.parca.flatMap(pc=>[{text:pc.ust,bold:true,color:RP_DR[pc.tip].ink,fontSize:FS},
+                  ...(pc.alt?[{text:pc.alt,color:RP_DR[pc.tip].ink,fontSize:FS-0.7}]:[])])};
+                const w=colW-8;
+                return {stack:[{canvas:rpDurak(hc.dilim).map(d=>({type:'rect',x:d.a*w,y:0,w:Math.max(0.6,(d.b-d.a)*w),h:3.2,color:RP_DR[d.tip].bar})),margin:[0,0,0,2]},
+                  ...hc.parca.flatMap(pc=>rpDilimSatir(pc).map((l,k)=>({columns:[{width:6,canvas:k===0?[{type:'rect',x:0,y:2.4,w:4,h:4.5,color:RP_DR[pc.tip].bar}]:[]},
+                    {text:l.t,bold:l.b,color:RP_DR[pc.tip].ink,fontSize:l.b?FS:FS-0.7}],columnGap:2})))]}; }),
+              k=>{ const hc=p.yuzler[k].hucre[i]; return rpTekDurum(hc)?RP_DR[hc.dilim[0].tip].fill:'#ffffff'; }),fillColor:sonFill(i)}))];
+        });
+        const bos=n=>Array(n).fill({});
+        const kenarsiz={border:[false,false,false,false]};
+        const bas=[{text:sf.baslik+(bi?'  ·  devam':''),colSpan:2+ay.length,style:'h2',margin:[0,4,0,0],...kenarsiz},...bos(1+ay.length)];
+        const alt=[{text:(sf.olcu?sf.olcu+'  ·  ':'')+`${ay[0].a.ad} – ${ay[ay.length-1].a.ad}`,colSpan:2+ay.length,style:'not',margin:[0,0,0,3],...kenarsiz},...bos(1+ay.length)];
+        ic.push({table:{headerRows:3,dontBreakRows:true,keepWithHeaderRows:1,widths:[noW,yuzW,...ay.map(()=>colW)],
+          body:[bas,alt,[{text:'No',style:'th',alignment:'center'},{text:'Yüz',style:'th'},...ay.map(({a})=>({text:a.ad,style:'th',alignment:'center'}))],...govde]},
+          layout:{hLineWidth:(i,n)=>i<2?0:(i===2||i===3||i===n.table.body.length?0.9:0.6),vLineWidth:()=>0.4,
+            hLineColor:()=>'#8e8e95',vLineColor:()=>'#b8b8bf',fillColor:i=>i===2?'#FFE699':null,
+            paddingLeft:()=>0,paddingRight:()=>0,paddingTop:()=>0,paddingBottom:()=>0},margin:[0,0,0,10]});
       }); });
-    if(m.led.some(l=>!l.kampanyalar.length||l.kampanyalar.some(x=>x.dahil))){
-      /* Bölüm başlığı ve açıklaması İLK LED tablosunun başlık satırlarıdır:
-         sayfa sonunda tek başına kalamaz. */
-      let ilk=true;
-      const ledBas=()=>{ if(!ilk) return []; ilk=false; return [{text:'LED yayın alanları',stil:'h2'},
-        {text:'LED eşzamanlı yayındır. Kampanya sayısı boş kapasite, ekran sayısı ya da doluluk oranı göstermez; bu bölüm statik müsaitlik toplamına katılmaz.',stil:'not'}]; };
-      m.led.forEach(l=>{ const k=l.kampanyalar.filter(x=>x.dahil);
-        if(!k.length&&l.kampanyalar.length) return;   /* kampanya var ama seçilmedi: alan yazılmaz */
-        const ledUst=[...ledBas(),{text:l.ad+(l.sure?`  ·  ${l.sure} kreatif`:'')}];
-        ic.push(k.length?rpTablo([{b:'Durum',g:60},{b:'Başlangıç',g:70},{b:'Bitiş',g:80},...(a.musteri||a.isAdi?[{b:'Kampanya',g:'*'}]:[{b:'',g:'*'}]),...(a.notlar?[{b:'Not',g:150}]:[])],
-          k.map(x=>[{text:x.tip==='yayin'?'Yayın':'Opsiyon',color:RP_TUR_RENK[x.tip][0]},rpTr(x.r.block_start),x.acikUc?'bilinmiyor':rpTr(x.r.block_end),x.kim||'',...(a.notlar?[x.not||'']:[])]),{ust:ledUst})
-          :{stack:[...ledUst.map(u=>({text:u.text,style:u.stil||'h3'})),{text:'Bu dönemde kampanya yok.',style:'bos'}],unbreakable:true}); }); }
-    if(m.ozet) ic.push(...rpMecraOzetPdf(m.ozet));
-    return {icerik:ic,o:{yon:cizelge?'landscape':'portrait'}};
+    const led=m.led.filter(l=>l.dahil);
+    if(led.length) ic.push(rpTablo([{b:'Yayın alanı',g:'*'},{b:'Durum',g:60},{b:'Dönem',g:150},...(m.ic?[{b:'Kurum',g:160}]:[]),{b:'Kreatif süre',g:60}],
+      led.map(l=>[l.alan,{text:l.tip==='yayin'?'Yayın':'Opsiyon',color:RP_DR[l.tip].ink,bold:true},rpAralik(l.bas,l.bit),...(m.ic?[l.kim||'—']:[]),l.sure||'—']),
+      {ust:[{text:'LED yayınları',stil:'h2'},{text:'LED eşzamanlı yayındır; kampanya sayısı boş kapasite göstermez ve statik müsaitliğe katılmaz.',stil:'not'}]}));
+    return {icerik:ic,o:{yon:'landscape'}};
   },
-  xlsx(m,a){
+  xlsx(m){
     const S=[];
-    const satir=[];
-    m.gruplar.forEach(g=>g.urunler.forEach(u=>u.yuzler.filter(y=>y.dahil).forEach(y=>{
-      const tem=[g.ad,u.ad,y.pano,y.yuz||'',y.kod,...(a.olcu?[y.olcu||'']:[]),...(a.konum?[y.konum||'']:[])];
-      if(m.cikti==='tam') satir.push([...tem,m.bas,m.bit,rpDn(m.bit)-rpDn(m.bas)+1]);
-      else if(m.cikti==='aralik') (y.tam?[{s:m.bas,e:m.bit,gun:rpDn(m.bit)-rpDn(m.bas)+1}]:y.bos).forEach(s=>satir.push([...tem,s.s,s.e,s.gun,y.aylik?'Ay bazlı eski kayda dayanır':'']));
-      else y.seg.forEach(s=>satir.push([...tem,s.tip==='musait'?'Müsait':s.tip==='yayin'?'Yayın':'Opsiyon',s.s,s.e,s.gun,
-        ...(a.musteri||a.isAdi?[s.kim||'']:[]),...(a.notlar?[s.not||'']:[]),[s.acikUc?'Bitiş bilinmiyor':'',s.aylik?'Ay bazlı eski kayıt':'',s.opsSure?'Opsiyon süresi doldu (hâlâ bloklar)':''].filter(Boolean).join(' · ')]));
-    })));
-    const tem=[{b:'Lokasyon',w:22},{b:'Ürün',w:20},{b:'Pozisyon',w:11},{b:'Yüz',w:6},{b:'Yüz kodu',w:10},...(a.olcu?[{b:'Ölçü',w:16}]:[]),...(a.konum?[{b:'Konum',w:28,sar:true}]:[])];
-    const kol=m.cikti==='tam'?[...tem,{b:'Müsait başlangıç',w:13,tip:'tarih'},{b:'Müsait bitiş',w:13,tip:'tarih'},{b:'Gün',w:7,tip:'tam'}]
-      :m.cikti==='aralik'?[...tem,{b:'Müsait başlangıç',w:13,tip:'tarih'},{b:'Müsait bitiş',w:13,tip:'tarih'},{b:'Gün',w:7,tip:'tam'},{b:'Not',w:30,sar:true}]
-      :[...tem,{b:'Durum',w:10},{b:'Başlangıç',w:12,tip:'tarih'},{b:'Bitiş',w:12,tip:'tarih'},{b:'Gün',w:7,tip:'tam'},
-        ...(a.musteri||a.isAdi?[{b:'Kampanya',w:30,sar:true}]:[]),...(a.notlar?[{b:'Not',w:30,sar:true}]:[]),{b:'Kesinlik',w:26,sar:true}];
-    S.push({ad:m.cikti==='cizelge'?'Çizelge':'Müsaitlik',yon:'landscape',kol,satir,
-      not:m.cikti==='aralik'?'Her satır bir müsait tarih aralığıdır; başlangıç ve bitiş günleri dahildir.':null});
-    if(m.cikti==='cizelge') S.push(rpCizelgeXlsGrid(m,a));
-    if(m.led.some(l=>l.kampanyalar.some(k=>k.dahil))){ const ls=[];
-      m.led.forEach(l=>l.kampanyalar.filter(k=>k.dahil).forEach(k=>ls.push([l.ad,k.tip==='yayin'?'Yayın':'Opsiyon',k.r.block_start,k.acikUc?null:k.r.block_end,
-        ...(a.musteri||a.isAdi?[k.kim||'']:[]),...(a.notlar?[k.not||'']:[]),l.sure||''])));
-      S.push({ad:'LED',yon:'landscape',kol:[{b:'Yayın alanı',w:32},{b:'Durum',w:10},{b:'Başlangıç',w:12,tip:'tarih'},{b:'Bitiş',w:12,tip:'tarih'},
-        ...(a.musteri||a.isAdi?[{b:'Kampanya',w:30,sar:true}]:[]),...(a.notlar?[{b:'Not',w:30,sar:true}]:[]),{b:'Kreatif süre',w:10}],satir:ls,
-        not:'LED eşzamanlı yayındır; kampanya sayısı boş kapasite ya da doluluk oranı göstermez.'}); }
-    if(m.ozet){ const o=m.ozet, y=v=>o.toplam?v/o.toplam:0;
-      S.push({ad:'Doluluk özeti',yon:'portrait',kol:[{b:'Lokasyon',w:24},{b:'Yüz',w:7,tip:'tam'},{b:'Yüz-gün (payda)',w:14,tip:'tam'},
-        {b:'Yayın yüz-gün',w:13,tip:'tam'},{b:'Opsiyon yüz-gün',w:14,tip:'tam'},{b:'Müsait yüz-gün',w:14,tip:'tam'},{b:'Yayın %',w:9,tip:'yuzde'},{b:'Opsiyon %',w:10,tip:'yuzde'}],
-        satir:o.lok.map(L=>[L.ad,L.yuz,L.toplam,L.yayin,L.opsiyon,L.musait,L.toplam?L.yayin/L.toplam:0,L.toplam?L.opsiyon/L.toplam:0]),
-        alt:[[{v:'Toplam',kalin:true},{v:o.n,tip:'tam',kalin:true},{v:o.toplam,tip:'tam',kalin:true},{v:o.donem.yayin,tip:'tam',kalin:true},{v:o.donem.opsiyon,tip:'tam',kalin:true},{v:o.donem.musait,tip:'tam',kalin:true},{v:o.toplam?o.donem.yayin/o.toplam:0,tip:'yuzde',kalin:true},{v:o.toplam?o.donem.opsiyon/o.toplam:0,tip:'yuzde',kalin:true}],
-          [],[`Tek gün (${rpTr(o.ref)}): yayında ${o.tek.yayin} yüz (${rpYzd(o.tek.yayin,o.n)}), opsiyonda ${o.tek.opsiyon} yüz (${rpYzd(o.tek.opsiyon,o.n)}), müsait ${o.tek.musait} yüz (${rpYzd(o.tek.musait,o.n)}) — payda ${o.n} yüz.`],
-          [`Dönem oranı = ilgili yüzey-gün ÷ (${o.n} yüz × ${o.gunSay} gün = ${o.toplam} yüzey-gün). Payda bugünkü aktif envanterdir; envanterin geçmiş değişimi kayıtlı değildir.`]],
-        not:'Aynı yüzey-gün iki kez sayılmaz. Yayın ve opsiyon ayrı oranlardır.'}); }
-    S.push(rpBilgiSayfa(m,[['Hesap kuralları','İptal edilen kayıt bloklamaz. Opsiyon ve yayın bloklar; süresi dolmuş ama iptal edilmemiş opsiyon da bloklar. Bitişi bilinmeyen kayıt dönem sonuna kadar bloklar. A ve B yüzleri ayrı değerlendirilir.'],
-      ['Kapsam',`${m.dahilYuzSay} statik yüz (${m.panoSay} pano)${m.pasif?`; ${m.pasif} pasif yüz hesaba katılmadı`:''}.`]]));
+    m.sayfalar.forEach(sf=>{ const panolar=sf.panolar.map(p=>({...p,yuzler:p.yuzler.filter(f=>f.dahil)})).filter(p=>p.yuzler.length);
+      if(panolar.length) S.push({ad:sf.ad,yon:'landscape',ozel:ws=>rpXlsDoluluk(ws,m,sf,panolar)}); });
+    const led=m.led.filter(l=>l.dahil);
+    if(led.length) S.push({ad:m.ledAd,yon:'landscape',kol:[{b:'Yayın alanı',w:36,sar:true},{b:'Durum',w:10},{b:'Başlangıç',w:12,tip:'tarih'},{b:'Bitiş',w:12,tip:'tarih'},
+        ...(m.ic?[{b:'Kurum',w:30,sar:true}]:[]),{b:'Kreatif süre',w:11}],
+      satir:led.map(l=>[l.alan,l.tip==='yayin'?'Yayın':'Opsiyon',l.bas,l.bit,...(m.ic?[l.kim]:[]),l.sure]),
+      not:'LED eşzamanlı yayındır; kampanya sayısı boş kapasite göstermez ve statik müsaitliğe katılmaz. Bitiş boşsa bitiş belirsizdir.'});
     return S;
   },
   pdfVar:true
 };
-const rpYuzde=(v,t)=>t?Math.round(v*1000/t)/10:0;
-const rpYzd=(v,t)=>'%'+rpYuzde(v,t).toLocaleString('tr-TR',{maximumFractionDigits:1});
-function rpMecraOzetHtml(o){
-  return `<h5 class="rp2-g1">Doluluk özeti</h5>
-    <p class="rp2-ozet"><b>Tek gün (${esc(rpTr(o.ref))}):</b> ${o.n} yüzden yayında ${o.tek.yayin} (${rpYzd(o.tek.yayin,o.n)}), opsiyonda ${o.tek.opsiyon} (${rpYzd(o.tek.opsiyon,o.n)}), müsait ${o.tek.musait} (${rpYzd(o.tek.musait,o.n)}).</p>
-    <p class="rp2-ozet"><b>Dönem:</b> ${o.n} yüz × ${o.gunSay} gün = ${o.toplam} yüzey-gün. Yayın ${o.donem.yayin} yüzey-gün (${rpYzd(o.donem.yayin,o.toplam)}), opsiyon ${o.donem.opsiyon} (${rpYzd(o.donem.opsiyon,o.toplam)}), müsait ${o.donem.musait} (${rpYzd(o.donem.musait,o.toplam)}).</p>
-    <p class="fhint">Payda, seçili kapsamdaki bugünkü aktif statik envanterdir; envanterin geçmiş dönemdeki değişimi kayıtlı değildir. LED ve pasif yüzler dahil değildir.</p>`;
+/* Excel doluluk sayfası — referans rezervasyon tablosunun düzeni:
+   yüz başına iki satır (üstte kurum/durum, altta tarih), aylar sütunda.
+   Ay içinde değişen hücre iki satır boyunca BİRLEŞİR ve dilimleri renk
+   işaretiyle alt alta taşır (keskin geçişli dolgu Excel baskısında
+   çizgili göründüğü için kullanılmaz). */
+function rpXlsDoluluk(ws,m,sf,panolar){
+  const ay=m.aylar, F='Arial', H=5, son=2+ay.length, GEN=24;
+  ws.getColumn(1).width=5; ws.getColumn(2).width=10; ay.forEach((_,i)=>{ ws.getColumn(3+i).width=GEN; });
+  const c1=ws.getCell(1,1); c1.value=`${sf.baslik} — doluluk tablosu`; c1.font={name:F,bold:true,size:14};
+  const bilgi=[`Dönem: ${rpTr(m.bas)} – ${rpTr(m.bit)}`,sf.olcu?`Ölçü: ${sf.olcu}`:'',m.ic?'İç kullanım':'Dış paylaşım',
+    m.alici?`Hazırlanan: ${m.alici}`:'',`Hazırlanma: ${rpAnTr(m.an)}`].filter(Boolean).join('   ·   ');
+  const c2=ws.getCell(2,1); c2.value=bilgi; c2.font={name:F,size:9,color:{argb:'FF55555B'}};
+  const lej=[...['yayin','opsiyon','musait','disi'].map(t=>[RP_DR[t].ad,RP_DR[t].fill,RP_DR[t].ink]),['Ay içinde değişim: dilimler alt alta','#FFFFFF','#55555B']];
+  lej.forEach(([t,f,k],i)=>{ const c=ws.getCell(3,3+i); c.value=t;
+    c.fill={type:'pattern',pattern:'solid',fgColor:{argb:rpArgb(f)}}; c.font={name:F,bold:i<4,size:9,color:{argb:rpArgb(k)}};
+    c.alignment={horizontal:'center',vertical:'middle',wrapText:true}; c.border=rpXKenar(); });
+  ws.getRow(3).height=26;
+  if(m.aciklama){ const c=ws.getCell(4,1); c.value=m.aciklama; c.font={name:F,size:9}; }
+  const hr=ws.getRow(H); hr.height=30;
+  [['No',1],['Yüz',2],...ay.map((a,i)=>[a.ad,3+i])].forEach(([t,k])=>{ const c=hr.getCell(k); c.value=t;
+    c.font={name:F,bold:true,size:10}; c.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFFFE699'}};
+    c.alignment={horizontal:'center',vertical:'middle',wrapText:true}; c.border=rpXKenar(); });
+  const kalin={style:'medium',color:{argb:'FF6E6E75'}};
+  /* Satır sayısı tahmini (Arial 10 kalın ≈ sütun genişliği × 0,85 karakter). */
+  const kap=Math.floor(GEN*0.85), sat=t=>t?Math.max(1,Math.ceil(String(t).length/kap)):0;
+  const renk=tip=>({argb:rpArgb(RP_DR[tip].ink)});
+  let r=H+1;
+  /* Elle sayfa sonu: pano (A/B çifti ve birleşik hücreler) iki sayfaya
+     bölünmez. Ölçek, sütun genişliğinden ve fitToWidth'ten tahmin edilir. */
+  const sayfaGen=Math.max(1,Math.ceil(ay.length/6));
+  const genPt=[5,10,...ay.map(()=>GEN)].reduce((t,w)=>t+(w*7+5)*0.75,0);
+  const olcek=Math.min(1,(842-0.8*72)*sayfaGen/genPt*0.92);
+  const sayfaYuk=(595-72-24)/olcek;
+  let dolu=[1,2,3,4,H].reduce((t,k)=>t+(ws.getRow(k).height||15),0);
+  panolar.forEach(p=>{ const r0=r;
+    p.yuzler.forEach(f=>{
+      const kod=ws.getCell(r,2); kod.value=f.kod; kod.font={name:F,bold:true,size:10};
+      ws.mergeCells(r,2,r+1,2);
+      let h1=18, h2=15, hTop=0;
+      ay.forEach((a,i)=>{ const hc=f.hucre[i]; const u=ws.getCell(r,3+i), t=ws.getCell(r+1,3+i);
+        if(rpTekDurum(hc)){
+          const tip=hc.dilim[0].tip, pc=hc.parca[0]||{tip,ust:RP_DR[tip].ad,alt:''};
+          const dolgu={type:'pattern',pattern:'solid',fgColor:{argb:rpArgb(RP_DR[tip].fill)}};
+          u.value=hc.parca.map(x=>x.ust).join('\n')||pc.ust; t.value=hc.parca.map(x=>x.alt).filter(Boolean).join('\n')||null;
+          u.font={name:F,bold:true,size:10,color:renk(pc.tip)}; t.font={name:F,size:8.5,color:renk(pc.tip)};
+          [u,t].forEach(c=>{ c.fill=dolgu; c.alignment={horizontal:'center',vertical:c===u?'bottom':'top',wrapText:true};
+            c.border={left:RP_XBORDER,right:RP_XBORDER,top:c===u?RP_XBORDER:undefined,bottom:c===t?RP_XBORDER:undefined}; });
+          h1=Math.max(h1,hc.parca.reduce((x,q)=>x+sat(q.ust),0)*13+5); h2=Math.max(h2,hc.parca.reduce((x,q)=>x+sat(q.alt),0)*11.5+4);
+        } else {
+          const runs=[]; let n=0;
+          hc.parca.forEach(pc=>{ rpDilimSatir(pc).forEach((l,j)=>{
+            if(j===0) runs.push({text:(runs.length?'\n':'')+'■ ',font:{name:F,size:10,color:{argb:rpArgb(RP_DR[pc.tip].bar)}}});
+            else runs.push({text:'\n    ',font:{name:F,size:8.5}});
+            runs.push({text:l.t,font:{name:F,bold:l.b,size:l.b?9.5:8.5,color:renk(pc.tip)}}); n+=sat('■ '+l.t); }); });
+          u.value={richText:runs}; ws.mergeCells(r,3+i,r+1,3+i);
+          u.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFFFFFFF'}};
+          u.alignment={horizontal:'left',vertical:'middle',wrapText:true,indent:1}; u.border=rpXKenar();
+          hTop=Math.max(hTop,n*12.5+6);
+        }
+      });
+      if(h1+h2<hTop) h2+=hTop-(h1+h2);
+      ws.getRow(r).height=h1; ws.getRow(r+1).height=h2;
+      [ws.getCell(r,2),ws.getCell(r+1,2)].forEach(c=>{ c.alignment={horizontal:'center',vertical:'middle'}; c.border=rpXKenar(); });
+      r+=2; });
+    const no=ws.getCell(r0,1); no.value=p.no; no.font={name:F,bold:true,size:10};
+    if(r-1>r0) ws.mergeCells(r0,1,r-1,1);
+    no.alignment={horizontal:'center',vertical:'middle'}; no.border=rpXKenar();
+    for(let k=1;k<=son;k++){ const c=ws.getCell(r-1,k); c.border={...(c.border||{}),bottom:kalin}; }
+    let ph=0; for(let k=r0;k<r;k++) ph+=ws.getRow(k).height||15;
+    if(dolu+ph>sayfaYuk&&r0>H+1){ ws.getRow(r0-1).addPageBreak(); dolu=(ws.getRow(H).height||30); }
+    dolu+=ph;
+  });
+  ws.views=[{state:'frozen',xSplit:2,ySplit:H,topLeftCell:'C'+(H+1),activeCell:'C'+(H+1)}];
+  ws.pageSetup.printArea=`A1:${ws.getColumn(son).letter}${r-1}`;
+  ws.pageSetup.printTitlesRow=`${H}:${H}`;
+  ws.pageSetup.printTitlesColumn='A:B';
+  /* Altı ay bir sayfa genişliği; on iki ay iki sayfa — yazı küçültülüp tek sayfaya sıkıştırılmaz. */
+  /* Sabit ölçek (Excel "sığdır" açıkken elle sayfa sonlarını yok sayar). */
+  ws.pageSetup.fitToPage=false; ws.pageSetup.scale=Math.max(40,Math.floor(olcek*100));
+  ws.pageSetup.pageOrder='overThenDown';
 }
-function rpMecraOzetPdf(o){
-  return [
-    rpTablo([{b:'Lokasyon',g:'*'},{b:'Yüz',g:34,sag:true},{b:'Yüzey-gün',g:60,sag:true},{b:'Yayın',g:60,sag:true},{b:'Yayın %',g:48,sag:true},{b:'Opsiyon',g:60,sag:true},{b:'Opsiyon %',g:52,sag:true},{b:'Müsait',g:60,sag:true}],
-      [...o.lok.map(L=>[L.ad,String(L.yuz),String(L.toplam),String(L.yayin),rpYzd(L.yayin,L.toplam),String(L.opsiyon),rpYzd(L.opsiyon,L.toplam),String(L.musait)]),
-       [{text:'Toplam',bold:true},{text:String(o.n),bold:true},{text:String(o.toplam),bold:true},{text:String(o.donem.yayin),bold:true},{text:rpYzd(o.donem.yayin,o.toplam),bold:true},{text:String(o.donem.opsiyon),bold:true},{text:rpYzd(o.donem.opsiyon,o.toplam),bold:true},{text:String(o.donem.musait),bold:true}]],
-      {ust:[{text:'Doluluk özeti',stil:'h2'},
-        {text:[{text:`Tek gün (${rpTr(o.ref)}): `,bold:true},`${o.n} yüzden yayında ${o.tek.yayin} (${rpYzd(o.tek.yayin,o.n)}), opsiyonda ${o.tek.opsiyon} (${rpYzd(o.tek.opsiyon,o.n)}), müsait ${o.tek.musait} (${rpYzd(o.tek.musait,o.n)}).`],stil:'ozetSatir'},
-        {text:[{text:'Dönem: ',bold:true},`${o.n} yüz × ${o.gunSay} gün = ${o.toplam} yüzey-gün.`],stil:'ozetSatir'}]}),
-    {text:'Aynı yüzey-gün iki kez sayılmaz; yayın ve opsiyon ayrı oranlardır. Payda seçili kapsamdaki bugünkü aktif statik envanterdir — envanterin geçmiş değişimi kayıtlı olmadığı için geçmiş dönemlerde kesinlik iddia edilmez. LED ve pasif yüzler dahil değildir.',style:'not'}];
-}
-/* Çizelge: ay sütunlu tablo (kaynak rezervasyon tablolarının okuma
-   alışkanlığı). 12 aydan uzun dönem birden çok tabloya bölünür. */
-function rpAyListe(b,e){ const out=[]; let y=+b.slice(0,4), mo=+b.slice(5,7);
-  while(`${y}-${rp2(mo)}`<=e.slice(0,7)){ out.push(`${y}-${rp2(mo)}`); mo++; if(mo>12){mo=1;y++;} } return out; }
-function rpCizelgeHucre(y,ym,b,e){
-  const ayB=ym+'-01', ayE=_cIso(new Date(+ym.slice(0,4),+ym.slice(5,7),0));
-  const s0=ayB<b?b:ayB, e0=ayE>e?e:ayE;
-  return y.seg.filter(s=>s.s<=e0&&s.e>=s0).map(s=>({...s,s:s.s<s0?s0:s.s,e:s.e>e0?e0:s.e,tamAy:s.s<=ayB&&s.e>=ayE}));
-}
-function rpCizelgePdf(m,yuzler,ust){
-  const aylar=rpAyListe(m.bas,m.bit); const parca=[];
-  for(let i=0;i<aylar.length;i+=6) parca.push(aylar.slice(i,i+6));
-  return parca.map((ay,pi)=>rpTablo([{b:'Yüz',g:52},...ay.map(ym=>({b:`${RP_AYLAR[+ym.slice(5,7)-1]} ${ym.slice(0,4)}`,g:'*'}))],
-    yuzler.map(y=>[{text:y.kod,bold:true},...ay.map(ym=>{ const h=rpCizelgeHucre(y,ym,m.bas,m.bit);
-      if(h.length===1&&h[0].tamAy){ const s=h[0]; const [c,f]=RP_TUR_RENK[s.tip];
-        return {stack:[{text:s.tip==='musait'?'Müsait':s.tip==='yayin'?'Yayın':'Opsiyon',color:c,bold:true},...(s.kisa?[{text:s.kisa,fontSize:7.5}]:[]),...(s.acikUc?[{text:'bitiş bilinmiyor',fontSize:7,color:RPC.ink3}]:[])],fillColor:f}; }
-      return {stack:h.map(s=>({text:[{text:`${+s.s.slice(8)}–${+s.e.slice(8)} `,color:RPC.ink2},{text:s.tip==='musait'?'Müsait':s.tip==='yayin'?'Yayın':'Opsiyon',color:RP_TUR_RENK[s.tip][0],bold:true},
-        ...(s.kisa?[{text:' · '+s.kisa,fontSize:7.5}]:[])],fontSize:8}))}; })]),{fs:8.5,ust:pi===0?ust:[(ust||[]).filter(Boolean).slice(-1)[0]&&{text:(ust||[]).filter(Boolean).slice(-1)[0].text+'  ·  devam'}]}));
-}
-function rpCizelgeXlsGrid(m,a){
-  const aylar=rpAyListe(m.bas,m.bit);
-  const satir=[]; m.gruplar.forEach(g=>g.urunler.forEach(u=>u.yuzler.filter(y=>y.dahil).forEach(y=>{
-    satir.push([g.ad,u.ad,y.kod,...aylar.map(ym=>rpCizelgeHucre(y,ym,m.bas,m.bit).map(s=>
-      (s.tamAy?'':`${+s.s.slice(8)}–${+s.e.slice(8)} `)+(s.tip==='musait'?'Müsait':s.tip==='yayin'?'Yayın':'Opsiyon')+(s.kisa?' · '+s.kisa:'')).join('\n'))]); })));
-  return {ad:'Aylık görünüm',yon:'landscape',sabitKol:3,kol:[{b:'Lokasyon',w:18},{b:'Ürün',w:16},{b:'Yüz',w:9},
-    ...aylar.map(ym=>({b:`${RP_AY3[+ym.slice(5,7)-1]} ${ym.slice(0,4)}`,w:16,sar:true}))],satir,
-    not:'Hücrede gün aralığı yazmıyorsa durum ayın tamamı içindir.'};
-}
+function rpMecraDonem(n){ const a=rpAyar('mecra'); const d=mdGun(rpBugun());
+  if(n==='yil'){ a.bas=`${d.getFullYear()}-01-01`; a.bit=`${d.getFullYear()}-12-31`; }
+  else { a.bas=_cIso(new Date(d.getFullYear(),d.getMonth(),1)); a.bit=_cIso(new Date(d.getFullYear(),d.getMonth()+n,0)); }
+  rpKontrolCiz('mecra'); rpYenile('mecra'); }
 function rpSiteSec(id,on){ const a=rpAyar('mecra'); const s=new Set(a.siteler); if(on) s.add(id); else s.delete(id);
-  a.siteler=[...s]; if(!a.siteler.length){ rpNot('En az bir lokasyon seçin.','uyari'); a.siteler=[id]; rpKontrolCiz('mecra'); return; }
-  rpYenile('mecra'); }
-let _rpAraT=null;
-function rpAraGecikmeli(tur,k,v){ clearTimeout(_rpAraT); _rpAraT=setTimeout(()=>{ rpAyar(tur)[k]=v; rpOnizleCiz(tur); },220); }
+  a.siteler=[...s]; if(!a.siteler.length){ rpNot('En az bir mecra seçin.','uyari'); a.siteler=[id]; rpKontrolCiz('mecra'); return; }
+  if(a.urun){ const M=((rpDurum().veri||{}).mecra||{}).M; if(M&&!M.alts.some(x=>a.siteler.includes(x.mecra_id)&&String(x.product_id)===String(a.urun))) a.urun=''; }
+  rpKontrolCiz('mecra'); rpYenile('mecra'); }
 
 /* ==========================================================
-   2) BASKI / MONTAJ DÖKÜMÜ
-   Kurum → iş → işlem. Mecraya bağlı OLMAYAN işlemler de raporlanır
-   (fuar, tabela, söküm, vinç…). Tutar kuralları:
-     · her tutar kendi para biriminde; birimler asla toplanmaz
-     · paket bedeli BİR KEZ sayılır; paketin tüm işlemleri rapordaysa
-       toplama girer, bir kısmı rapordaysa kapsamıyla yazılır ama
-       seçilen satırların toplamı gibi SUNULMAZ ve dağıtılmaz
-     · paket içindeki işlemin satır tutarı bilgi olarak görünür, toplama
-       ayrıca girmez (paket bedeli anlaşılan tutardır)
-     · kayıtta olmayan KDV, indirim, kâr varsayılmaz
+   2) BASKI / MONTAJ — İKİ HAZIR ŞABLON (S15)
+   A · Takip tablosu  — referans "BASKI-MONTAJ TAKİP TABLOSU": her
+       üretim kalemi bir satır; baskı bilgisi ve AYNI kalemin montajı
+       yan yana (Tarih · Müşteri · Ürün · Adet · Baskı merkezi · Ölçü ·
+       Bedel · Montaj tarihi · Montaj yeri · Montajı yapan · Not).
+   B · İşe özel döküm — referans Gürgençler dökümü: tek iş; Ürün ·
+       Malzeme · Baskı ölçüsü · Görünen alan · Yüzey · Baskı adedi ·
+       Montaj bedeli · Birim fiyat · Tutar; destek hizmetleri ayrı bölüm.
+
+   ÜRETİM KALEMİ = aynı `kalem_key`i taşıyan işlemler (PS15). Bağ yalnız
+   kullanıcının kurduğu kayıttan okunur; isim benzerliği ya da satır
+   sırasıyla eşleştirme YAPILMAZ. Bağlanmamış montaj/söküm kendi satırında
+   "baskıyla eşleştirilmemiş" olarak görünür, kaybolmaz.
+
+   Tutar kuralları (S12'den değişmedi):
+     · iç kullanım = kayıtlı maliyet; dış paylaşım = kayıtlı satış bedeli
+     · her para birimi ayrı toplanır; girilmemiş tutar 0 sayılmaz
+     · paket bedeli BİR kez sayılır; paketin tamamı rapordaysa toplama
+       girer, kısmen rapordaysa toplama girmez ve dağıtılmaz
+     · paket içindeki satır tutarları bilgi amaçlıdır
+     · bir montaj birden çok baskıyı kapsıyorsa bedeli bir kez görünür
+     · KDV, indirim, kâr varsayılmaz
    ========================================================== */
 const RP_OPTUR={baski:'Baskı',montaj:'Montaj',sokum:'Söküm',diger:'Diğer hizmet'};
 const RP_OPDURUM={planned:'Planlandı',waiting:'Bekliyor',in_progress:'Devam ediyor',done:'Tamamlandı',cancelled:'İptal'};
-const RP_TARIHALAN=[['planned','İşlem tarihi (planlanan)'],['completed','Tamamlanma tarihi'],['created','Kayıt tarihi']];
+const RP_BSABLON=[['takip','Takip tablosu'],['dokum','İşe özel döküm']];
+const RP_BDONEM=[['ay','Bu ay'],['gecen','Geçen ay'],['uc','Son 3 ay'],['yil','Bu yıl'],['tum','Tümü'],['ozel','Özel aralık']];
+const rpBIs=a=>a.is?+a.is:(Array.isArray(a.isler)&&a.isler.length===1?+a.isler[0]:0);
+function rpBDonemAralik(k){ const d=mdGun(rpBugun()), y=d.getFullYear(), mo=d.getMonth();
+  if(k==='ay') return [_cIso(new Date(y,mo,1)),_cIso(new Date(y,mo+1,0))];
+  if(k==='gecen') return [_cIso(new Date(y,mo-1,1)),_cIso(new Date(y,mo,0))];
+  if(k==='uc') return [_cIso(new Date(y,mo-2,1)),_cIso(new Date(y,mo+1,0))];
+  if(k==='yil') return [`${y}-01-01`,`${y}-12-31`];
+  return [null,null]; }
+/* Birim fiyat YALNIZ kayıttan: kayıtlı birim tutar ya da satır tutarının
+   miktara kuruşu kuruşuna bölünebildiği değer. Yuvarlanmış tahmin yok. */
+function rpBirimFiyat(birim,tutar,miktar){
+  if(birim!=null&&birim!=='') return +birim;
+  if(tutar==null||tutar===''||!(+miktar>0)) return null;
+  const x=Math.round(+tutar*100/+miktar)/100; return Math.abs(x*+miktar-+tutar)<0.005?x:null; }
+const RP_XPARA={TRY:'#,##0.00 "₺"',USD:'#,##0.00 "$"',EUR:'#,##0.00 "€"'};
+const rpParaListe=l=>(l||[]).map(x=>rpPara(x.v,x.pb)).join(' + ');
+/* Kalem tutarı: paket DIŞI işlemlerin girilmiş tutarları, para birimine göre. */
+function rpTutarTopla(ops,tut){ const m={}; ops.forEach(o=>{ const v=tut(o); if(v==null) return; const pb=o.currency||'TRY'; m[pb]=(m[pb]||0)+v; });
+  return Object.entries(m).map(([pb,v])=>({pb,v:Math.round(v*100)/100})); }
+
 RPD_BASKI={
-  amac:'Bir kurumun ya da işin baskı, montaj ve ilgili uygulamalarının teknik ve gerektiğinde ticari dökümü.',
-  presetNot:'Dış paylaşımda teknik bilgiler açık; maliyet, satış bedeli ve serbest iç notlar kapalıdır.',
-  varsayilan(){ return {kurum:'',isler:[],turler:['baski','montaj','sokum','diger'],uygulayan:'',durum:'',tarihAlan:'planned',bas:'',bit:'',
-    teknik:true,sirala:'tarih',c_malzeme:true,c_olcu:true,c_gorunen:true,c_yuzey:true,c_miktar:true,c_kim:true,c_yer:true}; },
-  preset(v){ return v==='dis'?{tMaliyet:false,tSatis:false,notlar:false}:{tMaliyet:true,tSatis:true,notlar:true}; },
+  sade:true,
+  amac:'Baskı, montaj, söküm ve ilgili hizmetlerin hazır şablonlarda dökümü: genel takip tablosu ya da tek işin bedel dökümü.',
+  presetNot:'Dış paylaşımda bedel = satış bedeli; maliyet ve iç notlar dosyaya girmez.',
+  varsayilan(){ return {sablon:'takip',donem:'ay',bas:'',bit:'',kurum:'',is:'',uygulayan:'',iptal:false,tarihsiz:false}; },
+  preset(){ return {}; },
   veriAnahtar:()=>'baski',
   async veri(){
     const [ops,grp,jobs,custs,M]=await Promise.all([
-      rapHepsi(()=>sb.from('work_operations').select('id,job_id,operation_type,status,description,quantity,quantity_unit,dimensions,visible_size,surface_count,material,grammage_gsm,reprint,supplier_org_id,unit_id,location_text,planned_date,completed_at,created_at,unit_cost,cost,sale_amount,currency,price_group_id,note').order('id')),
+      rapHepsi(()=>sb.from('work_operations').select('id,job_id,operation_type,status,description,quantity,quantity_unit,dimensions,visible_size,surface_count,material,grammage_gsm,reprint,supplier_org_id,unit_id,location_text,planned_date,completed_at,created_at,unit_cost,cost,sale_amount,currency,price_group_id,kalem_key,note').order('id')),
       rapHepsi(()=>sb.from('operation_price_groups').select('*').order('id')),
       rapHepsi(()=>sb.from('jobs').select('id,title,customer_id,status,lifecycle_status').order('id')),
       api('customers_min'), mdYukle()]);
     const cm={}; (custs||[]).forEach(c=>cm[c.id]=c.firma||'');
     return {ops,grp,jobs,cm,M};
   },
+  veriSonra(a,v){ const id=rpBIs(a); if(id){ a.is=id; const j=v.jobs.find(x=>x.id===id); if(j&&!a.kurum&&j.customer_id) a.kurum=j.customer_id; } },
   kontrolVeriyle:true,
-  baslik(a,v){ const cm=v?v.cm:{}; return 'Baskı ve montaj dökümü'+(a.kurum&&cm[a.kurum]?' — '+cm[a.kurum]:''); },
-  dosya:()=>'Baski_Montaj_Dokumu',
+  baslik(a,v){ const cm=v?v.cm:{}; const j=v&&rpBIs(a)?v.jobs.find(x=>x.id===rpBIs(a)):null;
+    if(a.sablon==='dokum') return j?`${j.title} — baskı / montaj dökümü`:'Baskı / montaj dökümü';
+    return 'Baskı / montaj takip tablosu'+(j?' — '+j.title:a.kurum&&cm[a.kurum]?' — '+orgKisa(cm[a.kurum],40):''); },
+  dosya:m=>m.sablon==='dokum'?'Baski_Montaj_Dokumu':'Baski_Montaj_Takip',
   kontroller(a){
-    const v=(rpDurum().veri||{}).baski, T='baski';
+    const v=(rpDurum().veri||{}).baski, T='baski', takip=a.sablon!=='dokum';
     const jobs=v?v.jobs:[], cm=v?v.cm:{};
     const opJob=new Set((v?v.ops:[]).map(o=>o.job_id));
     const kurumlar=[...new Set(jobs.filter(j=>opJob.has(j.id)&&j.customer_id).map(j=>j.customer_id))]
       .map(id=>[id,cm[id]||'#'+id]).sort((x,y)=>String(x[1]).localeCompare(String(y[1]),'tr'));
-    const isler=jobs.filter(j=>opJob.has(j.id)&&(!a.kurum||String(j.customer_id)===String(a.kurum)));
+    const isler=jobs.filter(j=>opJob.has(j.id)&&(!a.kurum||String(j.customer_id)===String(a.kurum)))
+      .sort((x,y)=>String(x.title).localeCompare(String(y.title),'tr'));
     const uyg=[...new Set((v?v.ops:[]).map(o=>o.supplier_org_id).filter(Boolean))].map(id=>[id,cm[id]||'#'+id]).sort((x,y)=>String(x[1]).localeCompare(String(y[1]),'tr'));
-    return `<div class="rp2-grid">
-        <div class="field"><label class="flabel" for="rpKurum">Kurum</label><select class="inp ${a.kurum?'inp-on':''}" id="rpKurum" onchange="rpBaskiKurum(this.value)">
-          <option value="">Tüm kurumlar</option>${kurumlar.map(([id,ad])=>`<option value="${id}" ${String(a.kurum)===String(id)?'selected':''}>${esc(orgKisa(ad,60))}</option>`).join('')}</select></div>
-        <div class="field"><label class="flabel" for="rpUyg">Tedarikçi / uygulayan</label><select class="inp ${a.uygulayan?'inp-on':''}" id="rpUyg" onchange="rpSet('baski','uygulayan',this.value,true)">
-          <option value="">Tümü</option>${uyg.map(([id,ad])=>`<option value="${id}" ${String(a.uygulayan)===String(id)?'selected':''}>${esc(orgKisa(ad,60))}</option>`).join('')}</select></div></div>
-      <div class="field"><span class="flabel">İşler ${a.isler.length?`<em class="muted">${a.isler.length} seçili</em>`:'<em class="muted">seçilmezse tümü</em>'}</span>
-        <div class="rp2-chips rp2-isler">${isler.length?isler.map(j=>`<label class="rp2-chk"><input type="checkbox" ${a.isler.includes(j.id)?'checked':''} onchange="rpBaskiIs(${j.id},this.checked)"> <span>${esc(j.title||'#'+j.id)}${a.kurum?'':` <em>${esc(orgKisa(cm[j.customer_id]||'',30))}</em>`}</span></label>`).join(''):'<span class="muted">Baskı/montaj kaydı olan iş yok.</span>'}</div></div>
-      <div class="field"><span class="flabel">İşlem türü</span><div class="rp2-chips">${Object.entries(RP_OPTUR).map(([k,l])=>`<label class="rp2-chk">
-        <input type="checkbox" ${a.turler.includes(k)?'checked':''} onchange="rpBaskiTur('${k}',this.checked)"> <span>${esc(l)}</span></label>`).join('')}</div></div>
+    const ic=a._alici==='ic';
+    return `<div class="rp3-f">
+      <div class="field"><span class="flabel">Şablon</span>${rpSeg(T,'sablon',a.sablon,RP_BSABLON,'Şablon')}
+        <p class="fhint">${takip?'Her üretim kalemi bir satır: baskı ve aynı kalemin montajı yan yana. Birden çok işi ve kurumu kapsayabilir.'
+          :'Tek işin kalem kalem teknik ve bedel dökümü: montaj bedeli, birim fiyat, tutar ve para birimine göre toplam.'}</p></div>
+      ${takip?`<div class="field"><span class="flabel">Dönem</span>${rpSeg(T,'donem',a.donem,RP_BDONEM,'Dönem')}
+        ${a.donem==='ozel'?rpTarihKontrol(T,a,'bas','bit'):''}
+        <p class="fhint">Kalemin <b>planlanan</b> işlem tarihine göre (baskı tarihi; baskısı olmayan kalemde ilk uygulama tarihi). Gerçekleşme durumu Not sütununda yazılır.</p></div>`:''}
       <div class="rp2-grid">
-        <div class="field"><span class="flabel">Durum</span>${rpSeg(T,'durum',a.durum,[['','Aktif + tamamlanan'],['aktif','Yalnız aktif'],['tamam','Yalnız tamamlanan'],['hepsi','İptal dahil']],'Durum')}</div>
-        <div class="field"><label class="flabel" for="rpTAlan">Tarih süzgeci neye uygulanır</label><select class="inp" id="rpTAlan" onchange="rpSet('baski','tarihAlan',this.value,true)">
-          ${RP_TARIHALAN.map(([k,l])=>`<option value="${k}" ${a.tarihAlan===k?'selected':''}>${esc(l)}</option>`).join('')}</select>
-          <p class="fhint">Baskı satırında baskı, montaj satırında montaj tarihidir. Tarihi girilmemiş kayıt, tarih süzgeci varken dahil edilmez.</p></div></div>
-      ${rpTarihKontrol(T,a,'bas','bit',['Başlangıç (isteğe bağlı)','Bitiş (isteğe bağlı)'])}
-      <details class="rp2-adv" ${rpDurum().adv?'open':''} ontoggle="rpDurum().adv=this.open"><summary>Ayrıntılı ayarlar — bölümler ve sütunlar</summary>
-        <div class="rp2-cols">
-          <div><b>Teknik bilgi</b>${rpChk(T,'teknik',a.teknik,'Teknik bölüm')}
-            ${a.teknik?`${rpChk(T,'c_malzeme',a.c_malzeme,'Malzeme / cins ve gramaj')}${rpChk(T,'c_olcu',a.c_olcu,'Baskı ölçüsü')}
-            ${rpChk(T,'c_gorunen',a.c_gorunen,'Görünen alan')}${rpChk(T,'c_yuzey',a.c_yuzey,'Yüzey sayısı')}${rpChk(T,'c_miktar',a.c_miktar,'Miktar ve birim')}`:''}</div>
-          <div><b>İşlem bilgisi</b>${rpChk(T,'c_yer',a.c_yer,'Uygulama yeri / mecra')}${rpChk(T,'c_kim',a.c_kim,'Baskı merkezi / uygulayan')}
-            ${rpChk(T,'notlar',a.notlar,'Serbest notlar','ticari/özel bilgi içerebilir')}</div>
-          <div><b>Ticari bilgi</b>${rpChk(T,'tMaliyet',a.tMaliyet,'Maliyet','birim maliyet, maliyet, paket maliyeti')}${rpChk(T,'tSatis',a.tSatis,'Satış bedeli')}
-            <p class="fhint">KDV, indirim ve kâr kayıtta yoksa hesaplanmaz.</p></div>
-          <div><b>Sıralama</b>${rpSeg(T,'sirala',a.sirala,[['tarih','Tarih'],['tur','İşlem türü']],'Sıralama')}</div>
-        </div></details>`;
+        <div class="field"><label class="flabel" for="rpKurum">Kurum${takip?' (isteğe bağlı)':''}</label>
+          <select class="inp ${a.kurum?'inp-on':''}" id="rpKurum" data-ara onchange="rpBaskiKurum(this.value)"><option value="">Tüm kurumlar</option>
+          ${kurumlar.map(([id,ad])=>`<option value="${id}" ${String(a.kurum)===String(id)?'selected':''}>${esc(orgKisa(ad,60))}</option>`).join('')}</select></div>
+        <div class="field"><label class="flabel" for="rpIs">İş${takip?' (isteğe bağlı)':''}</label>
+          <select class="inp ${a.is?'inp-on':''}" id="rpIs" data-ara onchange="rpBaskiIs(this.value)"><option value="">${takip?'Tüm işler':'— iş seçin —'}</option>
+          ${isler.map(j=>`<option value="${j.id}" ${String(a.is)===String(j.id)?'selected':''}>${esc(j.title||'#'+j.id)}</option>`).join('')}</select></div></div>
+      <div class="field"><span class="flabel">Kimin için</span>${rpAliciSeg(T,a)}
+        <p class="fhint">${ic?'Bedel = kayıtlı maliyet. Serbest iç notlar dahildir.':'Bedel = kayıtlı satış bedeli. Maliyet ve iç notlar dosyaya girmez.'}</p></div>
+      ${takip?`<details class="rp2-adv" ${rpDurum().adv?'open':''} ontoggle="rpDurum().adv=this.open"><summary>Ek filtreler</summary>
+        <div class="rp2-grid"><div class="field"><label class="flabel" for="rpUyg">Baskı merkezi / uygulayan</label>
+          <select class="inp ${a.uygulayan?'inp-on':''}" id="rpUyg" data-ara onchange="rpSet('baski','uygulayan',this.value,true)"><option value="">Tümü</option>
+          ${uyg.map(([id,ad])=>`<option value="${id}" ${String(a.uygulayan)===String(id)?'selected':''}>${esc(orgKisa(ad,60))}</option>`).join('')}</select></div></div>
+        <div class="rp2-chips col">${rpChk(T,'iptal',a.iptal,'İptal edilen işlemleri de göster')}${rpChk(T,'tarihsiz',a.tarihsiz,'Tarihi girilmemiş kalemleri ekle','dönem seçiliyken')}</div></details>`:''}
+    </div>`;
   },
   model(a,v){
-    const T='baski', cm=v.cm, M=v.M;
-    const jm={}; v.jobs.forEach(j=>jm[j.id]=j);
-    const gm={}; v.grp.forEach(g=>gm[g.id]=g);
-    const hata=(a.bas||a.bit)?rpDonemDogrula(a.bas||'2000-01-01',a.bit||'2099-12-31'):null;
-    const out={gruplar:[],uyari:[],hata,bilgi:[]};
-    if(hata){ out.uyari.push(hata); out.say={dahil:0,filtre:0,cik:0,birim:'işlem'}; return out; }
-    const tarihOf=o=>a.tarihAlan==='completed'?rpYerelGun(o.completed_at):a.tarihAlan==='created'?rpYerelGun(o.created_at):(o.planned_date||'');
-    const filtreli=v.ops.filter(o=>{ const j=jm[o.job_id]; if(!j) return false;
-      if(a.kurum&&String(j.customer_id)!==String(a.kurum)) return false;
-      if(a.isler.length&&!a.isler.includes(o.job_id)) return false;
-      if(!a.turler.includes(o.operation_type)) return false;
-      if(a.uygulayan&&String(o.supplier_org_id)!==String(a.uygulayan)) return false;
-      if(a.durum===''&&o.status==='cancelled') return false;
-      if(a.durum==='aktif'&&['done','cancelled'].includes(o.status)) return false;
-      if(a.durum==='tamam'&&o.status!=='done') return false;
-      if(a.bas||a.bit){ const t=tarihOf(o); if(!t) return false; if(a.bas&&t<a.bas) return false; if(a.bit&&t>a.bit) return false; }
-      return true; });
-    const gorunen=new Set(filtreli.map(o=>'o'+o.id));
-    out.budanan=rpBuda(T,gorunen);
+    const T='baski', ic=a._alici==='ic', cm=v.cm, M=v.M, sab=a.sablon==='dokum'?'dokum':'takip';
+    const jm={}; v.jobs.forEach(j=>jm[j.id]=j); const gm={}; v.grp.forEach(g=>gm[g.id]=g);
+    const isId=rpBIs(a);
+    const out={sablon:sab,ic,uyari:[],bilgi:[],satirlar:[],bolumler:[],toplamlar:{},paketler:{},
+      bedelAd:ic?'Maliyet':'Satış bedeli'};
+    const bosSay=()=>({dahil:0,filtre:0,cik:0,birim:'işlem'});
+    if(sab==='dokum'&&!isId){ out.bosMesaj='Döküm için bir iş seçin.'; out.say=bosSay(); return out; }
+    let bas=null, bit=null;
+    if(sab==='takip'){
+      if(a.donem==='ozel'){ bas=a.bas||null; bit=a.bit||null;
+        const h=(bas||bit)?rpDonemDogrula(bas||'2000-01-01',bit||'2099-12-31'):null;
+        if(h){ out.hata=h; out.uyari.push(h); out.say=bosSay(); return out; } }
+      else [bas,bit]=rpBDonemAralik(a.donem);
+    }
+    out.bas=bas; out.bit=bit;
+    const tut=o=>{ const x=ic?o.cost:o.sale_amount; return x==null||x===''?null:+x; };
     const yerOf=o=>{ const u=o.unit_id?M.unitById[o.unit_id]:null; const p=[];
       if(u){ const al=M.altById[u.alt_mecra_id]; const me=M.mecById[(al||{}).mecra_id||u.mecra_id];
         p.push([me&&me.name,mdYuzAdi(M,u)].filter(Boolean).join(' · ')); }
       if(o.location_text) p.push(o.location_text); return p.join(' — '); };
-    const satir=o=>{ const j=jm[o.job_id]; const tur=o.operation_type;
-      return {key:'o'+o.id,dahil:rpDahil(T,'o'+o.id),id:o.id,kurum:cm[j.customer_id]||'',kurumId:j.customer_id,is:j.title||'',isId:j.id,
-        tarih:tarihOf(o),tarihPlan:o.planned_date||'',tur:RP_OPTUR[tur]||tur,turKod:tur,yeniden:!!o.reprint,durum:RP_OPDURUM[o.status]||o.status,
-        aciklama:o.description||'',yer:a.c_yer?yerOf(o):'',
-        malzeme:a.teknik&&a.c_malzeme?(o.material||''):'',gramaj:a.teknik&&a.c_malzeme?o.grammage_gsm:null,
-        olcu:a.teknik&&a.c_olcu?(o.dimensions||''):'',gorunen:a.teknik&&a.c_gorunen?(o.visible_size||''):'',
-        yuzey:a.teknik&&a.c_yuzey?o.surface_count:null,miktar:a.teknik&&a.c_miktar?o.quantity:null,birim:a.teknik&&a.c_miktar?(RP_BIRIM[o.quantity_unit]||o.quantity_unit||''):'',
-        baskiMerkezi:a.c_kim&&tur==='baski'?orgKisa(cm[o.supplier_org_id]||'',50):'',uygulayan:a.c_kim&&tur!=='baski'?orgKisa(cm[o.supplier_org_id]||'',50):'',
-        birimMaliyet:a.tMaliyet?o.unit_cost:null,maliyet:a.tMaliyet?o.cost:null,satis:a.tSatis?o.sale_amount:null,pb:o.currency||'TRY',
-        paket:(a.tMaliyet||a.tSatis)&&o.price_group_id?o.price_group_id:null,not:a.notlar?(o.note||''):''}; };
-    const tumSatir=filtreli.map(satir);
-    const sira=(x,y)=>a.sirala==='tur'?(x.turKod.localeCompare(y.turKod)||String(x.tarih).localeCompare(String(y.tarih))||x.id-y.id)
-      :(String(x.tarih||'9999').localeCompare(String(y.tarih||'9999'))||x.id-y.id);
-    /* Kurum → iş */
-    const km=new Map();
-    tumSatir.forEach(r=>{ if(!km.has(r.kurumId)) km.set(r.kurumId,{ad:r.kurum||'Kurum bağlı değil',isler:new Map()});
-      const k=km.get(r.kurumId); if(!k.isler.has(r.isId)) k.isler.set(r.isId,{ad:r.is,id:r.isId,satirlar:[]}); k.isler.get(r.isId).satirlar.push(r); });
-    const ticari=a.tMaliyet||a.tSatis;
-    /* Paketler: her paketin kapsamı (tüm işlemleri) ve rapordaki kısmı. */
-    const paketTum={}; v.ops.forEach(o=>{ if(o.price_group_id&&(a.durum==='hepsi'||o.status!=='cancelled')) (paketTum[o.price_group_id]=paketTum[o.price_group_id]||[]).push(o.id); });
-    const toplamlar={};
-    const topEkle=(pb,alan,deger)=>{ if(deger==null) return; const t=toplamlar[pb]=toplamlar[pb]||{maliyet:0,satis:0,var:{maliyet:false,satis:false}}; t[alan]+=Number(deger); t.var[alan]=true; };
-    out.gruplar=[...km.values()].sort((x,y)=>String(x.ad).localeCompare(String(y.ad),'tr')).map(k=>({ad:k.ad,isler:[...k.isler.values()].map(is=>{
-      is.satirlar.sort(sira);
-      const dahil=is.satirlar.filter(r=>r.dahil);
-      const paketler=[];
-      if(ticari){ const ids=[...new Set(dahil.map(r=>r.paket).filter(Boolean))];
-        ids.forEach(pid=>{ const g=gm[pid]; if(!g) return; const kap=paketTum[pid]||[]; const rap=dahil.filter(r=>r.paket===pid).length;
-          const tam=rap===kap.length;
-          paketler.push({id:pid,ad:g.label,maliyet:a.tMaliyet?g.cost_amount:null,satis:a.tSatis?g.sale_amount:null,pb:g.currency||'TRY',
-            kapsam:kap.length,raporda:rap,tam,not:a.notlar?(g.note||''):''});
-          if(tam){ topEkle(g.currency||'TRY','maliyet',a.tMaliyet?g.cost_amount:null); topEkle(g.currency||'TRY','satis',a.tSatis?g.sale_amount:null); } });
-        dahil.filter(r=>!r.paket).forEach(r=>{ topEkle(r.pb,'maliyet',r.maliyet); topEkle(r.pb,'satis',r.satis); }); }
-      return {...is,paketler}; })}));
-    out.toplamlar=toplamlar; out.ticari=ticari;
-    out.kismiPaket=out.gruplar.some(g=>g.isler.some(i=>i.paketler.some(p=>!p.tam)));
-    if(a.kurum) out.bilgi.push(['Kurum',cm[a.kurum]||'']);
-    if(a.isler.length) out.bilgi.push(['İş',a.isler.map(id=>(jm[id]||{}).title).filter(Boolean).join(', ')]);
-    if(a.bas||a.bit) out.bilgi.push([(RP_TARIHALAN.find(x=>x[0]===a.tarihAlan)||[])[1]||'Tarih',`${a.bas?rpTr(a.bas):'…'} – ${a.bit?rpTr(a.bit):'…'}`]);
-    if(a.turler.length<4) out.bilgi.push(['İşlem türü',a.turler.map(t=>RP_OPTUR[t]).join(', ')]);
-    const dahilN=tumSatir.filter(r=>r.dahil).length;
-    out.say={dahil:dahilN,filtre:tumSatir.length,cik:tumSatir.length-dahilN,birim:'işlem'};
-    if(!tumSatir.length) out.uyari.push('Bu kapsamda baskı/montaj kaydı yok.');
+    const unitAd=o=>{ const u=o.unit_id?M.unitById[o.unit_id]:null; return u?mdYuzAdi(M,u):''; };
+    const kurumAd=id=>id?rpKisaAd(cm[id],30):'';
+    /* Baskı merkezi / uygulayan: sütun dar, daha kısa. */
+    const firmaKisa=id=>id?rpKisaAd(cm[id],24):'';
+    /* 1. Kapsam */
+    const kapsam=v.ops.filter(o=>{ const j=jm[o.job_id]; if(!j) return false;
+      if(isId&&o.job_id!==isId) return false;
+      if(a.kurum&&String(j.customer_id)!==String(a.kurum)) return false;
+      if(!a.iptal&&o.status==='cancelled') return false; return true; });
+    /* 2. Üretim kalemleri (yalnız açık bağ) */
+    const km=new Map(); kapsam.forEach(o=>{ const k=o.kalem_key||('t'+o.id); if(!km.has(k)) km.set(k,[]); km.get(k).push(o); });
+    const turSira={baski:0,montaj:1,sokum:2,diger:3};
+    let kalemler=[...km.entries()].map(([key,ops])=>{ ops.sort((x,y)=>turSira[x.operation_type]-turSira[y.operation_type]||x.id-y.id);
+      const b=ops.filter(o=>o.operation_type==='baski'&&o.planned_date).map(o=>o.planned_date).sort();
+      const t=ops.map(o=>o.planned_date).filter(Boolean).sort();
+      return {key,ops,tarih:b[0]||t[0]||null,job:jm[ops[0].job_id],ilkId:Math.min(...ops.map(o=>o.id))}; });
+    if(a.uygulayan&&sab==='takip') kalemler=kalemler.filter(k=>k.ops.some(o=>String(o.supplier_org_id)===String(a.uygulayan)));
+    out.tarihsizDisarda=0;
+    if(sab==='takip'&&(bas||bit)) kalemler=kalemler.filter(k=>{ if(!k.tarih){ if(!a.tarihsiz) out.tarihsizDisarda++; return !!a.tarihsiz; }
+      return (!bas||k.tarih>=bas)&&(!bit||k.tarih<=bit); });
+    const gorunen=new Set(kalemler.flatMap(k=>k.ops.map(o=>'o'+o.id)));
+    out.budanan=rpBuda(T,gorunen);
+    kalemler.forEach(k=>{ k.d=k.ops.filter(o=>rpDahil(T,'o'+o.id)); });
+    /* Çıkarılan işlemler modelde yalnız ADIYLA kalır (geri eklemek için);
+       tutar, not ya da başka alan taşımaz. */
+    out.cikarilan=kalemler.flatMap(k=>k.ops.filter(o=>!rpDahil(T,'o'+o.id)).map(o=>({key:'o'+o.id,tarih:o.planned_date||'',
+      ad:`${RP_OPTUR[o.operation_type]||o.operation_type} — ${o.description||unitAd(o)||(jm[o.job_id]||{}).title||''}`})));
+    kalemler=kalemler.filter(k=>k.d.length);
+    /* 3. Paketler: bir kez sayılır; kısmi paket toplama girmez. */
+    const paketTum={}; v.ops.forEach(o=>{ if(o.price_group_id&&(a.iptal||o.status!=='cancelled')) (paketTum[o.price_group_id]=paketTum[o.price_group_id]||[]).push(o.id); });
+    const pRap={}; kalemler.forEach(k=>k.d.forEach(o=>{ if(o.price_group_id&&gm[o.price_group_id]) (pRap[o.price_group_id]=pRap[o.price_group_id]||new Set()).add(o.id); }));
+    Object.keys(pRap).forEach(pid=>{ const g=gm[pid], kap=(paketTum[pid]||[]).length, r=pRap[pid].size, t=ic?g.cost_amount:g.sale_amount;
+      out.paketler[pid]={id:+pid,ad:g.label,pb:g.currency||'TRY',tutar:t==null?null:+t,kapsam:kap,raporda:r,tam:r===kap,not:ic?(g.note||''):''}; });
+    const pakette=o=>!!(o.price_group_id&&out.paketler[o.price_group_id]);
+    const kPaket=k=>{ const o=k.d.find(pakette); return o?o.price_group_id:null; };
+    const pTarih={}; kalemler.forEach(k=>{ const p=kPaket(k); if(p){ const t=k.tarih||'9999'; if(!pTarih[p]||t<pTarih[p]) pTarih[p]=t; } });
+    kalemler.sort((x,y)=>{ const px=kPaket(x), py=kPaket(y);
+      return String(px?pTarih[px]:(x.tarih||'9999')).localeCompare(String(py?pTarih[py]:(y.tarih||'9999')))
+        ||(px||0)-(py||0)||String(x.tarih||'9999').localeCompare(String(y.tarih||'9999'))||x.ilkId-y.ilkId; });
+    kalemler.forEach(k=>{ k.paket=kPaket(k); });
+    /* 4. Toplamlar (para birimine göre) */
+    const top=out.toplamlar;
+    const tEkle=(pb,alan,deger)=>{ const t=top[pb]=top[pb]||{tutar:0,var:false,eksik:0,baski:0,montaj:0,hizmet:0,paket:0};
+      if(deger==null){ t.eksik++; return; } t.tutar=Math.round((t.tutar+deger)*100)/100; t[alan]=Math.round((t[alan]+deger)*100)/100; t.var=true; };
+    kalemler.forEach(k=>{ const varB=k.d.some(o=>o.operation_type==='baski');
+      k.d.forEach(o=>{ if(pakette(o)) return; const alan=o.operation_type==='baski'?'baski':(o.operation_type==='montaj'&&varB)?'montaj':'hizmet';
+        tEkle(o.currency||'TRY',alan,tut(o)); }); });
+    Object.values(out.paketler).forEach(p=>{ if(p.tam&&p.tutar!=null) tEkle(p.pb,'paket',p.tutar); });
+    out.kismiPaket=Object.values(out.paketler).some(p=>!p.tam);
+    const sayDahil=kalemler.reduce((t,k)=>t+k.d.length,0);
+    out.say={dahil:sayDahil,filtre:gorunen.size,cik:gorunen.size-sayDahil,birim:'işlem'};
+    /* 5. Satırlar */
+    const durumMetni=ops=>{ const g={}; ops.forEach(o=>{ const t=o.operation_type; (g[t]=g[t]||new Set()).add(o.status); });
+      return Object.entries(g).map(([t,s])=>`${RP_OPTUR[t]||t}: ${[...s].map(x=>(RP_OPDURUM[x]||x).toLocaleLowerCase('tr')).join(' / ')}`).join(' · '); };
+    const tarihBir=l=>{ const u=[...new Set(l.filter(Boolean))].sort(); return u.length<=1?(u[0]||''):u.map(rpTr).join('\n'); };
+    const birles=l=>[...new Set(l.filter(Boolean))].join('\n');
+    const malzeme=o=>[o.material,o.grammage_gsm?o.grammage_gsm+' gr/m²':''].filter(Boolean).join(' · ');
+    const hizmetAd=o=>`${RP_OPTUR[o.operation_type]||o.operation_type}${o.description?' — '+o.description:unitAd(o)?' — '+unitAd(o):''}`;
+    const notlar=ops=>ic?ops.filter(o=>o.note).map(o=>(ops.length>1?RP_OPTUR[o.operation_type]+': ':'')+o.note):[];
+    if(sab==='takip'){
+      let sonP=null;
+      kalemler.forEach(k=>{
+        if(k.paket&&k.paket!==sonP) out.satirlar.push({tip:'paket',...out.paketler[k.paket]});
+        sonP=k.paket;
+        const B=k.d.filter(o=>o.operation_type==='baski'), Mo=k.d.filter(o=>o.operation_type==='montaj'), D=k.d.filter(o=>!['baski','montaj'].includes(o.operation_type));
+        const musteri=kurumAd(k.job.customer_id);
+        const rows=[];
+        B.forEach(o=>rows.push({key:'o'+o.id,tarih:o.planned_date||'',musteri,urun:o.description||unitAd(o)||'Baskı',
+          urunAlt:[o.reprint?'Yeniden baskı':'',malzeme(o),o.visible_size?'görünen '+o.visible_size:''].filter(Boolean).join(' · '),
+          adet:o.quantity==null?null:+o.quantity,birim:RP_BIRIM[o.quantity_unit]||o.quantity_unit||'',merkez:firmaKisa(o.supplier_org_id),olcu:o.dimensions||''}));
+        const mSpan=B.length&&Mo.length?B.length:0;
+        if(mSpan){ rows[0].mTarih=tarihBir(Mo.map(o=>o.planned_date)); rows[0].mYer=birles(Mo.map(yerOf)); rows[0].mYapan=birles(Mo.map(o=>firmaKisa(o.supplier_org_id))); }
+        (B.length?D:[...Mo,...D]).forEach(o=>rows.push({key:'o'+o.id,tarih:o.planned_date||'',musteri,urun:hizmetAd(o),urunAlt:'',
+          adet:o.quantity==null?null:+o.quantity,birim:RP_BIRIM[o.quantity_unit]||o.quantity_unit||'',merkez:'',olcu:o.dimensions||'',
+          mTarih:o.planned_date||'',mYer:yerOf(o),mYapan:firmaKisa(o.supplier_org_id),kendi:true}));
+        const bedelOps=k.d.filter(o=>!pakette(o));
+        const eksik=bedelOps.filter(o=>tut(o)==null).map(o=>RP_OPTUR[o.operation_type]);
+        const kapsamAd=B.length?(Mo.length?'Baskı + montaj':'Yalnız baskı')+(D.length?' + '+[...new Set(D.map(o=>RP_OPTUR[o.operation_type].toLocaleLowerCase('tr')))].join(', '):'')
+          :Mo.length?'Montaj — baskıyla eşleştirilmemiş':[...new Set(D.map(o=>RP_OPTUR[o.operation_type]))].join(', ');
+        const bedel=rpTutarTopla(bedelOps,tut);
+        const pktKis=k.d.filter(pakette);
+        out.satirlar.push({tip:'kalem',key:k.key,rows,mSpan,bedel,paket:!!k.paket&&bedelOps.length===0,
+          not:[kapsamAd,durumMetni(k.d),
+            pktKis.length&&bedelOps.length?`${[...new Set(pktKis.map(o=>RP_OPTUR[o.operation_type]))].join(', ')} paket bedelinde; bu bedel yalnız ${[...new Set(bedelOps.map(o=>RP_OPTUR[o.operation_type].toLocaleLowerCase('tr')))].join(', ')} kısmıdır.`:'',
+            bedel.length&&eksik.length?`Bedel yalnız girilmiş tutarları kapsar (${[...new Set(eksik)].join(', ').toLocaleLowerCase('tr')} tutarı girilmemiş).`:'',
+            ...notlar(k.d)].filter(Boolean).join('\n')});
+      });
+      if(a.kurum) out.bilgi.push(['Kurum',cm[a.kurum]||'']);
+      if(isId) out.bilgi.push(['İş',(jm[isId]||{}).title||'']);
+      out.bilgi.push(['Dönem',bas||bit?`${bas?rpTr(bas):'…'} – ${bit?rpTr(bit):'…'} (planlanan işlem tarihi)`:'Tüm tarihler']);
+      if(a.uygulayan) out.bilgi.push(['Uygulayan',orgKisa(cm[a.uygulayan]||'',60)]);
+      if(out.tarihsizDisarda) out.uyari.push(`${out.tarihsizDisarda} kalemin tarihi girilmemiş; bu döneme yerleştirilemediği için rapora girmedi. "Ek filtreler" içinden eklenebilir.`);
+    } else {
+      const job=jm[isId]||{};
+      out.kurum=cm[job.customer_id]||''; out.is=job.title||'';
+      const K1=[], K2=[]; let sonP=null;
+      kalemler.forEach(k=>{
+        const B=k.d.filter(o=>o.operation_type==='baski'), Mo=k.d.filter(o=>o.operation_type==='montaj'), D=k.d.filter(o=>!['baski','montaj'].includes(o.operation_type));
+        const hizmet=(o,bagli)=>K2.push({tip:'hizmet',key:'o'+o.id,urun:hizmetAd(o),urunAlt:[bagli?'↳ '+bagli:'',o.operation_type==='montaj'?'baskıyla eşleştirilmemiş':'',yerOf(o)].filter(Boolean).join(' · '),
+          olcu:o.dimensions||'',yuzey:o.surface_count,adet:o.quantity==null?null:+o.quantity,birim:RP_BIRIM[o.quantity_unit]||o.quantity_unit||'',
+          birimFiyat:rpBirimFiyat(ic?o.unit_cost:null,tut(o),o.quantity),tutar:tut(o),pb:o.currency||'TRY',gri:pakette(o),
+          not:notlar([o]).join(' ')});
+        if(!B.length){ [...Mo,...D].forEach(o=>hizmet(o,'')); return; }
+        if(k.paket&&k.paket!==sonP) K1.push({tip:'paket',...out.paketler[k.paket]});
+        sonP=k.paket;
+        const mBedel=rpTutarTopla(Mo.filter(o=>!pakette(o)),tut);
+        const mGri=Mo.length>0&&Mo.every(pakette);
+        const rows=B.map(o=>({key:'o'+o.id,urun:o.description||unitAd(o)||'Baskı',
+          urunAlt:[o.reprint?'Yeniden baskı':'',yerOf(o)].filter(Boolean).join(' · '),malzeme:malzeme(o),
+          olcu:o.dimensions||'',gorunen:o.visible_size||'',yuzey:o.surface_count,adet:o.quantity==null?null:+o.quantity,
+          birim:RP_BIRIM[o.quantity_unit]||o.quantity_unit||'',birimFiyat:rpBirimFiyat(ic?o.unit_cost:null,tut(o),o.quantity),
+          tutar:tut(o),pb:o.currency||'TRY',gri:pakette(o)}));
+        K1.push({tip:'kalem',key:k.key,rows,montaj:Mo.length?{bedel:mGri?rpTutarTopla(Mo,tut):mBedel,gri:mGri,
+            eksik:Mo.some(o=>tut(o)==null)&&!mGri,kapsar:B.length}:null,
+          not:[...notlar(k.d)].join(' ')});
+        D.forEach(o=>hizmet(o,rows[0].urun));
+      });
+      out.bolumler=[{ad:'Baskı ve montaj kalemleri',tip:'kalem',satirlar:K1},{ad:'Destek hizmetleri',tip:'hizmet',satirlar:K2}].filter(b=>b.satirlar.length);
+      out.bilgi.push(['Kurum',out.kurum],['İş',out.is]);
+    }
+    if(!kalemler.length&&!out.uyari.length) out.uyari.push('Bu kapsamda baskı / montaj kaydı yok.');
     return out;
   },
   onizle(m,a){
-    const T='baski'; let h='';
-    m.gruplar.forEach(k=>{ h+=`<h5 class="rp2-g1">${esc(k.ad)}</h5>`;
-      k.isler.forEach(is=>{ const keys=is.satirlar.map(r=>r.key);
-        h+=`<div class="rp2-g2"><span>${esc(is.ad)} <em>${is.satirlar.length} işlem</em></span>
-          <button type="button" class="btn-link" onclick='rpSecTopluKey("baski",${JSON.stringify(keys)},true)'>tümü</button>
-          <button type="button" class="btn-link" onclick='rpSecTopluKey("baski",${JSON.stringify(keys)},false)'>hiçbiri</button>
-          <button type="button" class="btn-link" onclick="workAc(${is.id})">İşi aç →</button></div>
-        <div class="rp2-rows">${is.satirlar.map(r=>`<label class="rp2-row ${r.dahil?'':'dis'}">${rpCb(T,r.key,r.dahil,r.tur+' rapora dahil')}
-          <span class="rp2-tarih-c">${esc(rpTr(r.tarih)||'tarihsiz')}</span><b>${esc(r.tur)}${r.yeniden?' · yeniden baskı':''}</b>
-          <span class="rp2-det">${esc([r.aciklama,r.yer,[r.malzeme,r.gramaj?r.gramaj+' gr/m²':''].filter(Boolean).join(' '),r.olcu&&('baskı '+r.olcu),r.gorunen&&('görünen '+r.gorunen),
-            r.yuzey!=null?r.yuzey+' yüzey':'',r.miktar!=null?rpSayi(r.miktar)+' '+r.birim:'',r.baskiMerkezi,r.uygulayan].filter(Boolean).join(' · '))}
-            ${m.ticari?` <span class="rp2-para">${[r.maliyet!=null?'maliyet '+rpPara(r.maliyet,r.pb):'',r.satis!=null?'satış '+rpPara(r.satis,r.pb):'',r.paket?'paket içinde':''].filter(Boolean).join(' · ')}</span>`:''}
-            ${r.not?`<span class="rp2-notm">Not: ${esc(r.not)}</span>`:''}</span>
-          <span class="rp2-durum">${esc(r.durum)}</span></label>`).join('')}</div>
-        ${is.paketler.map(p=>`<div class="rp2-paket ${p.tam?'':'kismi'}">Paket bedeli — <b>${esc(p.ad)}</b>: ${[p.maliyet!=null?'maliyet '+rpPara(p.maliyet,p.pb):'',p.satis!=null?'satış '+rpPara(p.satis,p.pb):''].filter(Boolean).join(' · ')}
-          · ${p.kapsam} işlemi kapsar${p.tam?'':` — bu raporda ${p.raporda}/${p.kapsam} işlem var; tutar toplama katılmaz`}</div>`).join('')}`; }); });
-    if(m.ticari) h+=rpBaskiToplamHtml(m);
+    const T='baski';
+    if(m.bosMesaj) return `<p class="empty">${esc(m.bosMesaj)}</p>`;
+    if(m.hata) return '';
+    const P=(v,pb,gri)=>v==null?'<span class="muted">—</span>':`<span class="${gri?'rp3-gri':''}">${esc(rpPara(v,pb))}</span>`;
+    const tarihH=t=>/^\d{4}-\d{2}-\d{2}$/.test(t||'')?esc(rpTr(t)):esc(t||'').replace(/\n/g,'<br>');
+    const cok=t=>esc(t||'').replace(/\n/g,'<br>');
+    const cb=(key,dahil,ad)=>rpCb(T,key,dahil,ad);
+    let h=`<p class="rp2-ozet">Bedel sütunu: <b>${esc(m.bedelAd.toLocaleLowerCase('tr'))}</b> — kayıtlı tutarlar; KDV ve indirim hesaplanmaz, paket bedeli bir kez sayılır.</p>`;
+    if(m.sablon==='takip'){
+      const kol=['Tarih','Müşteri','Ürün / iş kalemi','Adet','Baskı merkezi','Ölçü',m.bedelAd,'Montaj tarihi','Montaj yeri','Montajı yapan','Not'];
+      h+=`<div class="rp3-kap"><table class="rp3-tab rp3-bm"><thead><tr><th class="rp3-cb"><span class="sr-only">Dahil</span></th>${kol.map(k=>`<th scope="col">${esc(k)}</th>`).join('')}</tr></thead><tbody>`;
+      m.satirlar.forEach(s=>{
+        if(s.tip==='paket'){ h+=`<tr class="rp3-pk${s.tam?'':' kismi'}"><td></td><td colspan="6"><b>Paket bedeli — ${esc(s.ad)}</b><small>${s.kapsam} işlemi kapsar${s.tam?'':` · bu raporda ${s.raporda}/${s.kapsam} işlem var; bedel dağıtılmadı, toplama katılmadı (paketin tamamı ${esc(rpPara(s.tutar,s.pb))})`}</small></td>
+            <td class="sag">${s.tam?P(s.tutar,s.pb):'<span class="muted">kısmi</span>'}</td><td colspan="4">${cok(s.not)}</td></tr>`; return; }
+        const n=s.rows.length;
+        s.rows.forEach((r,i)=>{ const d=rpDahil(T,r.key);
+          h+=`<tr class="${d?'':'dis'}${i===n-1?' son':''}"><td class="rp3-cb">${cb(r.key,d,r.urun+' rapora dahil')}</td>
+            <td>${tarihH(r.tarih)}</td><td>${esc(r.musteri)}</td><td><b>${esc(r.urun)}</b>${r.urunAlt?`<small>${esc(r.urunAlt)}</small>`:''}</td>
+            <td class="sag">${r.adet==null?'':esc(rpSayi(r.adet)+' '+r.birim)}</td><td>${esc(r.merkez)}</td><td>${esc(r.olcu)}</td>
+            ${i===0?`<td class="sag" rowspan="${n}">${s.paket?'<span class="rp3-gri">pakette</span>':s.bedel.length?esc(rpParaListe(s.bedel)):'<span class="muted">—</span>'}</td>`:''}
+            ${(i===0&&s.mSpan)?`<td rowspan="${s.mSpan}">${tarihH(r.mTarih)}</td><td rowspan="${s.mSpan}">${cok(r.mYer)}</td><td rowspan="${s.mSpan}">${cok(r.mYapan)}</td>`
+              :(s.mSpan&&i<s.mSpan)?'':`<td>${r.kendi?tarihH(r.mTarih):''}</td><td>${r.kendi?cok(r.mYer):''}</td><td>${r.kendi?cok(r.mYapan):''}</td>`}
+            ${i===0?`<td rowspan="${n}" class="rp3-not">${cok(s.not)}</td>`:''}</tr>`; }); });
+      h+=`</tbody></table></div>`;
+      if(!m.satirlar.length) h+=`<p class="empty">Bu kapsamda baskı / montaj kaydı yok.</p>`;
+    } else {
+      m.bolumler.forEach(b=>{
+        const kol=b.tip==='kalem'?['Ürün','Malzeme / cins','Baskı ölçüsü','Görünen alan','Yüzey adedi','Baskı adedi','Montaj bedeli','Birim fiyat','Tutar']
+          :['Hizmet','','Ölçü','','Yüzey adedi','Miktar','','Birim fiyat','Tutar'];
+        h+=`<h5 class="rp2-g1">${esc(b.ad)}</h5><div class="rp3-kap"><table class="rp3-tab rp3-bm"><thead><tr><th class="rp3-cb"><span class="sr-only">Dahil</span></th>${kol.map(k=>`<th scope="col">${esc(k)}</th>`).join('')}</tr></thead><tbody>`;
+        b.satirlar.forEach(s=>{
+          if(s.tip==='paket'){ h+=`<tr class="rp3-pk${s.tam?'':' kismi'}"><td></td><td colspan="8"><b>Paket bedeli — ${esc(s.ad)}: ${s.tam?esc(rpPara(s.tutar,s.pb)):'kısmi'}</b>
+              <small>${s.kapsam} işlemi kapsar; aşağıdaki satır tutarları bilgi amaçlıdır${s.tam?'':` · bu raporda ${s.raporda}/${s.kapsam} işlem var; bedel dağıtılmadı, toplama katılmadı`}${s.not?' · '+esc(s.not):''}</small></td><td></td></tr>`; return; }
+          if(s.tip==='hizmet'){ const d=rpDahil(T,s.key);
+            h+=`<tr class="${d?'':'dis'} son"><td class="rp3-cb">${cb(s.key,d,s.urun+' rapora dahil')}</td><td colspan="2"><b>${esc(s.urun)}</b>${s.urunAlt?`<small>${esc(s.urunAlt)}</small>`:''}${s.not?`<small class="rp3-notm">${esc(s.not)}</small>`:''}</td>
+              <td>${esc(s.olcu)}</td><td></td><td class="sag">${s.yuzey??''}</td><td class="sag">${s.adet==null?'':esc(rpSayi(s.adet)+' '+s.birim)}</td><td></td>
+              <td class="sag">${P(s.birimFiyat,s.pb)}</td><td class="sag">${P(s.tutar,s.pb,s.gri)}</td></tr>`; return; }
+          const n=s.rows.length;
+          s.rows.forEach((r,i)=>{ const d=rpDahil(T,r.key);
+            h+=`<tr class="${d?'':'dis'}${i===n-1?' son':''}"><td class="rp3-cb">${cb(r.key,d,r.urun+' rapora dahil')}</td>
+              <td><b>${esc(r.urun)}</b>${r.urunAlt?`<small>${esc(r.urunAlt)}</small>`:''}${i===0&&s.not?`<small class="rp3-notm">${esc(s.not)}</small>`:''}</td><td>${esc(r.malzeme)}</td><td>${esc(r.olcu)}</td><td>${esc(r.gorunen)}</td>
+              <td class="sag">${r.yuzey??''}</td><td class="sag">${r.adet==null?'':esc(rpSayi(r.adet)+(r.birim&&r.birim!=='adet'?' '+r.birim:''))}</td>
+              ${i===0?`<td class="sag" rowspan="${n}">${s.montaj?(s.montaj.bedel.length?`<span class="${s.montaj.gri?'rp3-gri':''}">${esc(rpParaListe(s.montaj.bedel))}</span>`:'<span class="muted">girilmemiş</span>')+(s.montaj.kapsar>1?`<small>${s.montaj.kapsar} kalemin ortak montajı</small>`:''):'<span class="muted">—</span>'}</td>`:''}
+              <td class="sag">${P(r.birimFiyat,r.pb)}</td><td class="sag">${P(r.tutar,r.pb,r.gri)}</td></tr>`; }); });
+        h+=`</tbody></table></div>`; });
+      if(!m.bolumler.length) h+=`<p class="empty">Bu işte baskı / montaj kaydı yok.</p>`;
+    }
+    if((m.cikarilan||[]).length) h+=`<div class="rp3-cik"><b>Rapordan çıkarılan kayıtlar (${m.cikarilan.length})</b> <span class="muted">— işaretleyerek geri ekleyin</span>
+      <div class="rp2-rows">${m.cikarilan.map(x=>`<label class="rp2-row dis">${rpCb(T,x.key,false,x.ad+' rapora ekle')}<span class="rp2-tarih-c">${esc(rpTr(x.tarih)||'tarihsiz')}</span><span class="rp2-det">${esc(x.ad)}</span></label>`).join('')}</div></div>`;
+    h+=rpBToplamHtml(m);
     return h;
   },
-  pdf(m,a){
-    const ic=[]; const ticari=m.ticari;
-    const n=m.gruplar.reduce((t,k)=>t+k.isler.reduce((x,i)=>x+i.satirlar.filter(r=>r.dahil).length,0),0);
-    if(!n) ic.push({text:'Bu kapsamda raporlanacak işlem yok.',style:'bos'});
-    const tek=a.teknik&&(a.c_malzeme||a.c_olcu||a.c_gorunen||a.c_yuzey||a.c_miktar);
-    m.gruplar.forEach(k=>{ const isler=k.isler.map(i=>({...i,s:i.satirlar.filter(r=>r.dahil)})).filter(i=>i.s.length);
-      if(!isler.length) return;
-      isler.forEach((is,ii)=>{ const ust=[ii===0?{text:k.ad,stil:'h2'}:null,{text:`${is.ad}  ·  ${is.s.length} işlem`}];
-        const islemHucre=r=>({stack:[{text:[{text:r.tur,bold:true},r.yeniden?{text:' · yeniden baskı',color:RPC.amber}:'',r.aciklama?'  '+r.aciklama:'']},
-          ...(r.not?[{text:'Not: '+r.not,style:'not'}]:[])]});
-        ic.push(rpTablo([{b:'Tarih',g:62},{b:'İşlem',g:'*'},...(a.c_yer?[{b:'Yer / mecra',g:150}]:[]),...(a.c_kim?[{b:'Baskı merkezi / uygulayan',g:120}]:[]),{b:'Durum',g:62}],
-          is.s.map(r=>[rpTr(r.tarih)||'—',islemHucre(r),...(a.c_yer?[r.yer||'—']:[]),...(a.c_kim?[r.baskiMerkezi||r.uygulayan||'—']:[]),r.durum]),{ust}));
-        if(tek){ const ts=is.s.filter(r=>r.malzeme||r.olcu||r.gorunen||r.yuzey!=null||r.miktar!=null);
-          if(ts.length) ic.push(rpTablo([{b:'İşlem',g:'*'},...(a.c_malzeme?[{b:'Malzeme / cins',g:120},{b:'Gramaj',g:46,sag:true}]:[]),
-            ...(a.c_olcu?[{b:'Baskı ölçüsü',g:80}]:[]),...(a.c_gorunen?[{b:'Görünen alan',g:80}]:[]),...(a.c_yuzey?[{b:'Yüzey',g:40,sag:true}]:[]),...(a.c_miktar?[{b:'Miktar',g:62,sag:true}]:[])],
-            ts.map(r=>[`${r.tur}${r.aciklama?' — '+r.aciklama:''}`,...(a.c_malzeme?[r.malzeme||'—',r.gramaj?r.gramaj+' gr/m²':'—']:[]),
-              ...(a.c_olcu?[r.olcu||'—']:[]),...(a.c_gorunen?[r.gorunen||'—']:[]),...(a.c_yuzey?[r.yuzey!=null?String(r.yuzey):'—']:[]),
-              ...(a.c_miktar?[r.miktar!=null?`${rpSayi(r.miktar)} ${r.birim}`:'—']:[])]),{fs:8.5})); }
-        if(ticari){ ic.push(rpTablo([{b:'İşlem',g:'*'},...(a.tMaliyet?[{b:'Birim maliyet',g:80,sag:true},{b:'Maliyet',g:88,sag:true}]:[]),...(a.tSatis?[{b:'Satış bedeli',g:88,sag:true}]:[]),{b:'Paket',g:110}],
-          is.s.map(r=>{ const gri=r.paket?{color:RPC.ink3}:{};
-            return [`${r.tur}${r.aciklama?' — '+r.aciklama:''}`,...(a.tMaliyet?[{text:rpPara(r.birimMaliyet,r.pb)||'—',...gri},{text:rpPara(r.maliyet,r.pb)||'—',...gri}]:[]),
-              ...(a.tSatis?[{text:rpPara(r.satis,r.pb)||'—',...gri}]:[]),r.paket?((is.paketler.find(p=>p.id===r.paket)||{}).ad||'Paket'):'—']; }),{fs:8.5}));
-          is.paketler.forEach(p=>ic.push({text:[{text:'Paket bedeli — '+p.ad+': ',bold:true},[p.maliyet!=null?'maliyet '+rpPara(p.maliyet,p.pb):'',p.satis!=null?'satış '+rpPara(p.satis,p.pb):''].filter(Boolean).join(' · '),
-            `. ${p.kapsam} işlemi kapsar.`,p.tam?'':{text:` Bu raporda yalnız ${p.raporda}/${p.kapsam} işlem var; bedel dağıtılmadı ve toplama katılmadı.`,color:RPC.kirmizi},
-            p.not?{text:' '+p.not,color:RPC.ink2}:''],fontSize:8.5,margin:[0,0,0,6]}));
-          if(is.s.some(r=>r.paket)) ic.push({text:'Paket içindeki işlemlerin satır tutarları bilgi amaçlıdır (gri); toplama paket bedeli girer.',style:'not',margin:[0,0,0,6]}); }
-      }); });
-    if(ticari) ic.push(...rpBaskiToplamPdf(m,a));
-    return {icerik:ic,o:{yon:'landscape'}};
-  },
-  xlsx(m,a){
-    const satir=[];
-    m.gruplar.forEach(k=>k.isler.forEach(is=>is.satirlar.filter(r=>r.dahil).forEach(r=>{
-      satir.push([r.kurum,r.is,r.tarih||null,r.tur,r.yeniden?'Evet':'',r.aciklama,
-        ...(a.c_yer?[r.yer]:[]),
-        ...(a.teknik&&a.c_malzeme?[r.malzeme,r.gramaj]:[]),...(a.teknik&&a.c_olcu?[r.olcu]:[]),...(a.teknik&&a.c_gorunen?[r.gorunen]:[]),
-        ...(a.teknik&&a.c_yuzey?[r.yuzey]:[]),...(a.teknik&&a.c_miktar?[r.miktar,r.birim]:[]),
-        ...(a.c_kim?[r.baskiMerkezi,r.uygulayan]:[]),r.durum,
-        ...(a.tMaliyet?[r.birimMaliyet,r.maliyet]:[]),...(a.tSatis?[r.satis]:[]),...(m.ticari?[r.pb,r.paket?((is.paketler.find(p=>p.id===r.paket)||{}).ad||''):'']:[]),
-        ...(a.notlar?[r.not]:[])]); })));
-    const kol=[{b:'Kurum',w:26,sar:true},{b:'İş',w:30,sar:true},{b:'Tarih',w:11,tip:'tarih'},{b:'İşlem',w:12},{b:'Yeniden baskı',w:9},{b:'Açıklama',w:30,sar:true},
-      ...(a.c_yer?[{b:'Yer / mecra',w:30,sar:true}]:[]),
-      ...(a.teknik&&a.c_malzeme?[{b:'Malzeme / cins',w:22,sar:true},{b:'Gramaj (gr/m²)',w:10,tip:'tam'}]:[]),...(a.teknik&&a.c_olcu?[{b:'Baskı ölçüsü',w:14}]:[]),
-      ...(a.teknik&&a.c_gorunen?[{b:'Görünen alan',w:14}]:[]),...(a.teknik&&a.c_yuzey?[{b:'Yüzey sayısı',w:9,tip:'tam'}]:[]),
-      ...(a.teknik&&a.c_miktar?[{b:'Miktar',w:9,tip:'sayi'},{b:'Birim',w:8}]:[]),
-      ...(a.c_kim?[{b:'Baskı merkezi',w:22,sar:true},{b:'Uygulayan',w:22,sar:true}]:[]),{b:'Durum',w:12},
-      ...(a.tMaliyet?[{b:'Birim maliyet',w:13,tip:'para'},{b:'Maliyet',w:13,tip:'para'}]:[]),...(a.tSatis?[{b:'Satış bedeli',w:13,tip:'para'}]:[]),
-      ...(m.ticari?[{b:'Para birimi',w:8},{b:'Paket',w:22,sar:true}]:[]),...(a.notlar?[{b:'Not',w:40,sar:true}]:[])];
-    const S=[{ad:'Döküm',yon:'landscape',kol,satir,sabitKol:2,
-      not:m.ticari?'Paket içindeki işlemlerin satır tutarları bilgi amaçlıdır; paket bedeli Paketler sayfasındadır ve toplama bir kez girer.':null}];
-    if(m.ticari){
-      const ps=[]; m.gruplar.forEach(k=>k.isler.forEach(is=>is.paketler.forEach(p=>ps.push([k.ad,is.ad,p.ad,p.kapsam,p.raporda,
-        ...(a.tMaliyet?[p.maliyet]:[]),...(a.tSatis?[p.satis]:[]),p.pb,p.tam?'Evet':'Hayır — kısmi, toplama katılmadı',...(a.notlar?[p.not]:[])]))));
-      if(ps.length) S.push({ad:'Paketler',yon:'landscape',kol:[{b:'Kurum',w:24,sar:true},{b:'İş',w:28,sar:true},{b:'Paket',w:26,sar:true},{b:'Kapsadığı işlem',w:10,tip:'tam'},
-        {b:'Bu rapordaki',w:10,tip:'tam'},...(a.tMaliyet?[{b:'Paket maliyeti',w:14,tip:'para'}]:[]),...(a.tSatis?[{b:'Paket satışı',w:14,tip:'para'}]:[]),{b:'Para birimi',w:8},{b:'Toplama dahil',w:26,sar:true},
-        ...(a.notlar?[{b:'Not',w:36,sar:true}]:[])],satir:ps});
-      S.push({ad:'Toplamlar',yon:'portrait',kol:[{b:'Para birimi',w:12},...(a.tMaliyet?[{b:'Maliyet toplamı',w:18,tip:'para'}]:[]),...(a.tSatis?[{b:'Satış toplamı',w:18,tip:'para'}]:[])],
-        satir:Object.entries(m.toplamlar).map(([pb,t])=>[pb,...(a.tMaliyet?[t.var.maliyet?t.maliyet:null]:[]),...(a.tSatis?[t.var.satis?t.satis:null]:[])]),
-        not:'Her para birimi ayrı toplanır. Kısmi paketler ve tutarı girilmemiş satırlar toplama katılmaz. KDV, indirim ve kâr kayıtta olmadığı için hesaplanmamıştır.'});
-    }
-    S.push(rpBilgiSayfa(m,[['Gruplama','Kurum → iş → işlem'],['Tarih','Tarih sütunu seçilen tarih alanıdır; baskı satırında baskı, montaj satırında montaj tarihi.']]));
-    return S;
-  }
+  pdf(m,a){ return m.sablon==='dokum'?rpDokumPdf(m):rpTakipPdf(m); },
+  xlsx(m,a){ return [{ad:m.sablon==='dokum'?'Döküm':'Takip',yon:'landscape',ozel:ws=>(m.sablon==='dokum'?rpDokumXls:rpTakipXls)(ws,m)}]; }
 };
-function rpBaskiToplamHtml(m){
-  const e=Object.entries(m.toplamlar);
-  return `<h5 class="rp2-g1">Toplamlar</h5>${e.length?e.map(([pb,t])=>`<p class="rp2-ozet"><b>${esc(pb)}</b>: ${[t.var.maliyet?'maliyet '+rpPara(t.maliyet,pb):'',t.var.satis?'satış '+rpPara(t.satis,pb):''].filter(Boolean).join(' · ')}</p>`).join('')
-    :'<p class="muted">Seçili işlemlerde kayıtlı tutar yok.</p>'}
-    <p class="fhint">Her para birimi ayrı toplanır. Kısmi paketler ve tutarı girilmemiş satırlar toplama katılmaz. KDV, indirim ve kâr hesaplanmaz.${m.kismiPaket?' Bu raporda kısmen kapsanan paket var.':''}</p>`;
+/* Toplam satırları — her para birimi ayrı. */
+function rpBToplamSatirlari(m){
+  const out=[]; const E=Object.entries(m.toplamlar);
+  E.forEach(([pb,t])=>{
+    if(m.sablon==='dokum'){
+      if(t.baski) out.push({ad:'Baskı toplamı',pb,v:t.baski});
+      if(t.montaj) out.push({ad:'Montaj toplamı',pb,v:t.montaj});
+      if(t.hizmet) out.push({ad:'Destek hizmetleri toplamı',pb,v:t.hizmet});
+      Object.values(m.paketler).filter(p=>p.pb===pb&&p.tam&&p.tutar!=null).forEach(p=>out.push({ad:'Paket bedeli — '+p.ad,pb,v:p.tutar}));
+    }
+    out.push({ad:`Genel toplam (${pb})`,pb,v:t.var?t.tutar:null,kalin:true,eksik:t.eksik});
+  });
+  return out;
 }
-function rpBaskiToplamPdf(m,a){
-  const e=Object.entries(m.toplamlar);
-  return [rpH2('Toplamlar'),
-    e.length?rpTablo([{b:'Para birimi',g:80},...(a.tMaliyet?[{b:'Maliyet toplamı',g:120,sag:true}]:[]),...(a.tSatis?[{b:'Satış toplamı',g:120,sag:true}]:[]),{b:'',g:'*'}],
-      e.map(([pb,t])=>[pb,...(a.tMaliyet?[{text:t.var.maliyet?rpPara(t.maliyet,pb):'—',bold:true}]:[]),...(a.tSatis?[{text:t.var.satis?rpPara(t.satis,pb):'—',bold:true}]:[]),''])):{text:'Seçili işlemlerde kayıtlı tutar yok.',style:'bos'},
-    {text:'Her para birimi ayrı toplanır; farklı birimler tek tutarda toplanmaz. Paket bedeli bir kez sayılır; kısmen kapsanan paketler ve tutarı girilmemiş satırlar toplama katılmaz. Tutarlar kayıtlı haliyledir; KDV, indirim ve kâr kayıtta olmadığı için hesaplanmamıştır.',style:'not'}];
+function rpBToplamNot(m){
+  const n=Object.values(m.toplamlar).reduce((x,t)=>x+t.eksik,0);
+  return [`${m.bedelAd}: kayıtlı tutarlar. Her para birimi ayrı toplanır; KDV, indirim ve kâr hesaplanmaz.`,
+    Object.keys(m.paketler).length?'Paket bedeli bir kez sayılır; paket içindeki satır tutarları bilgi amaçlıdır.':'',
+    m.kismiPaket?'Kısmen kapsanan paket toplama katılmadı.':'',
+    n?`${n} işlemde tutar girilmemiş; bu işlemler toplama katılmadı (0 sayılmadı).`:''].filter(Boolean).join(' ');
 }
-function rpBaskiKurum(v){ const a=rpAyar('baski'); a.kurum=v; a.isler=[]; rpKontrolCiz('baski'); rpYenile('baski'); }
-function rpBaskiIs(id,on){ const a=rpAyar('baski'); const s=new Set(a.isler); if(on) s.add(id); else s.delete(id); a.isler=[...s]; rpYenile('baski'); }
-function rpBaskiTur(k,on){ const a=rpAyar('baski'); const s=new Set(a.turler); if(on) s.add(k); else s.delete(k);
-  if(!s.size){ rpNot('En az bir işlem türü seçin.','uyari'); rpKontrolCiz('baski'); return; } a.turler=[...s]; rpYenile('baski'); }
+function rpBToplamHtml(m){
+  const T=rpBToplamSatirlari(m);
+  return `<div class="rp3-top">${T.length?T.map(t=>`<div class="${t.kalin?'kalin':''}"><span>${esc(t.ad)}</span><b>${t.v==null?'—':esc(rpPara(t.v,t.pb))}</b></div>`).join('')
+    :'<div><span>Kayıtlı tutar yok.</span></div>'}</div><p class="fhint">${esc(rpBToplamNot(m))}</p>`;
+}
+/* ---------- PDF ---------- */
+function rpPdfBaslikBilgi(m){ return {text:[{text:'Bedel: ',bold:true},m.bedelAd.toLocaleLowerCase('tr')+(m.ic?' (iç kullanım)':' (dış paylaşım)')+' — kayıtlı tutarlar.'],fontSize:9,margin:[0,0,0,6]}; }
+function rpPdfToplam(m){
+  const T=rpBToplamSatirlari(m);
+  return [{table:{widths:['*',140],body:T.length?T.map(t=>[{text:t.ad,bold:!!t.kalin,alignment:'right'},{text:t.v==null?'—':rpPara(t.v,t.pb),bold:!!t.kalin,alignment:'right'}])
+      :[[{text:'Kayıtlı tutar yok.',colSpan:2,style:'bos'},{}]]},layout:'lightHorizontalLines',margin:[340,6,0,4],unbreakable:true},
+    {text:rpBToplamNot(m),style:'not'}];
+}
+function rpTakipPdf(m){
+  const ic=[rpPdfBaslikBilgi(m)];
+  const W=[52,66,'*',40,60,52,62,52,74,60,90];
+  const bas=['Tarih','Müşteri','Ürün / iş kalemi','Adet','Baskı merkezi','Ölçü',m.bedelAd,'Montaj tarihi','Montaj yeri','Montajı yapan','Not']
+    .map((t,i)=>({text:t,style:'th',alignment:[3,6].includes(i)?'right':'left'}));
+  const body=[bas];
+  const tr=t=>/^\d{4}-\d{2}-\d{2}$/.test(t||'')?rpTr(t):(t||'');
+  m.satirlar.forEach(s=>{
+    if(s.tip==='paket'){ body.push([{text:'',fillColor:'#eef3fb'},{stack:[{text:'Paket bedeli — '+s.ad,bold:true},{text:`${s.kapsam} işlemi kapsar`+(s.tam?'':` · bu raporda ${s.raporda}/${s.kapsam}; toplama katılmadı (paketin tamamı ${rpPara(s.tutar,s.pb)})`),style:'not'}],colSpan:5,fillColor:'#eef3fb'},{},{},{},{},
+      {text:s.tam?rpPara(s.tutar,s.pb):'kısmi',bold:true,alignment:'right',fillColor:'#eef3fb'},{text:s.not||'',colSpan:4,style:'not',fillColor:'#eef3fb'},{},{},{}]); return; }
+    const n=s.rows.length;
+    s.rows.forEach((r,i)=>{ const row=[{text:tr(r.tarih),noWrap:true},r.musteri,{stack:[{text:r.urun,bold:true},...(r.urunAlt?[{text:r.urunAlt,style:'not'}]:[])]},
+        {text:r.adet==null?'':`${rpSayi(r.adet)} ${r.birim}`,alignment:'right'},r.merkez,r.olcu,
+        i===0?{text:s.paket?'pakette':s.bedel.length?rpParaListe(s.bedel):'—',alignment:'right',rowSpan:n,color:s.paket?RPC.ink3:RPC.ink}:{}];
+      if(i===0&&s.mSpan) row.push({text:tr(r.mTarih),rowSpan:s.mSpan,noWrap:!String(r.mTarih||'').includes('\n')},{text:r.mYer||'',rowSpan:s.mSpan},{text:r.mYapan||'',rowSpan:s.mSpan});
+      else if(s.mSpan&&i<s.mSpan) row.push({},{},{});
+      else row.push({text:r.kendi?tr(r.mTarih):'',noWrap:true},r.kendi?(r.mYer||''):'',r.kendi?(r.mYapan||''):'');
+      row.push(i===0?{text:s.not||'',style:'not',rowSpan:n}:{});
+      body.push(row); }); });
+  if(body.length===1) ic.push({text:'Bu kapsamda baskı / montaj kaydı yok.',style:'bos'});
+  else ic.push({table:{headerRows:1,dontBreakRows:true,widths:W,body},layout:{hLineWidth:(i,n)=>i===0||i===n.table.body.length?0.8:i===1?0.9:0.45,
+      vLineWidth:()=>0.35,hLineColor:i=>i===1?'#8e8e95':'#cfcfd4',vLineColor:()=>'#dcdce0',fillColor:i=>i===0?'#FFE699':null,
+      paddingLeft:()=>3,paddingRight:()=>3,paddingTop:()=>3,paddingBottom:()=>3},fontSize:8.5,margin:[0,0,0,6]});
+  ic.push(...rpPdfToplam(m));
+  return {icerik:ic,o:{yon:'landscape'}};
+}
+function rpDokumPdf(m){
+  const ic=[rpPdfBaslikBilgi(m)];
+  if(m.bosMesaj){ ic.push({text:m.bosMesaj,style:'bos'}); return {icerik:ic,o:{yon:'landscape'}}; }
+  const W=['*',108,70,70,40,46,72,66,76];
+  const para=(v,pb,gri)=>({text:v==null?'—':rpPara(v,pb),alignment:'right',color:gri?RPC.ink3:RPC.ink,italics:!!gri});
+  m.bolumler.forEach(b=>{
+    const bas=(b.tip==='kalem'?['Ürün','Malzeme / cins','Baskı ölçüsü','Görünen alan','Yüzey adedi','Baskı adedi','Montaj bedeli','Birim fiyat','Tutar']
+      :['Hizmet','','Ölçü','','Yüzey adedi','Miktar','','Birim fiyat','Tutar']).map((t,i)=>({text:t,style:'th',alignment:i>=4?'right':'left'}));
+    const body=[[{text:b.ad,style:'h2',colSpan:9,margin:[-3,4,0,0]},{},{},{},{},{},{},{},{}],bas];
+    b.satirlar.forEach(s=>{
+      if(s.tip==='paket'){ body.push([{stack:[{text:`Paket bedeli — ${s.ad}: ${s.tam?rpPara(s.tutar,s.pb):'kısmi'}`,bold:true},
+          {text:`${s.kapsam} işlemi kapsar; aşağıdaki satır tutarları bilgi amaçlıdır`+(s.tam?'':` · bu raporda ${s.raporda}/${s.kapsam}; toplama katılmadı`)+(s.not?' · '+s.not:''),style:'not'}],colSpan:9,fillColor:'#eef3fb'},{},{},{},{},{},{},{},{}]); return; }
+      if(s.tip==='hizmet'){ body.push([{stack:[{text:s.urun,bold:true},...(s.urunAlt?[{text:s.urunAlt,style:'not'}]:[]),...(s.not?[{text:s.not,style:'not'}]:[])],colSpan:2},{},s.olcu,'',
+          {text:s.yuzey==null?'':String(s.yuzey),alignment:'right'},{text:s.adet==null?'':`${rpSayi(s.adet)} ${s.birim}`,alignment:'right'},'',para(s.birimFiyat,s.pb),para(s.tutar,s.pb,s.gri)]); return; }
+      const n=s.rows.length;
+      s.rows.forEach((r,i)=>body.push([{stack:[{text:r.urun,bold:true},...(r.urunAlt?[{text:r.urunAlt,style:'not'}]:[]),...(i===0&&s.not?[{text:s.not,style:'not'}]:[])]},
+        r.malzeme,r.olcu,r.gorunen,{text:r.yuzey==null?'':String(r.yuzey),alignment:'right'},{text:r.adet==null?'':rpSayi(r.adet)+(r.birim&&r.birim!=='adet'?' '+r.birim:''),alignment:'right'},
+        i===0?{stack:s.montaj?[{text:s.montaj.bedel.length?rpParaListe(s.montaj.bedel):'girilmemiş',color:s.montaj.gri||!s.montaj.bedel.length?RPC.ink3:RPC.ink,italics:!!s.montaj.gri},
+            ...(s.montaj.kapsar>1?[{text:`${s.montaj.kapsar} kalemin ortak montajı`,style:'not'}]:[])]:[{text:'—',color:RPC.ink3}],alignment:'right',rowSpan:n}:{},
+        para(r.birimFiyat,r.pb),para(r.tutar,r.pb,r.gri)]));
+    });
+    ic.push({table:{headerRows:2,dontBreakRows:true,keepWithHeaderRows:1,widths:W,body},layout:{hLineWidth:(i,n)=>i<=1?0:i===2?0.9:i===n.table.body.length?0.8:0.45,
+        vLineWidth:()=>0,hLineColor:i=>i===2?'#8e8e95':'#d4d4d9',fillColor:i=>i===1?'#E3E9F4':null,
+        paddingLeft:()=>4,paddingRight:()=>4,paddingTop:()=>3,paddingBottom:()=>3},fontSize:9,margin:[0,0,0,8]});
+  });
+  if(!m.bolumler.length) ic.push({text:'Bu işte baskı / montaj kaydı yok.',style:'bos'});
+  ic.push(...rpPdfToplam(m));
+  return {icerik:ic,o:{yon:'landscape'}};
+}
+/* ---------- XLSX ---------- */
+function rpXlsBaslik(ws,m,son,alt){
+  const F='Arial';
+  const c1=ws.getCell(1,1); c1.value=m.baslik; c1.font={name:F,bold:true,size:14};
+  const c2=ws.getCell(2,1); c2.value=[...alt,`Bedel: ${m.bedelAd.toLocaleLowerCase('tr')} (${m.ic?'iç kullanım':'dış paylaşım'})`,
+    m.alici?`Hazırlanan: ${m.alici}`:'',`Hazırlanma: ${rpAnTr(m.an)}`].filter(Boolean).join('   ·   ');
+  c2.font={name:F,size:9,color:{argb:'FF55555B'}};
+  if(m.aciklama){ const c3=ws.getCell(3,1); c3.value=m.aciklama; c3.font={name:F,size:9}; }
+}
+function rpXlsHeader(ws,r,basliklar,dolgu,sagdan){
+  const row=ws.getRow(r); row.height=30;
+  basliklar.forEach((t,i)=>{ const c=row.getCell(i+1); c.value=t||null; c.font={name:'Arial',bold:true,size:10};
+    c.fill={type:'pattern',pattern:'solid',fgColor:{argb:dolgu}}; c.border=rpXKenar();
+    c.alignment={vertical:'middle',horizontal:i>=sagdan?'right':'left',wrapText:true}; });
+}
+function rpXlsDeger(c,tip,v,pb){
+  if(v==null||v===''){ c.value=null; return; }
+  if(tip==='para'){ c.value=+v; c.numFmt=RP_XPARA[pb||'TRY']||RP_XF.para; return; }
+  if(tip==='tarih'&&/^\d{4}-\d{2}-\d{2}$/.test(v)){ rpXlsHucre(c,'tarih',v); return; }
+  if(tip==='adet'||tip==='tam'){ const n=+v; const ek=tip==='adet'&&pb?` "${String(pb).replace(/"/g,'')}"`:'';
+    c.value=n; c.numFmt=(Number.isInteger(n)?'#,##0':'#,##0.00')+ek; return; }
+  c.value=String(v);
+}
+function rpXlsToplam(ws,r,m,etiketSon,degerKol){
+  const T=rpBToplamSatirlari(m);
+  r++;
+  T.forEach(t=>{ const l=ws.getCell(r,1); l.value=t.ad; l.font={name:'Arial',bold:!!t.kalin,size:10}; l.alignment={horizontal:'right'};
+    if(etiketSon>1) ws.mergeCells(r,1,r,etiketSon);
+    const c=ws.getCell(r,degerKol); rpXlsDeger(c,'para',t.v,t.pb); c.font={name:'Arial',bold:!!t.kalin,size:10};
+    if(t.kalin){ c.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFE2EFDA'}}; c.border=rpXKenar(); }
+    r++; });
+  const n=ws.getCell(r,1); n.value=rpBToplamNot(m); n.font={name:'Arial',size:8.5,italic:true,color:{argb:'FF55555B'}};
+  return r;
+}
+function rpTakipXls(ws,m){
+  const F='Arial', H=5;
+  const W=[11,20,32,10,16,13,15,11,22,16,34]; W.forEach((w,i)=>{ ws.getColumn(i+1).width=w; });
+  rpXlsBaslik(ws,m,11,(m.bilgi||[]).map(([k,v])=>`${k}: ${v}`));
+  rpXlsHeader(ws,H,['Tarih','Müşteri','Ürün / iş kalemi','Adet','Baskı merkezi','Ölçü',m.bedelAd,'Montaj tarihi','Montaj yeri','Montajı yapan','Not'],'FFFFE699',99);
+  let r=H+1;
+  const hucre=(rr,k,tip,v,pb,ek)=>{ const c=ws.getCell(rr,k); rpXlsDeger(c,tip,v,pb);
+    c.font={name:F,size:10,...(ek&&ek.font||{})}; c.alignment={vertical:'top',wrapText:true,horizontal:ek&&ek.sag?'right':'left'}; c.border=rpXKenar(); return c; };
+  m.satirlar.forEach(s=>{
+    if(s.tip==='paket'){ const pk={type:'pattern',pattern:'solid',fgColor:{argb:'FFEEF3FB'}};
+      for(let k=1;k<=11;k++){ const c=ws.getCell(r,k); c.fill=pk; c.border=rpXKenar(); }
+      const u=ws.getCell(r,3); u.value={richText:[{text:'Paket bedeli — '+s.ad,font:{name:F,bold:true,size:10}},
+        {text:`\n${s.kapsam} işlemi kapsar`+(s.tam?'':` · bu raporda ${s.raporda}/${s.kapsam}; bedel dağıtılmadı, toplama katılmadı (paketin tamamı ${rpPara(s.tutar,s.pb)})`),font:{name:F,size:8.5,color:{argb:'FF55555B'}}}]};
+      u.alignment={wrapText:true,vertical:'top'}; ws.mergeCells(r,3,r,6);
+      const b=ws.getCell(r,7); if(s.tam) rpXlsDeger(b,'para',s.tutar,s.pb); else b.value='kısmi'; b.font={name:F,bold:true,size:10}; b.alignment={horizontal:'right',vertical:'top'};
+      if(s.not){ const nn=ws.getCell(r,8); nn.value=s.not; nn.font={name:F,size:9}; nn.alignment={wrapText:true,vertical:'top'}; ws.mergeCells(r,8,r,11); }
+      ws.getRow(r).height=32; r++; return; }
+    const r0=r, n=s.rows.length;
+    s.rows.forEach((x,i)=>{ const rr=r0+i;
+      hucre(rr,1,'tarih',x.tarih);
+      hucre(rr,2,'metin',x.musteri);
+      const u=ws.getCell(rr,3); u.value=x.urunAlt?{richText:[{text:x.urun,font:{name:F,bold:true,size:10}},{text:'\n'+x.urunAlt,font:{name:F,size:8.5,color:{argb:'FF55555B'}}}]}:x.urun;
+      if(!x.urunAlt) u.font={name:F,bold:true,size:10}; u.alignment={vertical:'top',wrapText:true}; u.border=rpXKenar();
+      hucre(rr,4,'adet',x.adet,x.birim,{sag:true});
+      hucre(rr,5,'metin',x.merkez); hucre(rr,6,'metin',x.olcu);
+      if(s.mSpan&&i<s.mSpan){ if(i===0){ hucre(rr,8,'tarih',x.mTarih); hucre(rr,9,'metin',x.mYer); hucre(rr,10,'metin',x.mYapan); } }
+      else { hucre(rr,8,'tarih',x.kendi?x.mTarih:null); hucre(rr,9,'metin',x.kendi?x.mYer:null); hucre(rr,10,'metin',x.kendi?x.mYapan:null); }
+      const sar=(t,w)=>String(t||'').split('\n').reduce((n,l)=>n+Math.max(1,Math.ceil(l.length/(w*1.05))),0);
+      const satirN=Math.max(sar(x.urun,W[2])+(x.urunAlt?sar(x.urunAlt,W[2]*1.2):0),sar(x.musteri,W[1]),sar(x.merkez,W[4]),sar(x.olcu,W[5]),
+        i===0||x.kendi?Math.max(sar(x.mYer,W[8]),sar(x.mYapan,W[9])):1);
+      ws.getRow(rr).height=Math.max(18,satirN*13+4); });
+    const b=ws.getCell(r0,7);
+    if(s.paket){ b.value='pakette'; b.font={name:F,size:9,italic:true,color:{argb:'FF86868B'}}; }
+    else if(s.bedel.length===1){ rpXlsDeger(b,'para',s.bedel[0].v,s.bedel[0].pb); b.font={name:F,size:10}; }
+    else if(s.bedel.length>1){ b.value=rpParaListe(s.bedel); b.font={name:F,size:10}; }
+    b.alignment={horizontal:'right',vertical:'top'}; b.border=rpXKenar();
+    const nt=ws.getCell(r0,11); nt.value=s.not||null; nt.font={name:F,size:9}; nt.alignment={vertical:'top',wrapText:true}; nt.border=rpXKenar();
+    if(n>1){ ws.mergeCells(r0,7,r0+n-1,7); ws.mergeCells(r0,11,r0+n-1,11); }
+    if(s.mSpan>1) [8,9,10].forEach(k=>ws.mergeCells(r0,k,r0+s.mSpan-1,k));
+    const notSatir=String(s.not||'').split('\n').reduce((t,l)=>t+Math.max(1,Math.ceil(l.length/(W[10]*1.15))),0);
+    const mevcut=s.rows.reduce((t,_,i)=>t+(ws.getRow(r0+i).height||18),0);
+    if(notSatir*12.5+4>mevcut) ws.getRow(r0+n-1).height=(ws.getRow(r0+n-1).height||18)+(notSatir*12.5+4-mevcut);
+    r+=n; });
+  const sonVeri=r-1;
+  r=rpXlsToplam(ws,r,m,6,7);
+  ws.views=[{state:'frozen',ySplit:H,xSplit:0,topLeftCell:'A'+(H+1),activeCell:'A'+(H+1)}];
+  if(sonVeri>H) ws.autoFilter={from:{row:H,column:1},to:{row:H,column:11}};
+  ws.pageSetup.printArea=`A1:K${r}`; ws.pageSetup.printTitlesRow=`${H}:${H}`;
+  ws.pageSetup.fitToPage=true; ws.pageSetup.fitToWidth=1; ws.pageSetup.fitToHeight=0;
+}
+function rpDokumXls(ws,m){
+  const F='Arial'; let r=5;
+  const W=[34,28,15,15,10,10,15,14,16]; W.forEach((w,i)=>{ ws.getColumn(i+1).width=w; });
+  rpXlsBaslik(ws,m,9,[m.kurum?`Kurum: ${m.kurum}`:'',`İş: ${m.is||''}`]);
+  const hucre=(rr,k,tip,v,pb,ek)=>{ const c=ws.getCell(rr,k); rpXlsDeger(c,tip,v,pb);
+    c.font={name:F,size:10,...(ek&&ek.font||{})}; c.alignment={vertical:'top',wrapText:true,horizontal:ek&&ek.sag?'right':'left'}; c.border=rpXKenar(); return c; };
+  const gri={italic:true,color:{argb:'FF86868B'}};
+  const urunHucre=(rr,k,ust,alt,ek,gen)=>{ const c=ws.getCell(rr,k); const p=[ust&&{text:ust,font:{name:F,bold:true,size:10}},...[alt,ek].filter(Boolean).map(t=>({text:'\n'+t,font:{name:F,size:8.5,color:{argb:'FF55555B'}}}))].filter(Boolean);
+    c.value=p.length>1?{richText:p}:ust; if(p.length===1) c.font={name:F,bold:true,size:10}; c.alignment={vertical:'top',wrapText:true}; c.border=rpXKenar();
+    return Math.ceil(String(ust||'').length/((gen||W[0])*0.95))+[alt,ek].filter(Boolean).reduce((t,x)=>t+Math.ceil(x.length/((gen||W[0])*1.2)),0); };
+  let ilkBaslik=0;
+  m.bolumler.forEach(b=>{
+    const t=ws.getCell(r,1); t.value=b.ad; t.font={name:F,bold:true,size:11}; r++;
+    rpXlsHeader(ws,r,b.tip==='kalem'?['Ürün','Malzeme / cins','Baskı ölçüsü','Görünen alan','Yüzey adedi','Baskı adedi','Montaj bedeli','Birim fiyat','Tutar']
+      :['Hizmet','Yer','Ölçü','','Yüzey adedi','Miktar','','Birim fiyat','Tutar'],'FFE3E9F4',4);
+    if(!ilkBaslik) ilkBaslik=r; r++;
+    b.satirlar.forEach(s=>{
+      if(s.tip==='paket'){ const pk={type:'pattern',pattern:'solid',fgColor:{argb:'FFEEF3FB'}};
+        for(let k=1;k<=9;k++){ const c=ws.getCell(r,k); c.fill=pk; c.border=rpXKenar(); }
+        const u=ws.getCell(r,1); u.value={richText:[{text:`Paket bedeli — ${s.ad}`,font:{name:F,bold:true,size:10}},
+          {text:`\n${s.kapsam} işlemi kapsar; aşağıdaki satır tutarları bilgi amaçlıdır`+(s.tam?'':` · bu raporda ${s.raporda}/${s.kapsam}; bedel dağıtılmadı, toplama katılmadı`)+(s.not?' · '+s.not:''),font:{name:F,size:8.5,color:{argb:'FF55555B'}}}]};
+        u.alignment={wrapText:true,vertical:'top'}; ws.mergeCells(r,1,r,8);
+        const v=ws.getCell(r,9); if(s.tam) rpXlsDeger(v,'para',s.tutar,s.pb); else v.value='kısmi'; v.font={name:F,bold:true,size:10}; v.alignment={horizontal:'right',vertical:'top'};
+        ws.getRow(r).height=32; r++; return; }
+      if(s.tip==='hizmet'){
+        const n=urunHucre(r,1,s.urun,s.urunAlt,s.not,W[0]+W[1]); ws.mergeCells(r,1,r,2);
+        hucre(r,3,'metin',s.olcu); hucre(r,4,'metin',null); hucre(r,5,'tam',s.yuzey,null,{sag:true});
+        hucre(r,6,'adet',s.adet,s.birim,{sag:true}); hucre(r,7,'metin',null);
+        hucre(r,8,'para',s.birimFiyat,s.pb,{sag:true}); hucre(r,9,'para',s.tutar,s.pb,{sag:true,font:s.gri?gri:{}});
+        ws.getRow(r).height=Math.max(18,n*12.5+4); r++; return; }
+      const r0=r, n=s.rows.length;
+      s.rows.forEach((x,i)=>{ const sN=urunHucre(r,1,x.urun,x.urunAlt,i===0?s.not:'');
+        hucre(r,2,'metin',x.malzeme); hucre(r,3,'metin',x.olcu); hucre(r,4,'metin',x.gorunen);
+        hucre(r,5,'tam',x.yuzey,null,{sag:true}); hucre(r,6,'adet',x.adet,x.birim&&x.birim!=='adet'?x.birim:'',{sag:true});
+        hucre(r,8,'para',x.birimFiyat,x.pb,{sag:true}); hucre(r,9,'para',x.tutar,x.pb,{sag:true,font:x.gri?gri:{}});
+        ws.getRow(r).height=Math.max(18,Math.max(sN,Math.ceil((x.malzeme||'').length/26))*12.5+4); r++; });
+      const mc=ws.getCell(r0,7);
+      if(!s.montaj) mc.value='—';
+      else if(!s.montaj.bedel.length) mc.value='girilmemiş';
+      else if(s.montaj.bedel.length===1) rpXlsDeger(mc,'para',s.montaj.bedel[0].v,s.montaj.bedel[0].pb);
+      else mc.value=rpParaListe(s.montaj.bedel);
+      if(s.montaj&&s.montaj.kapsar>1) mc.note=`${s.montaj.kapsar} kalemin ortak montajı — bedel bir kez sayılır.`;
+      mc.font={name:F,size:10,...(s.montaj&&s.montaj.gri||!s.montaj||!s.montaj.bedel.length?gri:{})}; mc.alignment={horizontal:'right',vertical:'middle'}; mc.border=rpXKenar();
+      if(n>1) ws.mergeCells(r0,7,r0+n-1,7);
+    });
+    r++;
+  });
+  if(!m.bolumler.length){ ws.getCell(r,1).value=m.bosMesaj||'Bu işte baskı / montaj kaydı yok.'; r++; }
+  r=rpXlsToplam(ws,r-1,m,8,9);
+  if(ilkBaslik) ws.views=[{state:'frozen',ySplit:ilkBaslik,xSplit:0,topLeftCell:'A'+(ilkBaslik+1),activeCell:'A'+(ilkBaslik+1)}];
+  ws.pageSetup.printArea=`A1:I${r}`; if(ilkBaslik) ws.pageSetup.printTitlesRow=`${ilkBaslik}:${ilkBaslik}`;
+  ws.pageSetup.fitToPage=true; ws.pageSetup.fitToWidth=1; ws.pageSetup.fitToHeight=0;
+}
+function rpBaskiKurum(v){ const a=rpAyar('baski'); a.kurum=v; const d=(rpDurum().veri||{}).baski;
+  if(a.is&&d){ const j=d.jobs.find(x=>x.id===+a.is); if(!j||String(j.customer_id)!==String(v)&&v) a.is=''; }
+  rpKontrolCiz('baski'); rpYenile('baski'); }
+function rpBaskiIs(v){ const a=rpAyar('baski'); a.is=v?+v:''; a.isler=[]; const d=(rpDurum().veri||{}).baski;
+  if(a.is&&d){ const j=d.jobs.find(x=>x.id===a.is); if(j&&j.customer_id) a.kurum=j.customer_id; }
+  rpDurum().baslik.baski=null; rpKontrolCiz('baski'); rpYenile('baski'); }
 
 /* ==========================================================
    3) KİŞİSEL ÇALIŞMA PLANI

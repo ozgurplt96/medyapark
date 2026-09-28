@@ -159,3 +159,21 @@ export async function girisYap(page, kim) {
     && !/^Yükleniyor/.test(document.getElementById('content').innerText.trim()));
   await page.waitForLoadState('networkidle');
 }
+
+/* S15 — XLSX'in TÜM parçalarının ham metni (paylaşılan metinler, sayfa XML,
+   yorumlar, metadata). Dış paylaşım sızıntı taraması hücre görünümüne değil
+   dosyanın kendisine bakar. Yalnız standart zip (deflate/stored). */
+import zlib from 'node:zlib';
+export function zipMetin(buf) {
+  const b = Buffer.from(buf); let i = b.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]));
+  const n = b.readUInt16LE(i + 10); let p = b.readUInt32LE(i + 16); const out = [];
+  for (let k = 0; k < n; k++) {
+    const yontem = b.readUInt16LE(p + 10), boy = b.readUInt32LE(p + 20), adL = b.readUInt16LE(p + 28),
+      ekL = b.readUInt16LE(p + 30), yorumL = b.readUInt16LE(p + 32), yerel = b.readUInt32LE(p + 42);
+    const veriBas = yerel + 30 + b.readUInt16LE(yerel + 26) + b.readUInt16LE(yerel + 28);
+    const ham = b.subarray(veriBas, veriBas + boy);
+    out.push((yontem === 8 ? zlib.inflateRawSync(ham) : ham).toString('utf8'));
+    p += 46 + adL + ekL + yorumL;
+  }
+  return out.join('\n');
+}

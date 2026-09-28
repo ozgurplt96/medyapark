@@ -79,6 +79,10 @@ seeds/*
 # uygulayıcı kurumlar). İdempotent, ŞİRKET VERİSİ İÇERMEZ.
 !seeds/99_zzzzzzzz_ps12_rapor_ornekleri.sql
 
+# PS15: örnek işlerde üretim kalemi bağları (baskı ↔ montaj, ortak
+# montaj). Yalnız tohum işleri, yalnız boşsa. ŞİRKET VERİSİ İÇERMEZ.
+!seeds/99_zzzzzzzzz_ps15_kalem_ornekleri.sql
+
 # Eski düzen (seeds/ öncesi) — geri gelmesin
 seed.sql
 seed_local_auth.sql
