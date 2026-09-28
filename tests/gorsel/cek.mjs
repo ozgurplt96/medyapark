@@ -36,6 +36,8 @@ const EKRAN = [
   ['m_yerlesim', p => p.evaluate(() => mForm({ hedefler: [] }))],
   ['secici_acik', async p => { await p.evaluate(() => jobForm()); await p.locator('#jc__ara').click(); await p.locator('#jc__ara').pressSequentially('kurum 01'); }],
   ['secici_uzun', async p => { await p.evaluate(() => jobForm()); await p.locator('#jc__ara').click(); await p.locator('#jc__ara').pressSequentially('istanbul'); }],
+  ['filtre_aktif', p => p.evaluate(async () => { await go('is-takibi'); isTabYaz('liste'); try { sessionStorage.setItem('mp_is_filtre', JSON.stringify({ ...JSON.parse(sessionStorage.getItem('mp_is_filtre') || '{}'), acil: true, q: 'kampanya' })); } catch (e) {} await renderSection(); })],
+  ['hata_form', async p => { await p.evaluate(() => jobForm()); await p.locator('#modal').getByRole('button', { name: 'Oluştur', exact: true }).click(); await p.locator('#mpDlgBg').waitFor(); }],
   ['bulunamadi', async p => { await p.evaluate(() => { location.hash = '#/is/987654321'; }); await p.waitForFunction(() => /bulunamad/.test(document.getElementById('content').innerText)); }],
   ['uzun_is', p => p.evaluate(id => id ? workAc(id) : go('is-takibi'), UZUN)],
   ['hareketler', p => p.evaluate(async () => { await go('workspace-home'); if (typeof hrGor === 'function') await hrGor('hareket'); })],

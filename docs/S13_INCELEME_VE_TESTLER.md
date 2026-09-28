@@ -95,6 +95,8 @@ engelleyen davranış · **P3** hijyen/küçük görsel.
 | B38 | P3 | **S14** · Hareketler satırı üzerine gelince ok 4.41:1 kontrast | koyu vurgu tonu | ölçüm: 0 |
 | B39 | P2 | **S14** · Belge kaydı yoldayken form kapatılırsa kapanış temizliği dosyayı siliyor, geç tamamlanan kayıt dosyasız belge üretebiliyordu; "Sonucu kontrol et" kayıt bulamayınca "oluşturulmadı" diyor ve dosyayı geri alıyordu | sonucu doğrulanamayan dosya kapanışta ve 409 sonrası silinmez; kayıt bulunamazsa yalnız "bulunamadı, tekrar güvenli" denir; arka plan sorgusu 60 sn'den yeni girişim için hüküm vermez | e2e tekrar: yoldaki istek test tarafından geç gönderilir (koruma kaldırılınca düşüyor) |
 | B40 | P2 | **S14** · Ekip formu (yönetici) önbellekten açılıp `app_role` dahil satırın tamamını yazıyordu: başka yöneticinin yetki değişikliği eski formdan yapılan ilgisiz bir kayıtla sessizce geri alınabiliyordu | DB'den okuma; yalnız değişen alan, açılıştaki değer hâlâ yerindeyse; yetki aynı anda değiştiyse çakışma | e2e yönetim (eski kodda düşüyor) |
+| B42 | P1 | **Kabul turu** · Dosyasız belge oluşabiliyordu: (a) ilişkisiz belgenin dosyası yükleyen/yönetici tarafından Storage API ile her an silinebiliyordu (silme politikası yalnız bağlı belgeleri koruyordu); (b) kayıt dosyayı kilitsiz doğruluyor, eşzamanlı silmeyle iki taraf da başarı döndürüyordu; (c) kalıcı silme "önce dosya" sırasındaydı, ikinci adım başarısız olunca dosyasız belge kalıyordu; (d) kayıt/yükleme sürerken pencere "kaydetmeden kapat" ile kapatılabiliyordu | migration `20261002100000`: dosya yalnız hiçbir belge ona işaret etmiyorsa silinebilir; kayıt ve silme aynı dosya kilidini alır, bekleyen taraf taze görüntüyle karar verir; kalıcı silme önce kayıt sonra dosya (başarısız dosya adımı sahipsiz dosya bırakır ve söylenir); kayıt sürerken pencere kapanmaz, sayfa kapatma uyarısı | yarış mptest'te gerçek işlem + Storage API ile üretildi (düzeltme öncesi: belge 1 / dosya 0); e2e 12_belge_butunluk, access-checks 10 |
+| B43 | P3 | **Kabul turu** · "Aktif filtre" etiketi 4.01:1 kontrast (S13 ölçümünde hiçbir ekranda filtre aktif değildi) | koyu vurgu tonu | ölçüm: 23 ekran × 5 genişlik → 0 |
 | B41 | P2 | **S14** · Pencere açılışındaki gecikmeli (30 ms) otomatik odak, kullanıcının geçtiği alanı geri çalıyordu; hızlı yazılan metin ilk alana gidiyordu (S13'ten beri aralıklı düşen kişi düzenleme testinin kök nedeni) | odak zaten pencere içindeyse gecikmeli odak uygulanmaz | e2e klavye (eski kodda düşüyor) |
 
 S14'te değişiklik gerektirmeden doğrulananlar: mecra raporu hesapları
@@ -193,7 +195,7 @@ Kalan düşük öncelikli işler (bilinen açık P0/P1 yok):
 | Önem | Konu | Not |
 |---|---|---|
 | P3 | Güncelleme (Entry) oluşturmada tekillik anahtarı yok: kayıp yanıttan sonra tekrar ikinci güncelleme üretebilir | etkisi mükerrer bir not satırı (yetki/veri kaybı yok, kullanıcı kendi güncellemesini silebilir); aynı desen `entry_create_with_documents`'e uygulanabilir |
-| P3 | Belge kaydı ile aynı anda, aynı kullanıcı tarafından o dosyanın açıkça silinmesi yarışı sunucuda kilitli değil (`document_create` dosyayı kilitsiz doğrular) | arayüzdeki tek otomatik silme yolu (form kapanışı) belirsiz dosyayı artık silmiyor; yarım yükleme temizliği yalnız 2 saatten eski ve belgeye bağlı olmayanları listeler |
+| — | Belge kaydı / dosya silme yarışı | **kapandı** — B42 (kabul turu). Kalan teorik durum: doğrudan veritabanı oturumunda REPEATABLE READ ile yapılan silme kilitten sonra eski görüntüyle karar verebilir; uygulama, Storage API ve PostgREST bu yolu kullanmaz (READ COMMITTED doğrulandı) |
 | P3 | Aranabilir seçici yalnız kurum listelerinde; eski tedarikçi, mecra ve iş seçicileri yerel liste | listeler kısa; gerekirse aynı `data-ara` işaretiyle |
 | P3 | PDF içerik doğrulaması otomatik değil | görsel inceleme her sürümde tekrarlanmalı |
 | P3 | Ekran okuyucu denemesi | ayrı erişilebilirlik turu |
@@ -213,3 +215,14 @@ Kalan düşük öncelikli işler (bilinen açık P0/P1 yok):
 
 Yükseltme yolu: çalışma DB'sinin kopyasında iki migration uygulandı ve tekrar
 uygulandı; 37 tabloda satır sayısı birebir, yeni tablo boş, access 9/9, mecra 8/8.
+
+---
+
+## 6. Kabul turu (28 Eylül 2026)
+
+| | |
+|---|---|
+| Kabul sürümü | `041d65d` (`ozgur/s14-kabul`), ağaç `8cf4348` |
+| Regresyon | `5c5c3f3` temiz kurulum: 92/92 e2e, 10/10 erişim, 8/8 mecra. `041d65d` (yalnız CSS + önbellek sürümü farkı): aynı yığında 92/92, 10/10, 8/8 |
+| Kabul senaryoları | `tests/gorsel/kabul.mjs` — beş senaryo arayüzden, 16/16 adım, JS hatası yok (Claude'un koşusu; kullanıcı değerlendirmesi değildir) |
+| İndirilen dosyalar | uygulama dışında (PyMuPDF, openpyxl) açıldı: gömülü yazı tipi, formül ve gizli sayfa yok; dış paylaşım mecra PDF/XLSX'inde kayıtlı 36 kurum/iş adından hiçbiri yok |

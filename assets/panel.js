@@ -380,7 +380,7 @@ async function ekCikar(kid,k){
   const it=e.items.find(i=>i.k===k); if(!it) return;
   e.items=e.items.filter(i=>i.k!==k);
   ekCiz(kid);
-  if(it.yol&&!it.kaydedildi&&!it.belirsiz) await belgeNesneSil([it.yol]);   /* kaydedilmemis yukleme (S14: sonucu belirsiz olan SİLİNMEZ) */
+  if(it.yol&&!it.kaydedildi&&!it.belirsiz&&!it.gonderiliyor) await belgeNesneSil([it.yol]);   /* kaydedilmemis yukleme (S14: sonucu belirsiz olan SİLİNMEZ) */
 }
 function ekTekrar(kid,k){ const it=(EK[kid]||{items:[]}).items.find(i=>i.k===k);
   if(it){ it.durum='hazir'; it.hata=null; ekCiz(kid); } }
@@ -400,7 +400,7 @@ function ekBirak(kid){
   /* S14: kaydı gecikmeli tamamlanabilecek (sonucu doğrulanamamış) dosya
      silinmez — silinirse geç gelen kayıt dosyasız belge üretirdi. Hiç
      kaydedilmediyse Belgeler'deki "yarım yükleme" temizliğinde görünür. */
-  const yollar=e.items.filter(i=>i.yol&&!i.kaydedildi&&!i.belirsiz).map(i=>i.yol);
+  const yollar=e.items.filter(i=>i.yol&&!i.kaydedildi&&!i.belirsiz&&!i.gonderiliyor).map(i=>i.yol);
   if(yollar.length) belgeNesneSil(yollar);
 }
 function ekModalKapandi(){
@@ -432,7 +432,10 @@ async function ekYukle(kid){
     }
     ekCiz(kid);
   };
-  for(let i=0;i<is.length;i+=3) await Promise.all(is.slice(i,i+3).map(tek));
+  /* S14: yükleme de kaydın parçasıdır — sürerken pencere kapatılmaz. */
+  ui._kayitSuruyor=(ui._kayitSuruyor||0)+1;
+  try{ for(let i=0;i<is.length;i+=3) await Promise.all(is.slice(i,i+3).map(tek)); }
+  finally{ ui._kayitSuruyor--; }
   return !ekBekleyen(kid).some(i=>i.tip==='dosya'&&!i.yol);
 }
 /* RPC govdesi. Kaydedilmemis tum gecerli ogeler; `links` cagirana ait. */
@@ -475,8 +478,13 @@ async function islemSonucu(tur,anahtar){
    {durum:'belirsiz'}. Hata ve belirsizlik iletileri burada gösterilir. */
 async function islemCalistir(yer,tur,etiket,fn,baslik){
   const k=islemAnahtari(yer);
-  try{ const s=await fn(k); islemYeni(yer); belirsizSil(k); return {durum:'tamam',sonuc:s}; }
-  catch(e){
+  ui._kayitSuruyor=(ui._kayitSuruyor||0)+1;
+  let s;
+  try{ s=await fn(k); }
+  catch(e){ ui._kayitSuruyor--; return islemHata(e,yer,tur,k,etiket,baslik); }
+  ui._kayitSuruyor--; islemYeni(yer); belirsizSil(k); return {durum:'tamam',sonuc:s};
+}
+async function islemHata(e,yer,tur,k,etiket,baslik){
     if(e&&e.code==='PT409'){
       let onceki=null; try{ onceki=JSON.parse(e.hint); }catch(x){}
       belirsizSil(k); islemYeni(yer);
@@ -487,7 +495,6 @@ async function islemCalistir(yer,tur,etiket,fn,baslik){
     if(!belirsizMi(e)){ mpAlert(hataMetni(e),baslik||'Kaydedilemedi'); return {durum:'hata',hata:e}; }
     belirsizEkle(tur,k,etiket);
     return belirsizCoz(yer,tur,k,baslik);
-  }
 }
 async function belirsizCoz(yer,tur,k,baslik){
   const kontrol=await mpConfirm('Sunucudan yanıt alınamadı; işlemin sonucu doğrulanamadı. Girdiğiniz bilgiler formda duruyor. “Sonucu kontrol et” ile kaydın oluşup oluşmadığına bakabilirsiniz. Kaydet ile yeniden göndermek de güvenlidir: işlem kaydedildiyse ikinci kez oluşturulmaz.',
@@ -527,8 +534,10 @@ async function ekGonder(kid,links){
      SİLİNMEZ ve yolları korunur: tekrar aynı yollarla, aynı anahtarla gider;
      kayıt oluşmuşsa aynı belgeler döner (ikinci dosya ya da belge yok). Yalnız
      sunucu kesin olarak reddettiyse (işlem geri alındı) yüklemeler temizlenir. */
+  const gonderilen=ekBekleyen(kid).filter(i=>i.yol); gonderilen.forEach(i=>{ i.gonderiliyor=true; });
   const r=await islemCalistir('doc:'+kid,'document_create','Belge: '+(govde[0]&&(govde[0].title||govde[0].original_name)||''),
     k=>api('document_create',{docs:govde,islem:k}),'Belge kaydedilemedi');
+  gonderilen.forEach(i=>{ i.gonderiliyor=false; });
   /* Kesin red → işlem geri alındı, yüklemeler temizlenir. Önceki gönderim
      kayıtlıysa (409) dosyalar o kayda ait olabilir: silinmez. */
   if(r.durum==='hata'&&!r.onceKayitli){ await ekGeriAl(kid,'Kaydedilemedi.'); return {ok:false,hata:'kayıt oluşturulamadı',sessiz:true}; }
@@ -1268,8 +1277,8 @@ async function api(action, body){
       logYaz(act,body); return ok(t); }
     /* KALICI SILME — yalniz ACIKCA secilen belgeler (S10). Ilişkisiz belge
        artik mesru bir durumdur ("İlişkilendirilmemiş"); kimliksiz bir
-       "tum baglantisizlari temizle" taramasi YAPILMAZ. Sira yapisal kalir:
-       once DOSYA silinir; basarisizsa metadata KORUNUR (S6 §24). */
+       "tum baglantisizlari temizle" taramasi YAPILMAZ. Sira S14'te (PS14c)
+       tersine dondu: once KAYIT, sonra dosya — dosyasiz belge olusamaz. */
     case 'documents_cleanup':{
       const me=(ui._me&&ui._me.id)||0, adm=isAdmin();
       const ids=((body&&body.ids)||[]).filter(Boolean);
@@ -1279,26 +1288,23 @@ async function api(action, body){
       if(!adm) sel=sel.eq('uploaded_by_team_id',me);
       const {data,error}=await sel.limit(200); if(error)throw error;
       const aday=data||[]; if(!aday.length) return ok({silinen:0,kalan:0});
-      const tamam=new Set(aday.filter(d=>d.provider==='external').map(d=>d.id));
-      const dosya=aday.filter(d=>d.provider==='supabase');
-      if(dosya.length){
-        const {data:rm,error:re}=await sb.storage.from('documents').remove(dosya.map(d=>d.storage_path));
-        if(re) console.error('[belge] depo silme hatasi',re);
+      /* S14 (PS14c): sıra ÖNCE KAYIT, SONRA DOSYA. Önceki sıra (dosya önce)
+         ikinci adım başarısız olunca dosyasız belge bırakıyordu. Şimdi dosya
+         adımı başarısız olursa geriye yalnız sahipsiz dosya kalır; o da
+         Belgeler'deki yarım yükleme temizliğinde görünür. Depo politikası
+         bir belge kaydının işaret ettiği dosyanın silinmesine izin vermez. */
+      const {data:dd,error:de}=await sb.from('documents').delete().in('id',aday.map(d=>d.id)).select('id,provider,storage_path');
+      if(de)throw de;
+      const silindi=dd||[];
+      const yollar=silindi.filter(d=>d.provider==='supabase'&&d.storage_path).map(d=>d.storage_path);
+      let dosyaKaldi=0;
+      if(yollar.length){
+        const {data:rm,error:re}=await sb.storage.from('documents').remove(yollar);
         const gitti=new Set((rm||[]).map(o=>o.name));
-        for(const d of dosya){
-          if(gitti.has(d.storage_path)){ tamam.add(d.id); continue; }
-          if(re) continue;
-          /* Yanitta yoksa nesne onceki yarim bir denemede zaten silinmis
-             olabilir; klasor gercekten bossa metadata guvenle silinir. */
-          const {data:ls}=await sb.storage.from('documents').list(d.storage_path.split('/')[0]);
-          if(Array.isArray(ls)&&!ls.length) tamam.add(d.id);
-        }
+        dosyaKaldi=yollar.filter(y=>!gitti.has(y)).length;
+        if(re||dosyaKaldi) console.error('[belge] kayıt silindi, dosya depodan kaldırılamadı (yarım yüklemelerde görünür):',re,yollar);
       }
-      let silinen=0;
-      if(tamam.size){
-        const {data:dd,error:de}=await sb.from('documents').delete().in('id',[...tamam]).select('id');
-        if(de)throw de; silinen=(dd||[]).length; }
-      return ok({silinen,kalan:aday.length-silinen}); }
+      return ok({silinen:silindi.length,kalan:aday.length-silindi.length,dosyaKaldi}); }
     /* ---- Sozlesmeler (S7) ----
        Baslik + kalemler + (belge-once akista) mevcut belge baglantilari TEK
        islemde yazilir; imzali sozlesmenin kalemsiz kalmamasi COMMIT'te
@@ -2395,11 +2401,14 @@ let _modalKirli=false;
 },true));
 function modalAcikMi(){ const bg=document.getElementById('modalBg'); return !!(bg&&bg.classList.contains('open')); }
 async function modalVazgec(){
+  /* S14: kayıt isteği sürerken form kapatılmaz — sonuç gelmeden kapatmak
+     "kaydetmeden kapat" gibi görünür ama işlem sunucuda sürmektedir. */
+  if(ui._kayitSuruyor>0){ toast('Kayıt sürüyor — tamamlanınca kapatabilirsiniz.'); return false; }
   if(modalGercektenKirli()&&!(await mpConfirm('Kaydedilmemiş değişiklikler var. Kaydetmeden kapatılsın mı?','Değişiklikler kaydedilmedi',
       {danger:false,guvenli:true,ok:'Kaydetmeden kapat',no:'Düzenlemeye dön'}))) return false;
   closeModal(); return true;
 }
-window.addEventListener('beforeunload',e=>{ if((modalAcikMi()&&modalGercektenKirli())||ui._dirty){ e.preventDefault(); e.returnValue=''; } });
+window.addEventListener('beforeunload',e=>{ if((modalAcikMi()&&modalGercektenKirli())||ui._dirty||ui._kayitSuruyor>0){ e.preventDefault(); e.returnValue=''; } });
 function closeModal(){
   _modalKirli=false; _modalIlk='';
   document.getElementById('modalBg').classList.remove('open');
@@ -5172,7 +5181,7 @@ async function bdSil(){
   const d=ui._bd.d; const n=(d.document_links||[]).length;
   if(!await mpConfirm(`“${belgeAd(d)}” kalıcı olarak silinsin mi?${n?` ${n} bağlantısı da kaldırılır.`:''} Dosya geri getirilemez.`,'Belgeyi sil',{danger:true,ok:'Kalıcı olarak sil'})) return;
   const r=await guard(()=>api('document_delete',{id:d.id}),'Silinemedi'); if(r===null) return;
-  closeModal(); toast('Belge silindi.');
+  closeModal(); toast(r&&r.dosyaKaldi?'Belge silindi; dosyası depodan kaldırılamadı — Hafıza › Belgeler\'deki yarım yükleme temizliğinde görünecek.':'Belge silindi.');
   if(document.getElementById('blListe')) blListeCiz(); else ekranTazele();
 }
 /* Satir menusu: tur duzelt, kuruma bagla, bu baglamdan kaldir. Yetki

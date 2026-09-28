@@ -109,5 +109,20 @@ begin
   if v <> 4 then raise exception 'DENETİM 9 DÜŞTÜ: sürüm damgası % / 4 tabloda', v; end if;
   raise notice 'DENETİM 9 ✓ yönetim kayıtlarında sürüm damgası yerinde';
 
-  raise notice '--- 9/9 DENETİM GEÇTİ ---';
+  ---------------------------------------------------------------- 10
+  -- PS14c: dosyasız belge oluşamaz — dosya yalnız hiçbir belge ona işaret
+  -- etmiyorsa silinebilir (kilitli, taze okuma); belge kaydı önce silinir.
+  select count(*) into v from pg_proc
+   where oid = 'public._belge_nesnesi_silinebilir(text)'::regprocedure
+     and provolatile = 'v' and prosrc like '%pg_advisory_xact_lock%' and prosrc not like '%detached_at%';
+  if v <> 1 then raise exception 'DENETİM 10 DÜŞTÜ: dosya silme koruması eski kuralda'; end if;
+  select count(*) into v from pg_proc
+   where oid = 'public._trg_documents_ekle()'::regprocedure and prosrc like '%pg_advisory_xact_lock%';
+  if v <> 1 then raise exception 'DENETİM 10 DÜŞTÜ: belge kaydı dosya kilidini almıyor'; end if;
+  select count(*) into v from pg_policies
+   where tablename = 'documents' and policyname = 's6_documents_remove' and qual like '%_belge_nesnesi_yok%';
+  if v <> 0 then raise exception 'DENETİM 10 DÜŞTÜ: belge silme hâlâ "önce dosya" sırasına bağlı'; end if;
+  raise notice 'DENETİM 10 ✓ belge dosyası bütünlüğü (kilit + önce kayıt)';
+
+  raise notice '--- 10/10 DENETİM GEÇTİ ---';
 end $$;
