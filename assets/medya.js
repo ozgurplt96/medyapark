@@ -328,7 +328,8 @@ function mdDurum(){ let d={}; try{ d=JSON.parse(sessionStorage.getItem('mp_medya
   delete o.gor;
   return o; }
 function mdDurumYaz(d){ const o={...d}; delete o.gor;
-  try{ sessionStorage.setItem('mp_medya',JSON.stringify(o)); }catch(e){} }
+  try{ sessionStorage.setItem('mp_medya',JSON.stringify(o)); }catch(e){}
+  if(typeof navUrlTazele==='function') navUrlTazele(); }   /* S14: lokasyon/grup/dönem adreste */
 
 /* Hedef tarihi görünür pencereye al (derin bağlantı, PS9 kapanış §2).
    Kayıt zaten pencerede ise çapa DEĞİŞMEZ — kullanıcının seçtiği
@@ -453,7 +454,7 @@ async function listeler(c,o){
     ${secili?`<div class="sec-card fbar md-fbar">
       <div class="fbar-row">
         <input class="inp" id="mdQ" placeholder="Ara: pozisyon, kurum veya iş…" value="${esc(st.q)}" oninput="mdAra(this.value)" aria-label="Ara">
-        <select class="inp ${st.kurum?'inp-on':''}" id="mdKurum" onchange="mdSet({kurum:this.value,site:this.value?null:mdDurum().site})" aria-label="Kurum">
+        <select class="inp ${st.kurum?'inp-on':''}" id="mdKurum" data-ara onchange="mdSet({kurum:this.value,site:this.value?null:mdDurum().site})" aria-label="Kurum">
           <option value="">Tüm kurumlar</option>
           ${kurumOpt.map(k=>`<option value="${k.id}" ${String(st.kurum)===String(k.id)?'selected':''}>${esc(orgKisa(k.ad,40))}</option>`).join('')}</select>
         <select class="inp ${st.is?'inp-on':''}" id="mdIs" onchange="mdSet({is:this.value,site:this.value?null:mdDurum().site})" aria-label="İş">
@@ -1446,6 +1447,7 @@ async function mForm(o){
   const isler=M.jobs.filter(j=>(j.lifecycle_status||'acik')!=='kapandi'||(r&&r.work_id===j.id))
     .sort((a,b)=>String(a.title).localeCompare(String(b.title),'tr'));
   ui._mf={hedefler,esz,kayit:r,devral:false,onIs:o.isId||null};
+  islemYeni('media');                               /* S14: yeni form = yeni oluşturma girişimi */
   const vars=r?r.work_id:(o.isId||'');
   /* Açılıştaki taahhüt: düzenlemede kaydın kendisi, oluşturmada çağıran
      iş dili eylemi (Yayın ekle / Opsiyon ekle), yoksa Opsiyon. */
@@ -1584,12 +1586,18 @@ async function mfKaydet(){
   }
   if(btn){ btn.disabled=true; btn.textContent='Kaydediliyor…'; }
   let r;
-  try{
-    r=f.kayit&&f.kayit.placement_id
-      ? await api('media_update',{id:f.kayit.placement_id,patch:{...ortak,end_date:bit||'',
-          option_expires_at:opsSon||'',contract_item_id:ortak.contract_item_id||''}})
-      : await api('media_create',{common:ortak,targets:f.hedefler});
-  }catch(e){ if(btn){ btn.disabled=false; btn.textContent=btnMetin; } mpAlert(hataMetni(e),'Kaydedilemedi'); return; }
+  if(f.kayit&&f.kayit.placement_id){
+    try{ r=await api('media_update',{id:f.kayit.placement_id,patch:{...ortak,end_date:bit||'',
+          option_expires_at:opsSon||'',contract_item_id:ortak.contract_item_id||''}}); }
+    catch(e){ if(btn){ btn.disabled=false; btn.textContent=btnMetin; } mpAlert(hataMetni(e),'Kaydedilemedi'); return; }
+  } else {
+    /* S14: oluşturma tekillik anahtarıyla — yanıt kaybolup tekrar gönderilirse
+       aynı kayıtlar döner. Çakışma raporu (ok:false) anahtarı serbest bırakır. */
+    const s=await islemCalistir('media','media_placements_create',(f.esz?'Yayın':'Yerleşim')+' · '+bas,
+      k=>api('media_create',{common:ortak,targets:f.hedefler,islem:k}),'Kaydedilemedi');
+    if(s.durum!=='tamam'){ if(btn){ btn.disabled=false; btn.textContent=btnMetin; } return; }
+    r=s.sonuc;
+  }
   if(btn){ btn.disabled=false; btn.textContent=btnMetin; }
   if(!r||!r.ok){ mfSorunCiz(r&&r.sorunlar||[]); return; }
   closeModal();
