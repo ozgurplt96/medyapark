@@ -1870,13 +1870,15 @@ i.tk-p.tk-ozel{border-radius:3px;}
 .opb-pk-i em{font-style:normal;color:var(--c-ink3);font-size:11.5px;}
 .opb-pk-i.on{border-color:var(--c-accent-d);background:var(--c-accent-soft);}
 .opb-rows{display:flex;flex-direction:column;gap:6px;}
-.opb-r{display:grid;grid-template-columns:22px 118px repeat(3,minmax(0,1fr)) auto;
-  grid-template-areas:"n t u u d x" ". q m l c .";gap:6px;align-items:center;padding:7px 8px;
+.opb-r{display:grid;grid-template-columns:22px 118px repeat(3,minmax(0,1fr)) 72px auto;
+  grid-template-areas:"n t u u d d x" ". q m l c k .";gap:6px;align-items:center;padding:7px 8px;
   border:1px solid var(--c-hair);border-radius:var(--r);background:var(--c-panel);}
 .opb-r .opb-n{grid-area:n;} .opb-r [data-f="operation_type"]{grid-area:t;} .opb-r .opb-u{grid-area:u;}
 .opb-r .opb-d{grid-area:d;} .opb-r .ek-x{grid-area:x;}
 .opb-r [data-f="quantity"]{grid-area:q;} .opb-r [data-f="dimensions"]{grid-area:m;}
 .opb-r [data-f="location_text"]{grid-area:l;} .opb-r [data-f="cost"]{grid-area:c;}
+.opb-r .opb-k{grid-area:k;display:flex;align-items:center;gap:4px;font-size:11.5px;font-weight:600;color:var(--c-ink3);}
+.opb-r .opb-k .inp{text-align:center;padding-inline:4px;}
 .opb-r .inp{height:34px;padding-block:0;line-height:32px;}
 .opb-r .inp{width:100%;min-width:0;max-width:none;}
 .opb-r.hata{border-color:var(--c-red-t);background:var(--c-red-soft);}
@@ -1886,7 +1888,7 @@ i.tk-p.tk-ozel{border-radius:3px;}
   .opb-ort{grid-template-columns:1fr 1fr;}
   .opb-ort .field:first-child,.opb-ort .field:nth-child(2){grid-column:1 / -1;}
   .opb-r{grid-template-columns:22px minmax(0,1fr) minmax(0,1fr) auto;
-    grid-template-areas:"n t t x" ". u u ." ". d d ." ". q m ." ". l c .";}
+    grid-template-areas:"n t t x" ". u u ." ". d d ." ". q m ." ". l c ." ". k k .";}
   .w-st-a{margin-left:0;width:100%;}
   .w-faz{padding:8px 10px;}
   .w-faz button{padding:6px 10px;font-size:12.5px;}
@@ -2533,7 +2535,7 @@ button.hrow{width:100%;border:0;background:transparent;text-align:left;font:inhe
   .rp2-paket{margin-left:0;}
   .row3{grid-template-columns:1fr 1fr;}
 }
-@media (min-width:761px){ .opb-r{grid-template-columns:22px 160px repeat(3,minmax(0,1fr)) auto;} }
+@media (min-width:761px){ .opb-r{grid-template-columns:22px 160px repeat(3,minmax(0,1fr)) 72px auto;} }
 .opb-r .opb-qu input{min-width:0;flex:1 1 auto;} .opb-r .opb-qu select{flex:0 0 72px;padding-inline:8px;}
 
 /* ============ S13 — ortak UI/UX düzeltmeleri ============
@@ -2620,3 +2622,50 @@ body.mdl-acik{overflow:hidden;}
 .ara-liste li[aria-selected=true] .ara-ad::before{content:'✓ ';}
 .ara-ek{display:block;font-size:12px;color:var(--c-ink3);margin-top:1px;}
 .ara-not{padding:8px 10px;font-size:12.5px;color:var(--c-ink3);}
+
+/* ============ S15 — rapor şablonları (önizleme = dosya düzeni) ============
+   Önizleme tabloları indirilen Excel/PDF'in yerleşimini taşır: doluluk
+   tablosunda yüz başına kurum/durum + tarih, baskı/montajda kalem satırı. */
+.rp3-f{display:flex;flex-direction:column;gap:4px;}
+.rp3-hizli{display:flex;flex-wrap:wrap;gap:4px 14px;margin-top:6px;font-size:13px;}
+.rp3-lej{display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px;font-size:12.5px;margin:0 0 10px;}
+.rp3-lej span{display:inline-flex;align-items:center;gap:6px;font-weight:600;}
+.rp3-lej i{display:inline-block;width:16px;height:12px;border-radius:3px;border:1px solid rgba(0,0,0,.18);}
+.rp3-lej em{font-style:normal;color:var(--c-ink3);}
+.rp3-sh{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:4px 12px;}
+.rp3-sh .rp2-g1{flex:1 1 auto;} .rp3-sh .rp2-g1 em{font-style:normal;font-weight:500;color:var(--c-ink3);font-size:12.5px;}
+.rp3-sa{font-weight:500;font-size:12px;color:var(--c-ink3);margin-left:6px;}
+.rp3-tum{display:flex;gap:10px;font-size:12.5px;}
+.rp3-kap{overflow:auto;max-height:70vh;border:1px solid var(--c-hair);border-radius:10px;margin:0 0 12px;}
+.rp3-tab{border-collapse:separate;border-spacing:0;font-size:12.5px;min-width:100%;}
+.rp3-tab th{position:sticky;top:0;z-index:2;background:#fff2c7;color:var(--c-ink);font-weight:700;text-align:left;
+  padding:7px 8px;border-bottom:1px solid #b8b8bf;white-space:nowrap;}
+.rp3-tab td{padding:5px 8px;border-bottom:1px solid var(--c-hair);border-right:1px solid #ececef;vertical-align:top;}
+.rp3-tab td small{display:block;font-size:11.5px;color:var(--c-ink3);margin-top:1px;}
+.rp3-tab td.sag,.rp3-tab th.sag{text-align:right;white-space:nowrap;}
+.rp3-tab tr.son td{border-bottom:1px solid #9c9ca3;}
+.rp3-tab tr.dis td{opacity:.45;}
+.rp3-dol td{min-width:132px;text-align:center;vertical-align:middle;}
+.rp3-dol .rp3-no{min-width:30px;font-weight:700;background:#fafafb;}
+.rp3-dol .rp3-yuz{min-width:78px;text-align:left;background:#fafafb;position:sticky;left:0;z-index:1;white-space:nowrap;}
+.rp3-dol .rp3-yuz label{display:inline-flex;align-items:center;gap:6px;cursor:pointer;}
+.rp3-p{line-height:1.25;margin:1px 0;} .rp3-p b{display:block;font-size:12.5px;}
+.rp3-p small{display:block;font-size:11px;color:inherit;opacity:.9;margin-top:0;}
+.rp3-bm td{min-width:70px;} .rp3-bm td:nth-child(4){min-width:200px;}
+.rp3-bm .rp3-cb,.rp3-bm th.rp3-cb{width:28px;min-width:28px;text-align:center;}
+.rp3-bm .rp3-not{min-width:200px;white-space:pre-line;font-size:12px;color:var(--c-ink2);}
+.rp3-bm .rp3-notm{color:#8a5a00;}
+.rp3-pk td{background:#eef3fb;} .rp3-pk.kismi td{background:#fdf1ef;}
+.rp3-gri{color:var(--c-ink3);font-style:italic;}
+.rp3-top{display:flex;flex-direction:column;align-items:flex-end;gap:2px;margin:6px 0 4px;font-size:13.5px;}
+.rp3-top div{display:flex;gap:16px;justify-content:flex-end;min-width:320px;}
+.rp3-top div span{color:var(--c-ink2);} .rp3-top div.kalin{border-top:1px solid var(--c-hair);padding-top:3px;font-size:14.5px;}
+.rp3-cik{margin:8px 0;padding:10px 12px;border:1px dashed var(--c-hair);border-radius:10px;font-size:13px;}
+@media (max-width:760px){
+  .rp3-kap{max-height:none;}
+  .rp3-top div{min-width:0;}
+}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;}
+.rp3-dol td.rp3-karma{text-align:left;padding-top:9px;}
+.rp3-dp{display:flex;gap:6px;align-items:flex-start;} .rp3-dp i{flex:none;width:8px;height:8px;border-radius:2px;margin-top:4px;}
+.rp3-dp span{display:block;}

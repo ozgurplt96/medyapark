@@ -1496,6 +1496,11 @@ async function api(action, body){
       const row={...body};
       if(!row.id) row.created_by_team_id=(ui._me&&ui._me.id)||null; else row.updated_at=new Date().toISOString();
       const r=await saveRow('operation_price_groups',row); logYaz('operation_save',{job_id:body.job_id}); return ok(r); }
+    /* S15: üretim kalemi bağı — aynı işin baskı/montaj/söküm kayıtları.
+       with=null kaydı kalemden çıkarır. Tek işlem, RLS geçerli (invoker). */
+    case 'operation_kalem':{
+      const {data,error}=await sb.rpc('operation_kalem_bagla',{p_op:body.id,p_with:body.with||null});
+      if(error)throw error; logYaz('operation_save',{id:body.id}); return ok(data); }
     case 'operations_batch':{
       const {data,error}=await sb.rpc('operations_batch_create',
         {p_job:body.job_id, p_rows:body.rows||[], p_docs:body.docs||[], p_package:body.package||null, p_islem:body.islem||null});
@@ -4121,7 +4126,7 @@ async function workAc(id,odak){
 
     ${wBolum({id:'wOpKart',baslik:'Baskı &amp; Montaj',sayiId:'wOpSayi',sayi:opN,govde:'wOps',
       bos:!opN,ipucu:'Bu işe bağlı baskı/montaj kaydı yok.',
-      eylem:`${opN?`<button class="btn btn-ghost btn-sm" onclick="rpAc('baski',{kurum:${j.customer_id||0},isler:[${j.id}]})" title="Bu işin baskı/montaj dökümü (PDF/Excel)">${ic('download',15)} Döküm</button>`:''}
+      eylem:`${opN?`<button class="btn btn-ghost btn-sm" onclick="rpAc('baski',{sablon:'dokum',kurum:${j.customer_id||0},is:${j.id}})" title="Bu işin baskı/montaj dökümü (PDF/Excel)">${ic('download',15)} Döküm</button>`:''}
         <button class="btn btn-sm act act-ops" onclick="opForm(0,${j.id})">${ic('plus',15)} Kayıt Ekle</button>`})}
 
     ${/* S2 §27: bos bolum sessiz kalir. */''}
@@ -4321,6 +4326,8 @@ function workOdakUygula(){
 function workOpsCiz(){
   const box=document.getElementById('wOps'); if(!box)return;
   const ops=ui._workOps||[], jobId=(ui._work||{}).id;
+  /* S15: aynı üretim kalemindeki kayıtlar aynı numarayı gösterir (bağ kayıttan okunur). */
+  const kNo={}; let kN=0; ops.forEach(o=>{ if(o.kalem_key&&ops.filter(x=>x.kalem_key===o.kalem_key).length>1&&!kNo[o.kalem_key]) kNo[o.kalem_key]=++kN; });
   box.innerHTML=ops.map(o=>`<div class="list-item w-op" data-op="${o.id}" data-oc="${esc(String(o.created_at||''))}"
       role="button" tabindex="0" style="cursor:pointer" onclick="opForm(${o.id},${jobId})"
       onkeydown="if(event.key==='Enter')opForm(${o.id},${jobId})">
@@ -4332,7 +4339,8 @@ function workOpsCiz(){
         ${o.supplier_org_id&&ui._opCust[o.supplier_org_id]?' · '+esc(orgKisa(ui._opCust[o.supplier_org_id],34)):''}
         · <span class="badge-st st-${esc(o.status)}">${esc(opStatLbl(o.status))}</span>
         ${(o.document_links||[]).length?` · <span title="Ek dosya">📎 ${(o.document_links||[]).length}</span>`:''}
-        ${o.price_group_id?' · <span class="pill">paket</span>':''}</div>
+        ${o.price_group_id?' · <span class="pill">paket</span>':''}
+        ${kNo[o.kalem_key]?` · <span class="pill" title="Aynı üretim kalemi: baskı ve montajı raporlarda yan yana">kalem ${kNo[o.kalem_key]}</span>`:''}</div>
     </div>`).join('')+'<div id="wPaketler"></div>';
   if(ops.some(o=>o.price_group_id)) paketOzetCiz(jobId);
 }
@@ -5891,7 +5899,7 @@ async function operasyon(c){
   c.innerHTML=`<div class="sec-head">
       <div><h3>Baskı &amp; Montaj</h3><p class="sub">${list.length} kayıt · aktif takip uygulamada, Excel yalnız alışveriş formatı</p></div>
       <div style="display:flex;gap:8px">
-        <button class="btn btn-outline btn-sm" onclick="opExport()">${ic('download',15)} Excel'e Aktar</button>
+        <button class="btn btn-outline btn-sm" onclick="opTakipRapor()" title="Bu dönemin baskı/montaj takip tablosu (Excel, PDF)">${ic('download',15)} Takip tablosu</button>
         ${ui._role==='admin'?`<button class="btn btn-outline btn-sm" onclick="opImport()">${ic('upload',15)} Excel'den Al</button>`:''}
         <button class="btn btn-sm act act-ops" onclick="opForm(0)">${ic('plus',15)} Yeni Kayıt</button></div></div>
 
@@ -6001,9 +6009,16 @@ async function opForm(id,jobId){
   const isteyiz=(history.state&&history.state.mp&&history.state.v==='work');
   const o=((isteyiz?ui._workOps:ui._ops)||[]).find(x=>x.id===id)
         ||(ui._workOps||[]).find(x=>x.id===id)||(ui._ops||[]).find(x=>x.id===id)||{};
-  const veri=await guard(()=>Promise.all([api('jobs_list'),api('customers_list'),api('units_full').catch(()=>[]),api('price_groups_list').catch(()=>[])]),'Form açılamadı');
+  const veri=await guard(()=>Promise.all([api('jobs_list'),api('customers_list'),api('units_full').catch(()=>[]),api('price_groups_list').catch(()=>[]),
+    o.job_id?api('operations_list&job_id='+o.job_id):Promise.resolve([])]),'Form açılamadı');
   if(!veri)return;
-  const [jobs,custs,units,gruplar]=veri;
+  const [jobs,custs,units,gruplar,isOps]=veri;
+  /* S15: aynı işin diğer kayıtları — üretim kalemi bağı yalnız bunlarla kurulur. */
+  const uAd={}; (units||[]).forEach(u=>uAd[u.id]=u.name);
+  const kalemEt=x=>[opTypeLbl(x.operation_type),x.description||uAd[x.unit_id]||x.location_text||'',x.planned_date?trTarih(x.planned_date):''].filter(Boolean).join(' · ');
+  const digerOps=(isOps||[]).filter(x=>x.id!==id);
+  const kalemUye=o.kalem_key?digerOps.filter(x=>x.kalem_key===o.kalem_key):[];
+  ui._opKalem={onceki:o.kalem_key||null,ops:digerOps};
   ui._opPg=gruplar||[];
   const jid=jobId||o.job_id||((ui._work||{}).id)||0;
   ekYeni('op',{mevcut:(o.document_links||[]).filter(l=>l.documents).map(l=>({link_id:l.id,doc:l.documents})),
@@ -6037,6 +6052,9 @@ async function opForm(id,jobId){
     </div>
     <div class="field"><label class="flabel" for="opDesc">Açıklama / ürün</label><input class="inp" id="opDesc" value="${esc(o.description)}" placeholder="ör. M1 AVM megalight baskı"></div>
     <label class="rp2-chk" style="margin:-4px 0 10px"><input type="checkbox" id="opRe" ${o.reprint?'checked':''}> <span>Yeniden baskı <em>ölçü revizesi, yer değişikliği…</em></span></label>
+    ${id&&digerOps.length?`<div class="field"><label class="flabel" for="opKalem">Aynı üretim kalemi</label>
+      <select class="inp" id="opKalem"><option value="">— bağımsız kayıt —</option>${digerOps.map(x=>`<option value="${x.id}" ${kalemUye[0]&&kalemUye[0].id===x.id?'selected':''}>${esc(kalemEt(x))}${o.kalem_key&&x.kalem_key===o.kalem_key?' — bu kalemde':''}</option>`).join('')}</select>
+      <p class="fhint">Baskı ile onun montajı ya da sökümü aynı kalemde olursa raporlarda yan yana görünür. Bir montaj birden çok baskıyı kapsayabilir; bedeli bir kez sayılır.${kalemUye.length?` Bu kalemde: ${esc(kalemUye.map(kalemEt).join('; '))}.`:''}</p></div>`:''}
     <fieldset class="op-fs"><legend>Teknik</legend>
       <div class="row2">
         <div class="field"><label class="flabel" for="opMat">Malzeme / cins</label><input class="inp" id="opMat" value="${esc(o.material)}" placeholder="ör. Önden ışıklı vinil"></div>
@@ -6150,6 +6168,14 @@ async function opSave(){
      basarisizsa kayit korunur; form acik kalir ve Kaydet yeniden dener. */
   const opId=id||(r&&r.id);
   if(opId){ const el=document.getElementById('opid'); if(el) el.value=String(opId); }
+  /* S15: kalem bağı yalnız DEĞİŞTİYSE yazılır (aynı kalemin başka üyesini seçmek değişiklik değildir). */
+  const kEl=document.getElementById('opKalem');
+  if(id&&kEl&&ui._opKalem){ const sec=kEl.value, K=ui._opKalem;
+    const hedef=sec?K.ops.find(x=>String(x.id)===sec):null;
+    const degisti=sec?!(K.onceki&&hedef&&hedef.kalem_key===K.onceki):!!K.onceki;
+    if(degisti){ const kk=await guard(()=>api('operation_kalem',{id,with:sec?+sec:null}),'Üretim kalemi bağı kaydedilemedi');
+      if(kk===null&&sec!==''){ modalBusy(false); return; }
+      K.onceki=kk||null; } }
   if(opId&&EK.op){
     const g=await ekGonder('op',[{operation_id:opId}]);
     if(!g.ok){ modalBusy(false);
@@ -6213,6 +6239,7 @@ async function opTopluForm(jobId){
     </details>
 
     <div class="tc-h" style="margin-top:12px">Satırlar <span class="chip" id="opbSay"></span></div>
+    <p class="fhint" style="margin:-2px 0 8px">Aynı <b>kalem</b> numarasını taşıyan satırlar (ör. bir baskı ve onun montajı) tek üretim kalemidir; raporlarda yan yana görünür. Bir montaj birden çok baskıyla aynı numarayı taşıyabilir.</p>
     <div class="opb-rows" id="opbRows"></div>
     <div style="display:flex;gap:8px;align-items:center;margin:6px 0 12px">
       <button type="button" class="btn btn-outline btn-sm" onclick="opbSatirEkle()">${ic('plus',15)} Satır ekle</button>
@@ -6239,7 +6266,9 @@ async function opTopluForm(jobId){
   opbPkCiz(); opbSatirCiz();
 }
 let _opbSay=0;
-function opbYeniSatir(t,unit){ return {k:'r'+(++_opbSay),operation_type:t||'baski',unit_id:unit||'',description:'',quantity:'',quantity_unit:'adet',dimensions:'',location_text:'',cost:''}; }
+function opbYeniSatir(t,unit,kalem){ return {k:'r'+(++_opbSay),operation_type:t||'baski',unit_id:unit||'',description:'',quantity:'',quantity_unit:'adet',dimensions:'',location_text:'',cost:'',kalem:kalem||''}; }
+/* S15: sıradaki boş kalem numarası (formdaki etiketler yalnız bu kayıt için anlamlıdır). */
+const opbSonrakiKalem=()=>String(1+Math.max(0,...ui._opb.satir.map(s=>parseInt(s.kalem,10)).filter(n=>Number.isFinite(n))));
 const opbBos=s=>!s.unit_id&&!String(s.description||'').trim()&&!String(s.location_text||'').trim()
   &&s.quantity===''&&!String(s.dimensions||'').trim()&&s.cost==='';
 const opbUnitAd=u=>u?`${u.name}${u.urun?' · '+u.urun:''}`:'';
@@ -6277,10 +6306,18 @@ function opbUret(){
   const sirali=[...ui._opb.sec].sort((a,b)=>String((U[a]||{}).name).localeCompare(String((U[b]||{}).name),'tr',{numeric:true}));
   let eklenen=0;
   ui._opb.satir=ui._opb.satir.filter(s=>!opbBos(s));
-  turler.forEach(t=>sirali.forEach(uid=>{
-    if(ui._opb.satir.some(s=>String(s.unit_id)===String(uid)&&s.operation_type===t)) return;
-    const s=opbYeniSatir(t,uid); const u=U[uid]; if(u&&u.olcu) s.dimensions=u.olcu;
-    ui._opb.satir.push(s); eklenen++; }));
+  /* S15: aynı pozisyonun baskı / montaj / söküm satırları aynı KALEM
+     numarasını alır — görünür ve değiştirilebilir bir öneri; kullanıcı
+     Kaydet'e basana kadar hiçbir bağ yazılmaz. */
+  sirali.forEach(uid=>{
+    const yeniT=turler.filter(t=>!ui._opb.satir.some(s=>String(s.unit_id)===String(uid)&&s.operation_type===t));
+    if(!yeniT.length) return;
+    const mevcut=ui._opb.satir.filter(s=>String(s.unit_id)===String(uid));
+    let kalem=(mevcut.find(s=>s.kalem)||{}).kalem||'';
+    if(!kalem&&mevcut.length+yeniT.length>1){ kalem=opbSonrakiKalem(); mevcut.forEach(s=>{ s.kalem=kalem; }); }
+    yeniT.forEach(t=>{ const s=opbYeniSatir(t,uid,kalem); const u=U[uid]; if(u&&u.olcu) s.dimensions=u.olcu;
+      ui._opb.satir.push(s); eklenen++; }); });
+  ui._opb.satir.sort((x,y)=>{ const a=+x.kalem||1e9, b=+y.kalem||1e9; return a-b; });
   ui._opb.sec.clear(); opbPkCiz(); opbSatirCiz();
   toast(eklenen?eklenen+' satır eklendi.':'Seçilen pozisyonlar zaten satırlarda.');
 }
@@ -6304,6 +6341,8 @@ function opbSatirCiz(){
       <input class="inp inp-sm" data-f="dimensions" aria-label="Satır ${ix+1} ölçü" placeholder="Ölçü" value="${esc(s.dimensions)}">
       <input class="inp inp-sm" data-f="location_text" aria-label="Satır ${ix+1} serbest yer" placeholder="Yer (serbest)" value="${esc(s.location_text)}">
       <input class="inp inp-sm" data-f="cost" type="number" min="0" step="0.01" aria-label="Satır ${ix+1} maliyet" placeholder="Maliyet ₺" value="${esc(s.cost)}">
+      <label class="opb-k" title="Aynı numaralı satırlar tek üretim kalemidir (ör. baskı ve onun montajı)">Kalem
+        <input class="inp inp-sm" data-f="kalem" inputmode="numeric" maxlength="3" aria-label="Satır ${ix+1} üretim kalemi numarası" placeholder="–" value="${esc(s.kalem||'')}"></label>
       <button type="button" class="ek-x" aria-label="Satır ${ix+1} çıkar" onclick="opbSatirSil('${s.k}')">✕</button>
       ${s._hata?`<div class="opb-e" role="alert">${esc(s._hata)}</div>`:''}
     </div>`).join('')
@@ -6347,7 +6386,7 @@ async function opbKaydet(){
   const rows=ui._opb.satir.map(s=>({...ort, operation_type:s.operation_type, unit_id:+s.unit_id||null,
     description:String(s.description).trim()||null, quantity:num(s.quantity), quantity_unit:s.quantity_unit||'adet',
     dimensions:String(s.dimensions).trim()||null, location_text:String(s.location_text).trim()||null,
-    cost:num(s.cost)}));
+    cost:num(s.cost), kalem:String(s.kalem||'').trim()||null}));
   let paket=null;
   if((document.getElementById('opbPkOn')||{}).checked){
     paket={label:(gv('opbPkAd')||'').trim(),cost_amount:num(gv('opbPkM')),sale_amount:num(gv('opbPkS')),currency:ort.currency};
@@ -6387,33 +6426,17 @@ async function opDel(id){
 }
 
 /* ---------- Excel export / import (07 §16, BR-X02) ---------- */
-const OP_COLS=[
-  {key:'planned_date',label:'Tarih',w:12},
-  {key:'is',label:'İş',w:28,get:o=>((ui._opJobs||{})[o.job_id]||{}).title||''},
-  {key:'kurum',label:'Kurum',w:26,get:o=>(ui._opCust||{})[(((ui._opJobs||{})[o.job_id])||{}).customer_id]||''},
-  {key:'operation_type',label:'Tür',w:10,get:o=>opTypeLbl(o.operation_type)},
-  {key:'description',label:'Açıklama',w:32},
-  {key:'quantity',label:'Miktar',w:8},
-  {key:'quantity_unit',label:'Birim',w:8,get:o=>OP_BIRIM[o.quantity_unit]||''},
-  {key:'dimensions',label:'Ölçü',w:14},
-  {key:'yer',label:'Yer / Pozisyon',w:22,get:o=>((ui._opUnits||{})[o.unit_id]||{}).name||o.location_text||''},
-  {key:'uygulayan',label:'Uygulayan',w:24,get:o=>(ui._opCust||{})[o.supplier_org_id]||''},
-  {key:'status',label:'Durum',w:12,get:o=>opStatLbl(o.status)},
-  {key:'cost',label:'Maliyet',w:12},
-  {key:'note',label:'Not',w:30}];
-async function opExport(){
-  const list=ui._opFiltered||ui._ops||[];
-  if(!list.length){ mpAlert('Aktarılacak kayıt yok.'); return; }
+/* S15: ekranın ham Excel dışa aktarımı yerine şablonlu takip tablosu
+   (Raporlar › Baskı / montaj). Ekrandaki dönem rapora taşınır; iki ayrı
+   biçimde ikinci bir çıktı üretilmez. İçe aktarım (opImport) değişmedi. */
+function opTakipRapor(){
   const f=opFiltre();
   const [from,to]=f.donem==='ozel'?[f.from,f.to]:opDonem(f.donem);
-  const donemAd={bugun:'Bugün',hafta:'Bu hafta',yaklasan:'Yaklaşan 30 gün',ay:'Bu ay',
-                 gecen:'Geçen ay',yil:'Bu yıl',ozel:'Özel aralık',tum:'Tüm zamanlar'}[f.donem]||f.donem;
-  await exportRows('baski-montaj','Baskı & Montaj',OP_COLS,list,[
-    ['İş dönemi', donemAd + (from&&to?` (${trTarih(from)} – ${trTarih(to)})`:'')],
-    ['Tür filtresi', f.type?opTypeLbl(f.type):'Tümü'],
-    ['Durum filtresi', {aktif:'Aktif (planlandı + bekliyor + devam ediyor)',
-      tamam:'Tamamlananlar',iptal:'İptal',tum:'Tüm durumlar'}[f.kapsam]||f.kapsam],
-    ['Arama', f.q||'—']]);
+  const p={sablon:'takip'};
+  if(f.donem==='ay') p.donem='ay'; else if(f.donem==='gecen') p.donem='gecen'; else if(f.donem==='yil') p.donem='yil';
+  else if(from||to){ p.donem='ozel'; p.bas=from||''; p.bit=to||''; } else p.donem='tum';
+  if(f.kapsam==='iptal'||f.kapsam==='tum') p.iptal=true;
+  rpAc('baski',p);
 }
 function opImport(){
   importOpen({
@@ -7975,7 +7998,6 @@ async function rapHepsi(kur){
   }
   return out;
 }
-const RAP_AY=['Oca','Şub','Mar','Nis','May','Haz','Tem','Ağu','Eyl','Eki','Kas','Ara'];
 const rapTr=iso=>{ const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso||'')); return m?`${m[3]}.${m[2]}.${m[1]}`:''; };
 /* timestamptz -> yerel 'YYYY-MM-DD' */
 const rapGun=ts=>ts?_cIso(new Date(ts)):'';
@@ -7986,7 +8008,6 @@ const RAP_TEKLIF={yeni:'Yeni',gorusuldu:'Görüşüldü',onaylandi:'Onaylandı',
 const rapYasam=j=>(j&&j.lifecycle_status==='kapandi')?'Arşiv':'Aktif';
 const rapBekliyor=j=>(j&&j.lifecycle_status==='bekliyor')?'Bekliyor':'';
 /* Operasyon: gunluk UI kapsami + AYRINTI kaybolmaz. */
-const rapOpKapsam=s=>s==='done'?'Tamamlandı':s==='cancelled'?'İptal':'Aktif';
 const RAP_LED_NOT='LED kısa dönem/yayın rotasyonlarının tamamı V0 aylık doluluk modelinde temsil edilmeyebilir.';
 
 async function rapBaglam(b,e){
@@ -7995,7 +8016,7 @@ async function rapBaglam(b,e){
   const aylar=[]; { const d=new Date(+b.slice(0,4),+b.slice(5,7)-1,1); const son=e.slice(0,7);
     for(let i=0;i<60;i++){ const ym=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
       aylar.push(ym); if(ym>=son)break; d.setMonth(d.getMonth()+1); } }
-  const [jobs,cust,team,cts,fol,rel,aksiyon,sonGunc,ops,mec,alt,uni,prod,book,teklif]=await Promise.all([
+  const [jobs,cust,team,cts,fol,rel,aksiyon,sonGunc,teklif]=await Promise.all([
     rapHepsi(()=>sb.from('jobs').select('*').order('id')),
     rapHepsi(()=>sb.from('customers').select('id,firma').order('id')),
     api('team_list'),
@@ -8010,17 +8031,6 @@ async function rapBaglam(b,e){
     /* Is Takibi "son guncelleme": yalniz INSAN yazimi, en yeni once. */
     rapHepsi(()=>sb.from('entries').select('id,job_id,body,occurred_at').neq('source','system')
       .not('job_id','is',null).order('occurred_at',{ascending:false}).order('id',{ascending:false})),
-    rapHepsi(()=>sb.from('work_operations').select('*').gte('planned_date',b).lte('planned_date',e)
-      .order('planned_date').order('id')),
-    rapHepsi(()=>sb.from('mecralar').select('id,name,sort').order('sort').order('id')),
-    rapHepsi(()=>sb.from('alt_mecralar').select('id,name,mecra_id,product_id,occupancy_mode,creative_seconds,sort').order('id')),
-    rapHepsi(()=>sb.from('units').select('id,name,mecra_id,alt_mecra_id,product_id,active,sort').order('sort').order('id')),
-    rapHepsi(()=>sb.from('products').select('id,name').order('id')),
-    /* S8: doluluk kaynağı TEK normalleştirilmiş yüzey (kesin yerleşim +
-       hâlâ geçerli eski kayıt). Ekran ve dışa aktarımla AYNI üretici. */
-    rapHepsi(()=>sb.from('media_schedule').select('*').neq('commitment','cancelled')
-      .or(`block_end.is.null,block_end.gte.${b}`).lte('block_start',e)
-      .order('block_start').order('placement_id',{nullsFirst:false}).order('booking_id',{nullsFirst:false})),
     rapHepsi(()=>sb.from('quotes').select('id,customer_id,customer_name,firma,telefon,eposta,total,status,created_at,kaynak,gecerlilik,work_id,revision_no')
       .gte('created_at',ts0).lt('created_at',ts1).order('created_at').order('id'))
   ]);
@@ -8030,8 +8040,7 @@ async function rapBaglam(b,e){
   return {b,e,aylar,okunma:new Date(),
     jobs, jm:idx(jobs), cm:idx(cust,x=>x.firma||''), tm:idx(team||[],x=>x.name||''),
     km:idx(cts,x=>x.name||''), folJ:grup(fol,'job_id',x=>x.team_id), relE:grup(rel,'entry_id',x=>x.team_id),
-    aksiyon, sonGunc:son, ops, mec, am:idx(alt), mm:idx(mec), uni, um:idx(uni), pm:idx(prod,x=>x.name||''),
-    book, teklif, medya:mdModel({mecs:mec,alts:alt,units:uni,prods:prod,recs:book})};
+    aksiyon, sonGunc:son, teklif};
 }
 const rapAdlar=(tm,ids)=>[...new Set((ids||[]).filter(Boolean))].map(id=>tm[id]).filter(Boolean)
   .sort((a,b)=>a.localeCompare(b,'tr')).join(', ');
@@ -8084,53 +8093,10 @@ const RAPOR=[
     {key:'sonTarih',label:'Son güncelleme tarihi',w:14,tip:'tarih'},{key:'kisi',label:'Kişi',w:18},
     {key:'muh',label:'Muhasebe',w:12}]},
 
- {id:'op', ad:'Baskı & Montaj', sayfa:'Baskı & Montaj', dosya:'Baski_Montaj', varsayilan:1, donemli:true,
-  aciklama:'Planlanan tarihi seçilen aralıkta olan baskı, montaj ve söküm kayıtları',
-  kapsam:'Planlanan tarihi aralıkta olan operasyonlar. Tarihi girilmemiş operasyonlar bu aralığa girmez.',
-  satirlar:c=>c.ops.map(o=>{ const j=c.jm[o.job_id]||{}; const u=c.um[o.unit_id]||null;
-    const m=u?(c.mm[(c.am[u.alt_mecra_id]||{}).mecra_id||u.mecra_id]||{}):{};
-    return {tarih:o.planned_date||'', tur:opTypeLbl(o.operation_type), kurum:c.cm[j.customer_id]||'', is:j.title||'',
-      aciklama:o.description||'', adet:o.quantity, olcu:o.dimensions||'',
-      poz:u?[m.name,u.name].filter(Boolean).join(' · '):'', yer:o.location_text||'',
-      uygulayan:c.cm[o.supplier_org_id]||'', kapsam:rapOpKapsam(o.status), durum:opStatLbl(o.status),
-      bitti:o.completed_at?rapGun(o.completed_at):'', maliyet:o.cost, not:o.note||''}; }),
-  cols:[{key:'tarih',label:'Tarih',w:12,tip:'tarih'},{key:'tur',label:'Tür',w:9},{key:'kurum',label:'Kurum',w:26},
-    {key:'is',label:'İş',w:30},{key:'aciklama',label:'Açıklama / Ürün',w:32},{key:'adet',label:'Adet',w:7,tip:'sayi'},
-    {key:'olcu',label:'Ölçü',w:12},{key:'poz',label:'Pozisyon / Mecra',w:22},{key:'yer',label:'Yer',w:22},
-    {key:'uygulayan',label:'Uygulayan',w:22},{key:'kapsam',label:'Durum',w:11},{key:'durum',label:'Durum ayrıntısı',w:14},
-    {key:'bitti',label:'Tamamlanma',w:12,tip:'tarih'},{key:'maliyet',label:'Maliyet',w:11,tip:'sayi'},{key:'not',label:'Not',w:36}]},
-
- {id:'dol', ad:'Mecra Doluluk Detayı', sayfa:'Doluluk Detayı', dosya:'Doluluk_Detay', varsayilan:1, donemli:true,
-  aciklama:'Aralığın kapsadığı her ay için statik yüz durumu ve LED kampanyaları; kurum, iş, gerçek dönem ve kesinlik',
-  kapsam:'Aylık PROJEKSİYON: ay hücresi bir iş kaydı değildir. Gerçek dönem ve kesinlik ayrı sütunlardadır; ay bazlı eski kayda gün uydurulmaz. LED eşzamanlı yayındır: her satır bir kampanyadır, "dolu" değildir.',
-  /* S8: Doluluk ekranının dışa aktarımıyla AYNI üretici (mdAylikSatirlar). */
-  satirlar:c=>mdAylikSatirlar(c.medya,c.aylar).map(r=>({...r,
-    ay:`${RAP_AY[+r.ay.slice(5,7)-1]} ${r.ay.slice(0,4)}`})),
-  cols:[{key:'mecra',label:'Mecra',w:22},{key:'alan',label:'Alan',w:22},{key:'poz',label:'Pozisyon',w:11},
-    {key:'yuzey',label:'Yüz',w:6},{key:'tur',label:'Mecra türü',w:14},{key:'davranis',label:'Davranış',w:20},
-    {key:'ay',label:'Ay',w:10},{key:'durum',label:'Durum',w:10},{key:'kurum',label:'Kurum',w:28},{key:'is',label:'İş',w:28},
-    {key:'donem',label:'Gerçek dönem',w:24},{key:'kesinlik',label:'Kesinlik',w:26},{key:'bosalma',label:'Boşalma (statik)',w:16},
-    {key:'sure',label:'Kreatif süre',w:10},{key:'kaynak',label:'Kaynak ifade / şerit',w:22},{key:'not',label:'Not',w:28}]},
-
- {id:'ozet', ad:'Doluluk Özeti', sayfa:'Doluluk Özeti', dosya:'Doluluk_Ozet', varsayilan:1, donemli:true,
-  aciklama:'Mecra bazında statik yüzlerin dolu / opsiyon / boş ay sayısı ve doluluk oranı',
-  kapsam:'Yalnız STATİK (münhasır) yüzler, yüz × ay sayımı. LED eşzamanlı yayın olduğundan doluluk oranına katılmaz. Doluluk = (dolu + opsiyon) / (dolu + opsiyon + boş).',
-  /* Ozet, Detay'in AYNI satirlarindan sayilir: iki rapor asla celismez. */
-  satirlar:c=>{ const o={};
-    RAPOR.find(r=>r.id==='dol').satirlar(c).filter(r=>r.statik).forEach(r=>{
-      const x=o[r.mecra]=o[r.mecra]||{mecra:r.mecra||'—',pozSet:new Set(),dolu:0,rez:0,bos:0};
-      x.pozSet.add(r.alan+'|'+r.poz+'|'+r.yuzey);
-      if(r.durum==='Yayın'||r.durum==='Dolu')x.dolu++; else if(r.durum==='Opsiyon')x.rez++; else if(r.durum==='Müsait'||r.durum==='Boş')x.bos++; });
-    const sira=Object.fromEntries(c.mec.map((m,i)=>[m.name,i]));
-    return Object.values(o).map(x=>{ const t=x.dolu+x.rez+x.bos;
-      return {mecra:x.mecra,poz:x.pozSet.size,dolu:x.dolu,rez:x.rez,bos:x.bos,toplam:t,
-        oran:t?Math.round((x.dolu+x.rez)*100/t):0}; })
-      .sort((p,q)=>(sira[p.mecra]??99)-(sira[q.mecra]??99)); },
-  cols:[{key:'mecra',label:'Mecra',w:26},{key:'poz',label:'Yüz',w:10,tip:'sayi'},{key:'dolu',label:'Dolu (ay)',w:10,tip:'sayi'},
-    {key:'rez',label:'Opsiyon (ay)',w:12,tip:'sayi'},{key:'bos',label:'Boş (ay)',w:10,tip:'sayi'},
-    {key:'toplam',label:'Toplam (ay)',w:11,tip:'sayi'},
-    {label:'Doluluk',w:10,get:r=>r.oran+'%'}]},
-
+ /* S15: 'op' (Baskı & Montaj), 'dol' (Doluluk Detayı) ve 'ozet' (Doluluk
+    Özeti) hızlı tabloları KALDIRILDI. Aynı kayıtların şablonlu çıktısı artık
+    Raporlar › Baskı / montaj ve Raporlar › Mecra doluluk tablosu'dadır;
+    ikinci, çelişen bir dışa aktarım yolu bırakılmaz. */
  {id:'teklif', ad:'Teklifler', sayfa:'Teklifler', dosya:'Teklifler', varsayilan:0, donemli:true,
   aciklama:'Seçilen aralıkta oluşturulan teklifler; kurum, bağlı iş, durum ve tutar',
   kapsam:'Oluşturulma tarihi aralıkta olan teklifler. Kurum ve iş yalnız AÇIK bağlantıdan okunur; isim benzerliğiyle eşleştirme yapılmaz.',
@@ -9858,7 +9824,7 @@ async function orgAc(id){
         <button class="btn btn-primary btn-sm" onclick="qcAc({custId:${o.id}})">${ic('plus',15)} Güncelleme</button>
         <button class="btn btn-sm act act-work" onclick="jobForm(null,null,{custId:${o.id}})">${ic('plus',15)} Yeni İş</button>
         <button class="btn btn-outline btn-sm" onclick="custForm(${o.id})">Düzenle</button>
-        <button class="btn btn-ghost btn-sm" onclick="rpAc('baski',{kurum:${o.id}})" title="Bu kurumun baskı/montaj dökümü">${ic('download',15)} Baskı/montaj dökümü</button></div></div>
+        <button class="btn btn-ghost btn-sm" onclick="rpAc('baski',{sablon:'takip',donem:'tum',kurum:${o.id}})" title="Bu kurumun baskı/montaj takip tablosu (PDF/Excel)">${ic('download',15)} Baskı/montaj tablosu</button></div></div>
 
     ${kimlik||o.relationship_evidence?`<div class="sec-card">
       <div class="sec-head" style="margin-bottom:8px"><h4 style="font-size:14px;margin:0">Kimlik</h4>

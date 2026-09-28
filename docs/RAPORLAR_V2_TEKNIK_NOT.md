@@ -128,3 +128,65 @@ bağlantılarını ve isteğe bağlı paketi tek işlemde yazar.
   - Geçersiz birim reddedildi.
   - team_member paket silemedi.
 - **Arayüz:** 1440 px ve 390 px'te yatay taşma yok; konsol hatası yok.
+
+---
+
+# Sprint 15 — gerçek Excel şablonlarına uygun raporlar
+
+Referans: elle tutulan "M1 ADANA AVM PANOLAR REZ. LİSTESİ", "BASKI-MONTAJ
+TAKİP TABLOSU" ve Gürgençler baskı/montaj dökümü. Referans dosyaların
+kayıtları uygulamaya aktarılmadı; yalnız düzenleri örnek alındı. Manuel
+dosyalardaki hatalar (ör. Gürgençler G20 toplamının yalnız ilk kalemi
+kapsaması, "FİRMA" sütunundaki ARC/ERK satıcı kodları) kopyalanmadı.
+
+## Mecra doluluk tablosu (`RPD_MECRA`)
+
+- Tek çıktı; eski "tam dönem / aralıklar / çizelge" üçlüsü ve doluluk özeti
+  kaldırıldı. Filtreler: dönem, mecra, ürün, iç/dış; tek daraltma
+  "yalnız dönemin tamamında müsait yüzeyler". Önizlemede yüz çıkar/geri ekle.
+- Excel: lokasyon + ürün ailesi başına sayfa; No · Yüz · aylar. Yüz başına iki
+  satır (üstte kurum/durum, altta kesin tarih). A/B ardışık, pano numarası
+  birleşik. Başlık ve A:B sabit, ay başlıkları her sayfada; elle sayfa sonu
+  pano (A/B) çiftini bölmez; ölçek 6 ay/sayfa genişliği.
+- Ay içinde durum değişirse: hücre beyaz, iki satır boyunca birleşik; her
+  dilim kendi renk işaretiyle alt alta ("Müsait · 01.09–04.09", kurum +
+  tarih). Keskin geçişli (gradient) dolgu Excel baskısında çizgili çıktığı
+  için kullanılmadı. PDF ve önizlemede ayrıca günlere oranlı ince şerit.
+- Seçilen başlangıç/bitiş dışındaki günler "dönem dışı"dır, müsait sayılmaz;
+  ay başlığı "Eki 2026 (15–31)".
+- Dış paylaşımda kurum adı modele hiç kopyalanmaz; aynı yerleşimde
+  Dolu / Opsiyon / Müsait + tarih. İç ayrıntı ("opsiyon süresi doldu") yok.
+- LED ayrı sayfa; statik müsaitliğe ve yüz sayısına katılmaz.
+- Hesap kuralları S12/S14 ile aynıdır (`rpYuzSerit` değişmedi).
+
+## Baskı / montaj (`RPD_BASKI`) — iki hazır şablon
+
+- **Takip tablosu**: Tarih · Müşteri · Ürün/iş kalemi · Adet · Baskı merkezi ·
+  Ölçü · Bedel · Montaj tarihi · Montaj yeri · Montajı yapan · Not. Dönem
+  hazır seçimlerle; tarih = kalemin **planlanan** tarihi (baskı; yoksa ilk
+  uygulama). Tarihsiz kalem dönem seçiliyken sayısıyla bildirilir, "Ek
+  filtreler"den eklenir. Durum Not sütununda.
+- **İşe özel döküm**: tek iş; Ürün · Malzeme/cins · Baskı ölçüsü · Görünen
+  alan · Yüzey adedi · Baskı adedi · Montaj bedeli · Birim fiyat · Tutar;
+  destek hizmetleri (bağsız montaj, söküm, vinç…) ayrı bölüm; toplamlar
+  para birimine göre aynı sayfada.
+- Bedel: iç = kayıtlı maliyet, dış = kayıtlı satış bedeli (başlıkta yazar).
+  Birim fiyat yalnız kayıttan (kayıtlı birim ya da tam bölünen satır tutarı).
+- Paket bedeli bir kez; kısmi paket toplama girmez ve dağıtılmaz.
+- Eski "Hızlı Excel tabloları"ndaki Baskı & Montaj, Doluluk Detayı ve
+  Doluluk Özeti ile Baskı & Montaj / Doluluk ekranlarının ham dışa
+  aktarımları kaldırıldı; o düğmeler yeni şablonları açar.
+
+## Üretim kalemi (migration `20261003100000_ps15_uretim_kalemi.sql`)
+
+- `work_operations.kalem_key uuid` — aynı anahtar = aynı üretim kalemi
+  (baskı + montaj/söküm; bir montaj birden çok baskıyı kapsayabilir).
+  Yeni tablo yok; mevcut satırlar NULL (bağımsız), tahmin yapılmaz.
+- Tetikleyici: kalem yalnız aynı işin kayıtlarını kapsar.
+- `operation_kalem_bagla(p_op, p_with)` (invoker, RLS geçerli): bağlar ya da
+  çıkarır; tek üyesi kalan kalem temizlenir.
+- Toplu giriş satırında "Kalem" etiketi (aynı pozisyondan baskı+montaj
+  üretilince önerilir, görünür ve değiştirilebilir); tek kayıt formunda
+  "Aynı üretim kalemi" seçimi; iş detayında "kalem N" rozeti.
+- Tohum `99_zzzzzzzzz_ps15_kalem_ornekleri.sql`: yalnız tohum işleri
+  (sort 9201–9206, 9301), yalnız boşsa; açık eşleşme listesi.

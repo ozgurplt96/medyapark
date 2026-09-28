@@ -10,7 +10,7 @@
    Tek sorgu yüzeyi: `media_schedule` görünümü (yerleşim + eski kayıt, tek
    normalleştirilmiş satır biçimi). Bugün, Yıl, İş/Kurum bağlamı, bitiş
    bildirimi, temel dışa aktarım ve gelecekteki Raporlar V2 AYNI kapsam
-   yardımcılarını kullanır (mdModel / mdKapsam / mdAylikSatirlar).
+   yardımcılarını kullanır (mdModel / mdKapsam).
 
    Hiçbir yerde tarih uydurulmaz: yalnız ay bilinen eski kayıt ay
    seviyesinde konuşur; bitişi bilinmeyen kayıt "Bitiş bilinmiyor" der.
@@ -441,8 +441,7 @@ async function listeler(c,o){
       <p class="sub">Statik yüzeyler kesin dönemle, LED yayınları eşzamanlı kampanya olarak yönetilir.</p></div>
     <div class="md-head-r">
       ${secili?mdEksenKontrol(st):''}
-      <button class="btn btn-ghost btn-sm" onclick="mdRaporAc()" title="Müsaitlik / çizelge raporu (PDF, Excel)">${ic('download',15)} Rapor</button>
-      <button class="btn btn-ghost btn-sm" onclick="mdDisaAktar()">${ic('download',15)} Excel'e Aktar</button>
+      <button class="btn btn-ghost btn-sm" onclick="mdRaporAc()" title="Aylık doluluk tablosu (Excel, PDF)">${ic('download',15)} Doluluk tablosu</button>
       ${isAdmin()?`<button class="btn btn-ghost btn-sm" onclick="bookImport()" title="Eski tablolardan ay bazlı kayıt aktarımı — kesin dönemli yerleşim oluşturmaz">${ic('upload',15)} Eski ay kaydı al</button>`:''}
     </div></div>
     <div class="md-site" role="group" aria-label="Mecra">
@@ -2038,75 +2037,11 @@ function medyaBolumu(l,o){
   </div>`;
 }
 
-/* ==========================================================
-   AYLIK PROJEKSİYON SATIRLARI — temel dışa aktarım + Doluluk raporu
-   AYNI üreticiyi kullanır (B49/B50). Ay hücresi bir iş kaydı değildir;
-   gerçek dönem, kesinlik ve statik/LED anlamı ayrı sütunlardadır.
-   ========================================================== */
-function mdAylikSatirlar(M,aylar,o){
-  o=o||{};
-  const rows=[];
-  const msira=Object.fromEntries(M.mecs.map((m,i)=>[m.id,i]));
-  const kes=r=>r.record_kind==='legacy'?(r.date_precision==='month'?'Ay bazlı (eski kayıt)':r.date_precision==='open_end'?'Başlangıç kesin, bitiş bilinmiyor (eski kayıt)':'Kesin gün (eski kayıt)')
-                                     :(r.end_date?'Kesin gün':'Başlangıç kesin, bitiş bilinmiyor');
-  const donem=r=>r.record_kind==='legacy'&&r.date_precision==='month'?'':mdAralikNokta(r.start_date,r.end_date);
-  [...M.mecs].sort((a,b)=>(msira[a.id]??99)-(msira[b.id]??99)).forEach(m=>{
-    const alanlar=[...(M.altByMec[m.id]||[])]; const yetim=M.orphanByMec[m.id]||[];
-    if(yetim.length) alanlar.push({id:null,name:'Diğer pozisyonlar',_sahte:true,mecra_id:m.id});
-    alanlar.forEach(a=>{
-      const tur=M.pm[a.product_id]||'';
-      if(mdEszamanli(a)){
-        aylar.forEach(ym=>{ const ab=ym+'-01', ae=mdAySonu(ab);
-          (M.byArea[a.id]||[]).filter(r=>r.commitment!=='cancelled'&&r.block_start<=ae&&(r.block_end==null||r.block_end>=ab))
-            .forEach(r=>rows.push({mecra:m.name,alan:a.name,poz:'',yuzey:'',tur,davranis:'LED · eşzamanlı yayın',
-              ay:ym,durum:r.record_kind==='legacy'?'Eski kayıt':(r.commitment==='reserved'?'Opsiyon':'Yayın'),
-              kurum:r.customer_name||'',is:r.work_title||'',donem:donem(r),kesinlik:kes(r),
-              kaynak:r.period_note||r.legacy_lane||'',sure:a.creative_seconds&&r.record_kind!=='legacy'?a.creative_seconds+' sn':'',
-              bosalma:'',not:r.note||'',statik:false}));
-        });
-        return;
-      }
-      (a._sahte?yetim:(M.unitsByAlt[a.id]||[])).forEach(u=>{
-        const p=posParts(u.name); const yuzlu=/[\s._-][AB]$/i.test(String(u.name||''));
-        aylar.forEach(ym=>{ const ab=ym+'-01', ae=mdAySonu(ab);
-          const k=(M.byUnit[u.id]||[]).filter(r=>r.commitment!=='cancelled'&&r.block_start<=ae&&(r.block_end==null||r.block_end>=ab));
-          const d=k.length?(k.some(r=>r.commitment==='confirmed')?'Yayın':'Opsiyon'):(u.active===false?'Pasif':'Müsait');
-          const bit=k.length?k[k.length-1]:null;
-          rows.push({mecra:m.name,alan:a.name,poz:yuzlu?p.base:u.name,yuzey:yuzlu?p.surf:'',tur,davranis:'Statik · münhasır',
-            ay:ym,durum:d,kurum:k.map(r=>r.customer_name||'').filter(Boolean).join(' / '),
-            is:k.map(r=>r.work_title||'').filter(Boolean).join(' / '),donem:k.map(donem).filter(Boolean).join(' / '),
-            kesinlik:k.map(kes).join(' / '),kaynak:k.map(r=>r.period_note||'').filter(Boolean).join(' / '),sure:'',
-            bosalma:bit?(bit.record_kind==='legacy'&&bit.date_precision!=='exact'?'Kesin gün bilinmiyor'
-                        :bit.block_end?mdNokta(mdEkle(bit.block_end,1)):'Bitiş bilinmiyor'):'',
-            not:k.map(r=>r.note||'').filter(Boolean).join(' / '),statik:true});
-        });
-      });
-    });
-  });
-  return rows;
-}
-const MD_DISA_SUTUN=[
-  {key:'mecra',label:'Mecra',w:22},{key:'alan',label:'Alan',w:22},{key:'poz',label:'Pozisyon',w:11},
-  {key:'yuzey',label:'Yüz',w:6},{key:'tur',label:'Mecra türü',w:14},{key:'davranis',label:'Davranış',w:20},
-  {key:'ay',label:'Ay',w:9},{key:'durum',label:'Durum',w:10},{key:'kurum',label:'Kurum',w:28},{key:'is',label:'İş',w:28},
-  {key:'donem',label:'Gerçek dönem',w:24},{key:'kesinlik',label:'Kesinlik',w:24},{key:'bosalma',label:'Boşalma (statik)',w:16},
-  {key:'sure',label:'Kreatif süre',w:10},{key:'kaynak',label:'Kaynak ifade / şerit',w:22},{key:'not',label:'Not',w:28}];
 /* S12: Doluluk ekranından müsaitlik raporuna geçiş — seçili lokasyon ve
    uygulanmış müsaitlik aralığı rapora taşınır; ekranın kendisi değişmez. */
 function mdRaporAc(){ const st=mdDurum(); const ms=mdMsAralik(st);
   const p={}; if(st.site!=null) p.siteler=[+st.site]; if(st.urun) p.urun=String(st.urun);
-  if(ms){ p.bas=ms.bas; p.bit=ms.bit; p.cikti='tam'; }
+  if(ms){ p.bas=ms.bas; p.bit=ms.bit; p.tamMusait=true; }
   rpAc('mecra',p); }
-async function mdDisaAktar(){
-  const M=ui._M||await mdYukle(); const st=mdDurum();
-  const y=st.yil||new Date().getFullYear();
-  const aylar=Array.from({length:12},(_,i)=>`${y}-${pad(i+1)}`);
-  let rows=mdAylikSatirlar(M,aylar);
-  if(st.site!=null){ const ad=(M.mecById[st.site]||{}).name; rows=rows.filter(r=>r.mecra===ad); }
-  if(!rows.length){ mpAlert('Aktarılacak kayıt yok.'); return; }
-  await exportRows('doluluk-'+y,'Doluluk '+y,MD_DISA_SUTUN,rows,[
-    ['İş dönemi',`${y} yılı · ay bazlı projeksiyon`],
-    ['Kapsam',st.site!=null?((M.mecById[st.site]||{}).name||''):'Tüm mecra alanları'],
-    ['Not','`Ay` bir projeksiyondur; iş kaydı değildir. Gerçek dönem ve kesinlik ayrı sütunlardadır. Ay bazlı eski kayıtlara gün uydurulmaz.'],
-    ['LED','LED alanları eşzamanlı yayındır: her satır bir kampanyadır, "dolu" değildir. Kapasite / slot tanımlı değildir.']]);
-}
+/* S15: Doluluk ekranının ham Excel dışa aktarımı (mdDisaAktar) kaldırıldı;
+   aynı kayıtların aylık tablosu Raporlar › Mecra doluluk tablosu'dur. */

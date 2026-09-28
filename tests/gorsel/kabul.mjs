@@ -148,11 +148,13 @@ await adim(4, 'Paket bedelini düzenle (2.000 → 2.400 ₺ maliyet)', async () 
   if (sql(`select cost_amount::int from operation_price_groups where job_id=${isId}`) !== '2400') throw new Error('paket güncellenmedi');
 });
 await adim(4, 'Raporda paket bir kez ve güncel tutarla', async () => {
-  await page.evaluate(([k, i]) => rpAc('baski', { kurum: k, isler: [i], _alici: 'ic', tMaliyet: true, tSatis: true }), [K, isId]);
-  await bekle(() => ui._rpModel && ui._rpTur === 'baski' && !rpDurum().yukleniyor);
-  const t = await page.evaluate(() => ui._rpModel.toplamlar.TRY);
-  await foto('s4_rapor');
-  if (t.maliyet !== 2400 || t.satis !== 3500) throw new Error(`toplam ${t.maliyet}/${t.satis}`);
+  const toplam = async alici => {
+    await page.evaluate(([k, i, a]) => rpAc('baski', { sablon: 'dokum', kurum: k, is: i, _alici: a }), [K, isId, alici]);
+    await bekle(() => ui._rpModel && ui._rpTur === 'baski' && !rpDurum().yukleniyor);
+    return page.evaluate(() => ui._rpModel.toplamlar.TRY.tutar); };
+  const maliyet = await toplam('ic'); await foto('s4_rapor');
+  const satis = await toplam('dis');
+  if (maliyet !== 2400 || satis !== 3500) throw new Error(`toplam ${maliyet}/${satis}`);
   return 'maliyet 2.400 ₺, satış 3.500 ₺ (satır tutarları toplama ayrıca girmedi)';
 });
 
@@ -163,7 +165,7 @@ async function indir(dugme, ad) {
 }
 await adim(5, 'Dış paylaşım mecra raporu (PDF + XLSX)', async () => {
   const s = sql(`select string_agg(id::text, ',') from mecralar where operational`).split(',').map(Number);
-  await page.evaluate(x => rpAc('mecra', { siteler: x, bas: '2026-10-01', bit: '2026-12-31', cikti: 'aralik', _alici: 'dis' }), s);
+  await page.evaluate(x => rpAc('mecra', { siteler: x, bas: '2026-10-01', bit: '2026-12-31', _alici: 'dis' }), s);
   await bekle(() => ui._rpModel && ui._rpTur === 'mecra' && !rpDurum().yukleniyor);
   await foto('s5_mecra_onizleme');
   return [await indir('#rpPdfB', 'kabul_mecra'), await indir('#rpXlsB', 'kabul_mecra')].map(x => path.basename(x)).join(', ');
