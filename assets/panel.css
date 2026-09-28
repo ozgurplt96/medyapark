@@ -1239,7 +1239,7 @@ i.tk-p{min-width:10px;height:10px;padding:0;border-radius:3px;}
   border-bottom:1px solid var(--c-line2);border-left:3px solid var(--c-accent);}
 .afilt.neutral{background:var(--c-alt);border-left-color:var(--c-line);}
 .afilt.neutral .afilt-l{color:var(--c-ink3);}
-.afilt-l{font:700 11.5px/1.6 var(--f);letter-spacing:.06em;text-transform:uppercase;color:var(--c-accent);}
+.afilt-l{font:700 11.5px/1.6 var(--f);letter-spacing:.06em;text-transform:uppercase;color:var(--c-accent-d);}
 .afilt-v{font:600 13.5px/1.5 var(--f);color:var(--c-ink);}
 .afilt-n{font-size:12.5px;color:var(--c-ink3);}
 .afilt-x{margin-left:auto;border:1px solid var(--c-accent);background:#fff;color:var(--c-accent);
