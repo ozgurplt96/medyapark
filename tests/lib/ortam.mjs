@@ -29,7 +29,7 @@ export function hedefDogrula() {
 
 /* Test DB'sinde postgres olarak SQL (yalnız doğrulama ve teste ait temizlik). */
 export function sql(q) {
-  return execFileSync('docker', ['exec', '-i', DB_KONTEYNER, 'psql', '-U', 'postgres', '-d', 'postgres', '-tA', '-v', 'ON_ERROR_STOP=1'],
+  return execFileSync('docker', ['exec', '-i', DB_KONTEYNER, 'psql', '-U', 'postgres', '-d', 'postgres', '-qtA', '-v', 'ON_ERROR_STOP=1'],
     { input: q, encoding: 'utf8' }).trim();
 }
 
@@ -91,6 +91,11 @@ export function temizle() {
     delete from entries where contact_id in (select id from contacts where name like 'S13T %');
     delete from contact_affiliations where contact_id in (select id from contacts where name like 'S13T %');
     delete from contacts where name like 'S13T %';
+    delete from customers where firma like 'S13T %';
+    delete from suppliers where firma like 'S13T%';
+    delete from products where name like 'S13T%';
+    delete from pages where slug like 's13t%';
+    delete from notes where konu like 'S13T%';
     update team set active=true where eposta='s13-uye2@test.local';`);
 }
 
@@ -112,6 +117,23 @@ export async function isOlustur(kim, baslik, ek = {}) {
   const r = await rpc(kim, 'job_create', { p_job: { title: ONEK + baslik, status: 'temas_takip', customer_id: kurumId(), ...ek }, p_followers: [] });
   if (r.durum >= 300) throw new Error('job_create: ' + JSON.stringify(r.veri));
   return +(r.veri.id ?? r.veri);
+}
+
+/* S14: kurum seçimleri aranabilir seçicidir; kullanıcı gibi yazıp seçer.
+   `sec` gizli <select>'in seçicisidir (ör. '#jc'). */
+export async function aramaliSec(page, sec, deger) {
+  const id = sec.replace(/^#/, '');
+  const ad = await page.evaluate(([s, v]) => {
+    const o = [...document.querySelector(s).options].find(x => x.value === String(v)); return o ? o.textContent.trim() : null; }, [sec, deger]);
+  if (!ad) throw new Error(`${sec} içinde ${deger} yok`);
+  const kutu = page.locator(`#${id}__ara`);
+  await kutu.click();
+  await kutu.fill(ad);
+  await page.locator(`#${id}__ara_l li[role=option]`).filter({ hasText: ad }).first().click();
+  await expectDeger(page, sec, String(deger));
+}
+async function expectDeger(page, sec, v) {
+  await page.waitForFunction(([s, x]) => document.querySelector(s).value === x, [sec, v]);
 }
 
 /* Açık onay/uyarı penceresi (mpDlg). */

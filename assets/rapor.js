@@ -124,8 +124,8 @@ function rpPdfBelge(m,icerik,o){
     pageSize:boyut, pageOrientation:yon,
     pageMargins:kucuk?[28,40,28,38]:[36,44,36,40],
     info:{title:m.baslik, author:'Medyapark', subject:m.tur, creator:'Medyapark', producer:'Medyapark', keywords:''},
-    header:(p)=>p>1?{columns:[{text:[{text:'MEDYA',bold:true},{text:'PARK',bold:true,color:RPC.accent},{text:'  ·  '+m.baslik,color:RPC.ink2}]},
-        {text:m.tur,alignment:'right',color:RPC.ink3}],fontSize:7.5,margin:kucuk?[28,18,28,0]:[36,20,36,0]}:null,
+    header:(p)=>p>1?{columns:[{width:'*',text:[{text:'MEDYA',bold:true},{text:'PARK',bold:true,color:RPC.accent},{text:'  ·  '+rpKisalt(m.baslik,kucuk?44:78),color:RPC.ink2}],noWrap:true},
+        {width:'auto',text:m.tur,noWrap:true,alignment:'right',color:RPC.ink3,margin:[12,0,0,0]}],fontSize:7.5,margin:kucuk?[28,18,28,0]:[36,20,36,0]}:null,
     footer:(p,n)=>({columns:[{text:'Oluşturulma: '+an+(o.altNot?'  ·  '+o.altNot:''),color:RPC.ink3},
         {text:`Sayfa ${p} / ${n}`,alignment:'right',color:RPC.ink3,width:70}],fontSize:7.5,margin:kucuk?[28,12,28,0]:[36,14,36,0]}),
     content:[...bas,...icerik],
@@ -144,6 +144,10 @@ function rpPdfBelge(m,icerik,o){
     pageBreakBefore:(node,sonraki)=>node.headlineLevel===1&&sonraki.every(n=>n.headlineLevel===1||n.table||n.canvas&&!n.text)
   };
 }
+/* S14: sayfa üst bilgisinde uzun başlık tek satırda, sözcük sınırında ve
+   üç noktayla kısalır (önceden iki satıra taşıp yarım kesiliyordu). */
+function rpKisalt(t,n){ t=String(t||''); if(t.length<=n) return t;
+  const k=t.slice(0,n); const i=k.lastIndexOf(' '); return (i>n*0.6?k.slice(0,i):k).replace(/[\s,·—–-]+$/,'')+'…'; }
 const rpH2=(t,ek)=>({text:t,style:'h2',headlineLevel:1,...(ek||{})});
 const rpH3=(t,ek)=>({text:t,style:'h3',headlineLevel:1,...(ek||{})});
 /* Tablo: başlık her sayfada tekrar eder; satır sayfa sonunda bölünmez. */
@@ -649,7 +653,9 @@ RPD_MECRA={
     if(a.led) K.led.forEach(({m,al})=>{
       (M.byArea[al.id]||[]).filter(r=>r.commitment!=='cancelled'&&r.block_start<=a.bit&&(r.block_end==null||r.block_end>=a.bas))
         .forEach(r=>{ const key='l'+mdKayitKey(r); gorunen.add(key);
-          ledSatir.push({key,m,al,r,tip:r.commitment==='confirmed'?'yayin':'opsiyon',
+          /* S14: ham kayıt (kurum adı, iş adı, not taşır) modele KOPYALANMAZ;
+             yalnız dönem. Kapalı alan dış paylaşım modelinde bulunmamalı. */
+          ledSatir.push({key,m,al,r:{block_start:r.block_start,block_end:r.block_end},tip:r.commitment==='confirmed'?'yayin':'opsiyon',
             s:r.block_start<a.bas?a.bas:r.block_start,e:r.block_end==null||r.block_end>a.bit?a.bit:r.block_end,
             solTasar:r.block_start<a.bas,sagTasar:r.block_end==null||r.block_end>a.bit,acikUc:r.block_end==null,
             kim:kisi(r),not:a.notlar?(r.note||''):''}); }); });
@@ -1210,6 +1216,12 @@ RPD_PLAN={
     return out;
   },
   bosIndirilebilir:true,
+  /* S14: art arda boş günler tek satırda ("Perşembe, 1 Ekim – Pazar, 4 Ekim").
+     Önizleme ve PDF aynı gruplamayı kullanır. */
+  gunGrup(gunler,dolu){ const out=[];
+    gunler.forEach(g=>{ const s=out[out.length-1];
+      if(!dolu(g)&&s&&s.bos) s.son=g.ad; else out.push({ad:g.ad,g,bos:!dolu(g)}); });
+    return out.map(x=>({...x,ad:x.son?`${x.ad} – ${x.son}`:x.ad,cok:!!x.son})); },
   onizle(m,a){
     const T='plan';
     const madde=it=>`<label class="rp2-row ${it.dahil?'':'dis'}">${rpCb(T,it.key,it.dahil,'Plana dahil')}
@@ -1219,7 +1231,7 @@ RPD_PLAN={
     let h='';
     if(m.baskasi) h+='<div class="rp2-not">Bu plan başka bir kişi için: kişisel randevular dahil değildir.</div>';
     if(m.geciken.length) h+=`<h5 class="rp2-g1">Geciken</h5><div class="rp2-rows">${m.geciken.map(madde).join('')}</div>`;
-    m.gunler.forEach(g=>{ h+=`<h5 class="rp2-g1">${esc(g.ad)}</h5>${g.maddeler.length?`<div class="rp2-rows">${g.maddeler.map(madde).join('')}</div>`:'<p class="empty">Bu gün için kayıtlı iş yok.</p>'}`; });
+    RPD_PLAN.gunGrup(m.gunler,g=>g.maddeler.length).forEach(x=>{ h+=`<h5 class="rp2-g1">${esc(x.ad)}</h5>${!x.bos?`<div class="rp2-rows">${x.g.maddeler.map(madde).join('')}</div>`:`<p class="empty">${x.cok?'Bu günlerde':'Bu gün için'} kayıtlı iş yok.</p>`}`; });
     if(a.tarihsiz) h+=`<h5 class="rp2-g1">Tarihi belirlenmemiş</h5>${m.tarihsiz.length?`<div class="rp2-rows">${m.tarihsiz.map(madde).join('')}</div>`:'<p class="empty">Yok.</p>'}`;
     if(a.gelisme) h+=`<h5 class="rp2-g1">Bilmen gereken gelişmeler</h5><p class="fhint">Yalnız etiketlendiğin ve acil güncellemeler seçili gelir; diğerlerini gerekirse ekle. Güncellemeler görev değildir.</p>
       ${m.gelismeler.length?`<div class="rp2-rows">${m.gelismeler.map(madde).join('')}</div>`:'<p class="empty">Bu dönemde gelişme yok.</p>'}`;
@@ -1237,17 +1249,19 @@ RPD_PLAN={
       columnGap:4,margin:[0,0,0,7],unbreakable:true});
     const gelSatir=it=>({stack:[{text:[{text:rpTr(it.gun)+'  ',color:RPC.ink3,fontSize:9},{text:it.baslik},...(it.acil?[{text:'  ACİL',bold:true,color:RPC.kirmizi,fontSize:9}]:[])]},
       ...([it.is,it.kurum].filter(Boolean).length?[{text:[it.is,it.kurum].filter(Boolean).join(' · '),style:'not'}]:[])],margin:[0,0,0,6],unbreakable:true});
+    /* S14: başlık ilk maddesiyle AYNI bölünmez blokta — sayfa sonunda tek
+       başına kalmaz (önceki kural yalnız tabloları tanıyordu). */
+    const bolum=(bas,ogeler,bosMetin,ara)=>{ const b={...(typeof bas==='string'?rpH2(bas):bas),headlineLevel:undefined};
+      if(!ogeler.length){ ic.push({stack:[b,...(ara?[ara]:[]),{text:bosMetin,style:'bos'}],unbreakable:true}); return; }
+      ic.push({stack:[b,...(ara?[ara]:[]),ogeler[0]],unbreakable:true}); ogeler.slice(1).forEach(x=>ic.push(x)); };
+    ic.push({text:'Çevrimdışı kopya: üzerine yapılan işaretler uygulamaya aktarılmaz; tamamlanan işleri uygulamada ayrıca işaretleyin.',style:'not',margin:[0,0,0,8]});
     const ge=m.geciken.filter(x=>x.dahil);
-    if(ge.length){ ic.push(rpH2('Geciken',{color:RPC.kirmizi})); ge.forEach(it=>ic.push(satir(it))); }
-    m.gunler.forEach(g=>{ const md=g.maddeler.filter(x=>x.dahil);
-      ic.push(rpH2(g.ad));
-      if(md.length) md.forEach(it=>ic.push(satir(it))); else { ic.pop(); ic.push({stack:[{...rpH2(g.ad),headlineLevel:undefined},{text:'Bu gün için kayıtlı iş yok.',style:'bos'}],unbreakable:true}); } });
-    if(a.tarihsiz){ const t=m.tarihsiz.filter(x=>x.dahil); ic.push(rpH2('Tarihi belirlenmemiş'));
-      if(t.length) t.forEach(it=>ic.push(satir(it))); else ic.push({text:'Yok.',style:'bos'}); }
-    if(a.gelisme){ const g=m.gelismeler.filter(x=>x.dahil); ic.push(rpH2('Bilmen gereken gelişmeler'));
-      ic.push({text:'Bilgi içindir; yapılacak iş değildir.',style:'not',margin:[0,0,0,6]});
-      if(g.length) g.forEach(it=>ic.push(gelSatir(it))); else ic.push({text:'Seçilmiş gelişme yok.',style:'bos'}); }
-    ic.push({text:'Bu PDF çevrimdışı kullanım içindir. Üzerine yapılan işaretler uygulamaya aktarılmaz; tamamlanan işleri uygulamada ayrıca işaretleyin.',style:'not',margin:[0,14,0,0]});
+    if(ge.length) bolum(rpH2('Geciken',{color:RPC.kirmizi}),ge.map(satir));
+    RPD_PLAN.gunGrup(m.gunler,g=>g.maddeler.some(x=>x.dahil)).forEach(x=>
+      bolum(x.ad,x.bos?[]:x.g.maddeler.filter(y=>y.dahil).map(satir),x.cok?'Bu günlerde kayıtlı iş yok.':'Bu gün için kayıtlı iş yok.'));
+    if(a.tarihsiz) bolum('Tarihi belirlenmemiş',m.tarihsiz.filter(x=>x.dahil).map(satir),'Yok.');
+    if(a.gelisme) bolum('Bilmen gereken gelişmeler',m.gelismeler.filter(x=>x.dahil).map(gelSatir),'Seçilmiş gelişme yok.',
+      {text:'Bilgi içindir; yapılacak iş değildir.',style:'not',margin:[0,0,0,6]});
     return {icerik:ic,o:{yon:'portrait',boyut:'A5',altNot:'Çevrimdışı kopya'}};
   }
 };
@@ -1288,7 +1302,7 @@ RPD_IS={
         ${jobs.some(j=>j.lifecycle_status==='kapandi'&&j.id!==a.is)?`<optgroup label="Arşiv">${jobs.filter(j=>j.lifecycle_status==='kapandi'&&j.id!==a.is).map(j=>`<option value="${j.id}">${esc(j.title||'#'+j.id)}</option>`).join('')}</optgroup>`:''}</select></div>
       ${rpTarihKontrol(T,a,'bas','bit',['Geçmiş başlangıcı (isteğe bağlı)','Geçmiş bitişi (isteğe bağlı)'])}
       <div class="field"><span class="flabel">Bölümler</span><div class="rp2-chips col">
-        ${rpChk(T,'kisiler',a.kisiler,'İlgili kişiler','iletişim bilgisi')}
+        ${rpChk(T,'kisiler',a.kisiler,'Taraflar ve ilgili kişiler','iletişim bilgisi')}
         ${rpChk(T,'guncelleme',a.guncelleme,'Güncellemeler','iç yazışma — tek tek seçilir')}
         ${rpChk(T,'hareket',a.hareket,'Önemli hareketler','aşama, yaşam döngüsü, sözleşme…')}
         ${rpChk(T,'muhasebe',a.muhasebe,'Muhasebe hareketleri')}
@@ -1376,7 +1390,7 @@ RPD_IS={
     const sat=(x,ic)=>`<label class="rp2-row ${x.dahil?'':'dis'}">${rpCb(T,x.key,x.dahil)}${ic}</label>`;
     let h=`<div class="rp2-ozetkart"><b>${esc(o.is)}</b><span>${esc(o.kurum)}</span>
       <span>Durum (${esc(o.an)} itibarıyla): <b>${esc(o.asama)}</b> · ${esc(o.yasam)}${o.acil?' · Acil':''}</span>${o.donem?`<span>Dönem: ${esc(o.donem)}</span>`:''}</div>`;
-    if(m.kisiler) h+=`<h5 class="rp2-g1">İlgili kişiler</h5>${m.kisiler.length?m.kisiler.map(k=>`<p class="rp2-ozet"><b>${esc(k.ad)}</b> — ${esc(k.rol)}${k.tel?' · '+esc(k.tel):''}${k.eposta?' · '+esc(k.eposta):''}</p>`).join(''):'<p class="empty">Kayıtlı kişi yok.</p>'}
+    if(m.kisiler) h+=`<h5 class="rp2-g1">Taraflar ve ilgili kişiler</h5>${m.kisiler.length?m.kisiler.map(k=>`<p class="rp2-ozet"><b>${esc(k.ad)}</b> — ${esc(k.rol)}${k.tel?' · '+esc(k.tel):''}${k.eposta?' · '+esc(k.eposta):''}</p>`).join(''):'<p class="empty">Kayıtlı kişi yok.</p>'}
       ${m.ekip&&m.ekip.length?`<p class="rp2-ozet">Medyapark ekibi: ${esc(m.ekip.join(', '))}</p>`:''}`;
     h+=`<h5 class="rp2-g1">Geçmiş</h5>${m.zaman.length?`<div class="rp2-rows">${m.zaman.map(x=>sat(x,`<span class="rp2-tarih-c">${esc(rpTr(x.gun))}</span>
       <span class="rp2-tip ${x.tip}">${x.tip==='hareket'?'Hareket':'Güncelleme'}</span><span class="rp2-det">${esc(x.metin)}${x.kim?` <em>${esc(x.kim)}</em>`:''}</span>`)).join('')}</div>`:'<p class="empty">Seçilen bölümlerde geçmiş kaydı yok.</p>'}`;
@@ -1395,7 +1409,7 @@ RPD_IS={
       [{text:'Mevcut durum',color:RPC.ink3},{text:[{text:o.asama,bold:true},' · '+o.yasam+(o.acil?' · Acil':''),{text:`   (${o.an} itibarıyla)`,color:RPC.ink3,fontSize:8.5}]}]]},
       layout:{hLineWidth:()=>0,vLineWidth:()=>0,fillColor:()=>RPC.soft,paddingLeft:()=>8,paddingRight:()=>8,paddingTop:()=>5,paddingBottom:()=>5},margin:[0,0,0,8]});
     if(m.kisiler){
-      ic.push(rpBolum('İlgili kişiler',[{b:'Ad',g:150},{b:'Rol',g:'*'},{b:'Telefon',g:90},{b:'E-posta',g:130}],m.kisiler.map(k=>[{text:k.ad,bold:true},k.rol,k.tel||'—',k.eposta||'—']),'Kayıtlı kişi yok.'));
+      ic.push(rpBolum('Taraflar ve ilgili kişiler',[{b:'Ad',g:150},{b:'Rol',g:'*'},{b:'Telefon',g:90},{b:'E-posta',g:130}],m.kisiler.map(k=>[{text:k.ad,bold:true},k.rol,k.tel||'—',k.eposta||'—']),'Kayıtlı kişi yok.'));
       if(m.ekip&&m.ekip.length) ic.push({text:'Medyapark ekibi: '+m.ekip.join(', '),style:'not',margin:[0,0,0,6]}); }
     const z=m.zaman.filter(x=>x.dahil);
     if(a.guncelleme||a.hareket){

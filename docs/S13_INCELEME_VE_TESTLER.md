@@ -1,7 +1,11 @@
-# Sprint 13 — Uygulama geneli inceleme, düzeltmeler ve regresyon paketi
+# Sprint 13–14 — Uygulama geneli inceleme, düzeltmeler ve regresyon paketi
 
-Tarih: 27 Eylül 2026 · Dal: `ozgur/s13-audit-ux` → `ozgur/local-dev`
-Migration: `20260930100000_ps13_erisim_ve_butunluk.sql` (toplam 29)
+S13: 27 Eylül 2026 · `ozgur/s13-audit-ux` · migration `20260930100000_ps13_erisim_ve_butunluk.sql`
+S14: 28 Eylül 2026 · `ozgur/s14-guvenilirlik` · migration `20261001100000_ps14_islem_tekillik.sql`,
+`20261001110000_ps14_yonetim_surum.sql` (toplam 31)
+
+Tek bulgu listesidir: S14 bulguları aynı tabloya B26'dan itibaren eklendi,
+S13'ün açık bıraktığı maddelerin durumu §4'te güncellendi.
 
 Bu not; neyin nasıl denendiğini, bulunan hataları ve durumlarını, testlerin
 nasıl çalıştırıldığını ve sonraki sprinte bırakılanları özetler. Gerçek
@@ -28,11 +32,18 @@ migration uygulandı.
 | F · Oturum ve gezinme | başka sekmede çıkış, hesabın pasife alınması, hızlı ekran değişimi, tarayıcı Geri/İleri, sayfa yenileme | hata bulundu → düzeltildi, testli (yenileme → S14) |
 | Erişim (OWASP WSTG temelli) | anonim, aktif üye, yönetici, pasif üye, ekip kaydı olmayan oturum; tablo/RPC/depo/görünüm yoklaması; XSS; tehlikeli URL; Excel formülü; tarayıcıdaki anahtarlar | hata bulundu → düzeltildi, testli |
 | Görünüm | 1440 / 768 / 390 px, %200 yakınlaştırma (720 px) ve 320 px yeniden akış; 15 ekran/pencere | düzeltildi, otomatik ölçüm |
+| **S14** · Kayıp yanıt ve yeniden deneme | iş, mecra yerleşimi, baskı/montaj, belge: sunucuda COMMIT olup yanıtı düşürülen istek; formda kal / sonucu kontrol et / sayfa yenile; farklı içerikle tekrar; eşzamanlı aynı istek; başka üye; pasif üye; yükleme yanıtı kaybı; yarım yükleme temizliği | hata bulundu → düzeltildi, testli (eski istemcide düşüyor) |
+| **S14** · Adres, yenileme, Geri/İleri | yenileme, doğrudan bağlantı + giriş, alt sekme, mecra lokasyon/dönem, açık belge, bulunamayan kayıt, yetkisiz yönetim adresi, kaydedilmemiş formda elle adres | düzeltildi, testli |
+| **S14** · Aranabilir kurum seçici | 600+ kayıt, Türkçe arama, benzer adlar, klavye, Esc, temizle, düzenlemede mevcut değer, kirli form, 390 px pencere içinde | düzeltildi, testli |
+| **S14** · Yönetim formları | tedarikçi, ürün, sayfa, not: eşzamanlı değişiklik, bayat liste, değişikliksiz kayıt, hata sonrası taslak, sunucu doğrulaması, yetki | hata bulundu → düzeltildi, testli |
+| **S14** · Rapor hesapları ve dosyalar | mecra: tam dönem, aralık, A/B, ardışık yenileme, süresi dolmuş opsiyon, iptal, LED ayrımı, özet; dört raporun PDF/XLSX'i sayfa sayfa görsel | hata bulundu → düzeltildi; hesaplar testli, dosyalar elle incelendi |
+| **S14** · Klavye | yalnız klavyeyle iş oluşturma (kurum seçimi dahil) ve aşama değişikliği; onay penceresinde odak | hata bulundu → düzeltildi, testli |
 
 **Otomatik ölçümün sınırı:** kontrast, etiketsiz denetim ve yatay taşma
-ölçümü script ile 15 ekranda yapıldı (sonuç: beş genişlikte 0). Bu bir
-WCAG 2.2 AA uygunluk denetimi **değildir**; ekran okuyucuyla deneme
-yapılmadı.
+ölçümü script ile S13'te 15, S14'te 21 ekranda yapıldı (sonuç: beş
+genişlikte 0). Bu bir WCAG 2.2 AA uygunluk denetimi **değildir**. Ekran
+okuyucuyla deneme **yapılmadı** (bu ortamda otomatikleştirilebilir bir ekran
+okuyucu yok); klavye akışları test edildi.
 
 ---
 
@@ -69,8 +80,29 @@ engelleyen davranış · **P3** hijyen/küçük görsel.
 | B23 | P3 | Pencerede Tab dışarı kaçıyor, arka sayfa kayıyor, uzun formda düğmeler görünmüyor | odak tuzağı, kaydırma kilidi, yapışkan alt şerit | elle |
 | B24 | P3 | Başka yıla ait tarihlerde yıl yazmıyordu | yıl eklenir | elle |
 | B25 | P3 | Küçük seçim kutusunda metin kırpılıyor; aktif filtre çerçevesi hata gibi kırmızıydı | düzeltildi | elle |
+| B26 | P2 | **S14** · Kayıp yanıttan sonra tekrar gönderim iş, yerleşim, işlem ve belgede ikinci kayıt ve ikinci Hareket üretiyordu | sunucuda işlem tekillik anahtarı: anahtar iş verisiyle aynı işlemde kaydedilir, tekrar ilk sonucu döner, farklı içerik reddedilir (409), eşzamanlı tekrar bekleyip aynı sonucu alır, hata anahtarı kilitlemez, kapsam ekip üyesi + işlem türü, sonuç döndürülmeden yetki yeniden denetlenir. Arayüz "sonuç doğrulanamadı" der; "Sonucu kontrol et", formda kal, kapanış/yenilemede arka planda sorgu (oturum deposu: en çok 10 girişim, 24 saat, form içeriği yok) | e2e tekrar (eski istemcide düşüyor), access-checks 8 |
+| B27 | P2 | **S14** · Belge: yükleme yanıtı kaybolunca tekrar yeni yola ikinci dosya yüklüyordu; kayıt yanıtı kaybolunca doğrulama sorgusu da başarısızsa istemci yüklenen dosyayı silmeye çalışıyor, tekrar ikinci belge oluşturuyordu | dosya yolu öğe başına bir kez üretilir, "zaten var" yanıtı bu girişimin dosyası sayılır; belirsiz sonuçta dosya silinmez; kayıt adımı tekillik anahtarlı; belgeye bağlanmamış eski yüklemeler Belgeler'de görünür ve açık onayla temizlenir (belgeye bağlı dosya bu yoldan silinemez) | e2e tekrar |
+| B28 | P2 | **S14** · Adres çubuğunda ekran yoktu: yenileme varsayılan ekrana atıyor, bağlantı paylaşılamıyordu | mevcut history katmanına okunabilir karma adres (`#/is/42`, `#/hafiza?sekme=…`, `#/mecralar?lok=…&donem=…`, `?belge=…`); açılışta ve elle adres değişiminde hedef açılır; giriş sonrası hedefe dönülür; kaydedilmemiş formda vazgeçilirse adres geri yazılır; adreste taslak, not, anahtar ya da imzalı adres yok | e2e adres |
+| B29 | P3 | **S14** · Doğrudan bağlantıda silinmiş ya da yetkisiz kayıt uyarı verip önceki ekranda kalıyordu | açık "bulunamadı / görme yetkiniz yok" ekranı (RLS'in gizlediği kayıtla silinmiş kayıt aynı yanıtı verir), ağ hatasında "Tekrar dene"; konsolda 406 yok | e2e adres |
+| B30 | P2 | **S14** · Kurum seçimleri 500+ seçenekli yerel liste; baskı/montaj ve taraf formlarında liste sessizce 800'de kesiliyor, kurum okuması PostgREST 1000 satır tavanındaydı | ortak aranabilir seçici (gizli `<select>` değer kaynağı olarak kalır): Türkçe harf katlama, önek + alfabetik sıra, VKN/adres ek bilgisi, klavye, Esc yalnız listeyi kapatır, gösterilmeyen sonuç sayısı yazılır; sayfalı okuma, kesme kaldırıldı | e2e seçici |
+| B31 | P1 | **S14** · Yeni sayfa `upsert` ile kaydediliyordu: aynı adresli yayındaki bir sayfanın başlığı ve içeriği boş sayfayla eziliyordu | yeni sayfa insert; çakışmada açık uyarı | e2e yönetim |
+| B32 | P2 | **S14** · Tedarikçi, ürün, sayfa, not formları önbellekten açılıp satırın tamamını yazıyor, eşzamanlı değişikliği eziyordu; ürün ve not kaydı hata yakalamıyor, yetkisiz güncelleme (0 satır) başarı sanılıyordu | tek ortak koşullu kayıt yolu: DB'den tam okuma, yalnız değişen alan, `updated_at` sürüm damgası (tetikleyici), değişiklik yoksa yazma ve günlük yok, hatada taslak korunur; zorunlu alanlar sunucuda (NOT VALID kısıt) | e2e yönetim, access-checks 9 |
+| B33 | P2 | **S14** · Mecra raporunda LED satırları ham kaydı (kurum adı, iş adı, not) dış paylaşım modeline taşıyordu; dosyaya yazılmıyordu ama "kapatılan alan modele girmez" kuralı bozuktu | modele yalnız dönem kopyalanır | e2e mecra raporu (eski kodda düşüyor) |
+| B34 | P2 | **S14** · Kişisel plan PDF'inde gün başlığı sayfa sonunda tek kalıyor, son sayfa tek cümleden oluşuyor, boş günler ayrı ayrı yer kaplıyordu | başlık ilk maddesiyle bölünmez; çevrimdışı notu başta; art arda boş günler tek satır (önizleme de aynı) | PDF görsel (3 → 2 sayfa) |
+| B35 | P3 | **S14** · İş özeti PDF'inde uzun başlık sayfa üst bilgisinde iki satıra taşıp yarım kesiliyordu; "İlgili kişiler" kurum tarafını da listeliyordu | tek satır + sözcük sınırında "…"; bölüm adı "Taraflar ve ilgili kişiler" | PDF görsel |
+| B36 | P2 | **S14** · İş aşaması klavyeyle seçilince gösterge yeniden çiziliyor, odak sayfanın başına düşüyordu | odak aynı aşama düğmesine döner | e2e klavye |
+| B37 | P3 | **S14** · Mecralar Doluluk/Harita sekme değişimi ekran-numarası korumasının dışındaydı | korumalı çizim yolu | kod incelemesi |
+| B38 | P3 | **S14** · Hareketler satırı üzerine gelince ok 4.41:1 kontrast | koyu vurgu tonu | ölçüm: 0 |
 
-Değişiklik gerektirmeden doğrulananlar: rol matrisi (başkasının ajandası,
+S14'te değişiklik gerektirmeden doğrulananlar: mecra raporu hesapları
+bağımsız beklentiyle (ardışık yenileme sahte boşluk üretmiyor, A/B bağımsız,
+süresi dolmuş opsiyon blokluyor, iptal bloklamıyor, LED statik orana
+girmiyor); baskı/montaj toplamı paket düzenlemesinden sonra (40.710 ₺ /
+68.700 ₺, paket bir kez); XLSX'lerde gerçek tarih/sayı hücreleri, sabit
+başlık, filtre, A4 yatay sığdırma, tekrarlanan başlık satırı, gizli sayfa ve
+formül yok; PDF'lerde gömülü yazı tipi ve tekrarlanan tablo başlıkları.
+
+S13'te değişiklik gerektirmeden doğrulananlar: rol matrisi (başkasının ajandası,
 rol yükseltme, imzalı URL, yerleşim/paket yazımı), çift tıklamada tek kayıt,
 XSS yükü (akış, iş sayfası, rapor önizlemesi), eşzamanlı statik yerleşimde
 tek kazanan, toplu yerleşimde ya hep ya hiç, Excel'de `=`/`+` ile başlayan
@@ -106,7 +138,7 @@ Sabit gelecek dönemler kullanılır (yerleşim/işlem tarihleri 2031, randevu
 2027) — "bugün"e bağlı sonuç yoktur. Sabit bekleme yoktur; testler
 gözlenebilir durumu bekler.
 
-**Kapsam** (`tests/e2e`, 44 senaryo):
+**Kapsam** (`tests/e2e`; S13 44 senaryo, S14 ile toplam §5'te):
 
 - iş oluşturma: başarı, çift tık, ağ/sunucu hatası ve kayıp yanıtta yarım kayıt yok
 - Pano aşama taslağı: ok yazmaz, Vazgeç, Kaydet tek Hareket
@@ -121,28 +153,45 @@ gözlenebilir durumu bekler.
 - oturum: başka sekmede çıkış, pasife alma; gezinme yarışı; Geri/İleri
 - İşler › Liste sıralamasının klavyeyle yapılması
 - Excel'de formül enjeksiyonu yok; belge bağlantısında yalnız `https`
+- **S14:** dört oluşturma yolunda kayıp yanıt (sunucuda COMMIT + yanıt düşürülür) → tek kayıt, tek Hareket, tek dosya; sonucu kontrol et; yenileme sonrası bildirim; farklı içerik reddi; eşzamanlılık; yarım yükleme temizliği
+- **S14:** adres, yenileme, giriş sonrası hedef, Geri/İleri, bulunamayan kayıt, açık belge, mecra dönemi, kaydedilmemiş form
+- **S14:** aranabilir seçici (500+ kayıt, Türkçe, klavye, mobil, diğer formlar)
+- **S14:** yönetim formları (eşzamanlılık, bayat liste, değişikliksiz kayıt, hata, sayfa ezme, sunucu doğrulaması)
+- **S14:** mecra raporu hesapları (bağımsız beklenti), dış paylaşım modeli, yalnız seçili kayıtların Excel'i
+- **S14:** yalnız klavyeyle iş oluşturma ve aşama değişikliği; onay penceresinde odak
 
-SQL değişmezleri: `scripts/access-checks.sql` (7) ve `scripts/media-checks.sql` (8),
+SQL değişmezleri: `scripts/access-checks.sql` (9) ve `scripts/media-checks.sql` (8),
 ikisi de salt okunur; çalışma DB'sinde de çalıştırılabilir.
 
 Hata olursa ekran görüntüsü ve iz dosyası `tests/test-results/`, özet
 `tests/playwright-report/index.html` altına yazılır (Git dışı).
 
 Görsel ölçüm (isteğe bağlı): `node tests/gorsel/cek.mjs <klasör>`;
-`MP_VP="720x450,320x640"` ile genişlikler değiştirilir. Çıktı klasörü Git
-dışında tutulmalıdır.
+`MP_VP="720x450,320x640"` ile genişlikler değiştirilir. Temsili rapor
+dosyaları: `node tests/gorsel/raporlar.mjs <klasör>` (test yığınında sentetik
+veriyle dört raporun PDF/XLSX'i). Çıktı klasörleri Git dışında tutulmalıdır.
 
 ---
 
-## 4. Sprint 14'e bırakılanlar
+## 4. Açık liste (S13'ün bıraktıkları ve durumları)
 
-| Önem | Konu | Neden şimdi değil |
+| S13 maddesi | Durum |
+|---|---|
+| Kayıp yanıttan sonra mükerrer kayıt (iş, yerleşim, işlem, belge) | **kapandı** — B26, B27 |
+| Adres çubuğunda ekran yok | **kapandı** — B28, B29 |
+| Ekran içi alt panellerde sıra koruması | **kapandı** — B37 (Panelim Hareketler zaten korumalı yoldaydı) |
+| Yönetim formları (tedarikçi, ürün, sayfa, not) | **kapandı** — B31, B32; ekip formu kapsam dışında kaldı (aşağıda) |
+| Kurum seçimi 500+ seçenek | **kapandı** — B30 |
+| Mecra müsaitlik raporu ve PDF içeriği otomatik testte değil | **kısmen** — mecra hesapları ve dış paylaşım modeli testli; PDF'ler sayfa sayfa elle incelendi, içerik otomatik karşılaştırılmıyor |
+| Ekran okuyucuyla gerçek deneme | **açık** — bu ortamda yapılamadı |
+
+Kalan düşük öncelikli işler (bilinen açık P0/P1 yok):
+
+| Önem | Konu | Not |
 |---|---|---|
-| P2 | **Kayıp yanıttan sonra tekrar deneme mükerrer kayıt üretebilir** (iş, yerleşim, işlem, belge oluşturma). S13 iletiyi dürüst yaptı; kalıcı çözüm oluşturma RPC'lerine istemci üretimli tekillik anahtarı | tüm oluşturma yollarında şema + RPC değişikliği |
-| P2 | Adres çubuğunda ekran yok: sayfa yenilenince varsayılan ekrana dönülür, bağlantı paylaşılamaz | gezinme modelinde URL kararı gerekir |
-| P2 | Ekran içi alt paneller (ör. Panelim Hareketler sekmesi, Mecralar alt sekmesi) kendi isteklerinde sıra koruması taşımıyor; ekran düzeyinde koruma var | düşük gözlenen etki |
-| P3 | Yönetim formları (tedarikçi, ürün, sayfa, not, ekip) satırın tamamını yazar ve eşzamanlılık denetimi yoktur | yalnız yönetici, düşük eşzamanlılık; S13'teki kurum/kişi desenine taşınmalı |
-| P3 | Kurum seçimi 500+ seçenekli yerel `<select>`; aranabilir seçici | UI bileşeni kararı |
-| P3 | Mecra müsaitlik raporu ve PDF çıktılarının içeriği otomatik testte değil (PDF sıkıştırılmış); Excel ve model testli | test altyapısı |
-| P3 | Ekran okuyucuyla gerçek deneme yapılmadı | ayrı erişilebilirlik turu |
+| P3 | Güncelleme (Entry) oluşturmada tekillik anahtarı yok: kayıp yanıttan sonra tekrar ikinci güncelleme üretebilir | S14'ün dört zorunlu yolu dışında; aynı desen `entry_create_with_documents`'e uygulanabilir |
+| P3 | Ekip formu (yalnız yönetici) hâlâ satırın tamamını yazar | kayıt sayısı çok az; aynı ortak koşullu kayıt yoluna taşınabilir |
+| P3 | Aranabilir seçici yalnız kurum listelerinde; eski tedarikçi, mecra ve iş seçicileri yerel liste | listeler kısa; gerekirse aynı `data-ara` işaretiyle |
+| P3 | PDF içerik doğrulaması otomatik değil | görsel inceleme her sürümde tekrarlanmalı |
+| P3 | Ekran okuyucu denemesi | ayrı erişilebilirlik turu |
 | — | Bilinen, engel olmayan: Google Maps anahtarı localhost'a izinli değil; `/favicon.ico` 404 | yerel ortam |

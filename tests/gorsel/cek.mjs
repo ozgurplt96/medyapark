@@ -9,6 +9,11 @@ import { APP, hedefDogrula, girisYap, sql } from '../lib/ortam.mjs';
 hedefDogrula();
 const cikti = process.argv[2] || 'gorsel-cikti';
 fs.mkdirSync(cikti, { recursive: true });
+/* S14: çok kayıtlı ve uzun adlı sentetik veri (sonraki test koşusu temizler). */
+if (!+sql(`select count(*) from customers where firma like 'S13T Kurum %'`))
+  sql(`insert into customers (firma) select 'S13T Kurum ' || lpad(g::text,3,'0') from generate_series(1,600) g;
+       insert into customers (firma, vergi_no, adres) values ('S13T İstanbul Şişe Çam Sanayi ve Ticaret Anonim Şirketi Uzun Unvanlı Bölge Müdürlüğü', '1111111111', 'Seyhan, Adana')`);
+const UZUN = +sql(`select coalesce(max(id),0) from jobs where title like 'S13T Çok uzun adlı%'`);
 const J = +sql('select id from jobs where sort=9301');
 const K = +sql('select customer_id from jobs where sort=9301');
 const OP = +sql('select min(id) from work_operations where job_id=' + J);
@@ -29,6 +34,12 @@ const EKRAN = [
   ['m_guncelleme', p => p.evaluate(id => qcAc({ jobId: id }), J)],
   ['m_operasyon', p => p.evaluate(([o, j]) => opForm(o, j), [OP, J])],
   ['m_yerlesim', p => p.evaluate(() => mForm({ hedefler: [] }))],
+  ['secici_acik', async p => { await p.evaluate(() => jobForm()); await p.locator('#jc__ara').click(); await p.locator('#jc__ara').pressSequentially('kurum 01'); }],
+  ['secici_uzun', async p => { await p.evaluate(() => jobForm()); await p.locator('#jc__ara').click(); await p.locator('#jc__ara').pressSequentially('istanbul'); }],
+  ['bulunamadi', async p => { await p.evaluate(() => { location.hash = '#/is/987654321'; }); await p.waitForFunction(() => /bulunamad/.test(document.getElementById('content').innerText)); }],
+  ['uzun_is', p => p.evaluate(id => id ? workAc(id) : go('is-takibi'), UZUN)],
+  ['hareketler', p => p.evaluate(async () => { await go('workspace-home'); if (typeof hrGor === 'function') await hrGor('hareket'); })],
+  ['ajandam', p => p.evaluate(async () => { await go('workspace-home'); ajandaGor('takvim'); })],
 ];
 /* MP_VP="720x450,320x640" ile değiştirilebilir (200% yakınlaştırma ≈ 720px, WCAG yeniden akış 320px). */
 const VP = process.env.MP_VP ? process.env.MP_VP.split(',').map(x => { const [w, h] = x.split('x').map(Number); return [String(w), w, h]; })
@@ -45,7 +56,7 @@ for (const [vpAd, w, h] of VP) {
   await girisYap(page, 'uye');
   for (const [ad, ac] of EKRAN) {
     hatalar.length = 0;
-    await page.evaluate(() => { try { closeModal(); } catch (e) {} });
+    await page.evaluate(() => { const d = document.getElementById('mpDlgBg'); if (d) d.remove(); try { closeModal(); } catch (e) {} });
     await ac(page);
     await page.waitForLoadState('networkidle');
     await page.waitForFunction(() => !document.querySelector('#content .muted') || !/Yükleniyor|okunuyor/.test(document.querySelector('#content').innerText.slice(0, 80)));

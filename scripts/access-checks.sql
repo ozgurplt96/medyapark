@@ -86,5 +86,28 @@ begin
   if v <> 1 then raise exception 'DENETİM 7 DÜŞTÜ: paket Hareket tetikleyicisi yok'; end if;
   raise notice 'DENETİM 7 ✓ paket bedeli Hareket tetikleyicisi yerinde';
 
-  raise notice '--- 7/7 DENETİM GEÇTİ ---';
+  ---------------------------------------------------------------- 8
+  -- PS14: işlem tekillik anahtarları istemciye kapalı (RLS açık, doğrudan
+  -- yetki yok); dört oluşturma yolu anahtar kabul eder.
+  select count(*) into v from pg_class where oid = 'public.islem_anahtarlari'::regclass and relrowsecurity;
+  if v <> 1 then raise exception 'DENETİM 8 DÜŞTÜ: islem_anahtarlari RLS kapalı'; end if;
+  select count(*) into v from information_schema.role_table_grants
+   where table_schema = 'public' and table_name = 'islem_anahtarlari' and grantee in ('anon', 'authenticated');
+  if v > 0 then raise exception 'DENETİM 8 DÜŞTÜ: islem_anahtarlari istemciye açık (% yetki)', v; end if;
+  select count(*) into v from pg_proc
+   where pronamespace = 'public'::regnamespace
+     and proname in ('job_create', 'media_placements_create', 'operations_batch_create', 'document_create')
+     and pg_get_function_identity_arguments(oid) like '%p_islem uuid';
+  if v <> 4 then raise exception 'DENETİM 8 DÜŞTÜ: % / 4 oluşturma yolu anahtar kabul ediyor', v; end if;
+  raise notice 'DENETİM 8 ✓ işlem tekillik anahtarı yerinde ve istemciye kapalı';
+
+  ---------------------------------------------------------------- 9
+  -- PS14: yönetim kayıtlarında sürüm damgası (koşullu kayıt) tetikleyicisi.
+  select count(*) into v from pg_trigger
+   where tgname = 'trg_surum_damgasi' and not tgisinternal
+     and tgrelid in ('public.suppliers'::regclass, 'public.products'::regclass, 'public.pages'::regclass, 'public.notes'::regclass);
+  if v <> 4 then raise exception 'DENETİM 9 DÜŞTÜ: sürüm damgası % / 4 tabloda', v; end if;
+  raise notice 'DENETİM 9 ✓ yönetim kayıtlarında sürüm damgası yerinde';
+
+  raise notice '--- 9/9 DENETİM GEÇTİ ---';
 end $$;

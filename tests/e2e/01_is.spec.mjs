@@ -1,6 +1,6 @@
 // İş oluşturma bütünlüğü, Pano aşama taslağı ve eşzamanlı düzenleme çakışması.
 import { test, expect } from '@playwright/test';
-import { girisYap, sql, rest, isOlustur, kurumId, teamId, dlg, ONEK, temizle } from '../lib/ortam.mjs';
+import { girisYap, sql, rest, isOlustur, kurumId, teamId, dlg, ONEK, temizle, aramaliSec } from '../lib/ortam.mjs';
 
 /* Her test yalnız kendi işaretli verisiyle başlar (tekrar/sıra bağımsız). */
 test.beforeEach(() => temizle());
@@ -12,7 +12,7 @@ async function yeniIsFormu(page, baslik) {
   await page.evaluate(() => jobForm());
   await expect(page.locator('#modalBg.open #jt')).toBeVisible();
   await page.fill('#jt', ONEK + baslik);
-  await page.selectOption('#jc', String(kurumId()));
+  await aramaliSec(page, '#jc', kurumId());
 }
 
 test.describe('İş oluşturma', () => {
@@ -67,8 +67,11 @@ test.describe('İş oluşturma', () => {
     await page.route('**/rest/v1/rpc/job_create', async r => { await r.fetch(); await r.abort('failed'); });
     await yeniIsFormu(page, 'Kayıp yanıt');
     await page.locator('#modal').getByRole('button', { name: 'Oluştur', exact: true }).click();
-    await expect(dlg(page)).toContainText('kesin değil');
-    await page.locator('#mpDlgOk').click();
+    /* S14: sonuç "doğrulanamadı" — ne "kaydedilmedi" ne "kaydedildi" denir. */
+    await expect(dlg(page)).toContainText('sonucu doğrulanamadı');
+    await expect(dlg(page)).not.toContainText('kaydedilmedi');
+    await page.locator('#mpDlgOk').click();                              // Sonucu kontrol et
+    await expect(page.locator('#wFaz')).toBeVisible();
     expect(isSay('Kayıp yanıt')).toBe(1);   // sunucuda tek ve tam kayıt (yarım değil)
     const id = say(`select id from jobs where title='${ONEK}Kayıp yanıt'`);
     expect(say(`select count(*) from work_parties where job_id=${id}`)).toBe(1);
