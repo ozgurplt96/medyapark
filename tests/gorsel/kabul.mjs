@@ -87,7 +87,7 @@ await adim(2, 'Opsiyonu yayına çevir', async () => {
 });
 await adim(2, 'Takvimde doğrula', async () => {
   await page.evaluate(p => medyaOdak(p, { ayrinti: false }), pid);
-  await bekle(() => document.querySelector('.mtl-bar, [data-pid]'));
+  await bekle(() => document.querySelector('.mtb-b, [data-pid]'));
   await page.waitForTimeout(400);
   await foto('s2_takvim'); return await page.evaluate(() => location.hash);
 });
@@ -148,14 +148,12 @@ await adim(4, 'Paket bedelini düzenle (2.000 → 2.400 ₺ maliyet)', async () 
   if (sql(`select cost_amount::int from operation_price_groups where job_id=${isId}`) !== '2400') throw new Error('paket güncellenmedi');
 });
 await adim(4, 'Raporda paket bir kez ve güncel tutarla', async () => {
-  const toplam = async alici => {
-    await page.evaluate(([k, i, a]) => rpAc('baski', { sablon: 'dokum', kurum: k, is: i, _alici: a }), [K, isId, alici]);
-    await bekle(() => ui._rpModel && ui._rpTur === 'baski' && !rpDurum().yukleniyor);
-    return page.evaluate(() => ui._rpModel.toplamlar.TRY.tutar); };
-  const maliyet = await toplam('ic'); await foto('s4_rapor');
-  const satis = await toplam('dis');
-  if (maliyet !== 2400 || satis !== 3500) throw new Error(`toplam ${maliyet}/${satis}`);
-  return 'maliyet 2.400 ₺, satış 3.500 ₺ (satır tutarları toplama ayrıca girmedi)';
+  /* S16: işe özel döküm İş dökümündedir; raporlar iç kullanımdır (maliyet). */
+  await page.evaluate(i => rpAc('is', { is: i }), isId);
+  await bekle(() => ui._rpModel && ui._rpTur === 'is' && ui._rpModel.ozet && !rpDurum().yukleniyor);
+  const maliyet = await page.evaluate(() => ui._rpModel.baski.toplamlar.TRY.tutar); await foto('s4_rapor');
+  if (maliyet !== 2400) throw new Error(`toplam ${maliyet}`);
+  return 'maliyet 2.400 ₺ (satır tutarları toplama ayrıca girmedi)';
 });
 
 /* 5 — Dış paylaşım mecra raporu + kişisel plan; uygulama dışında açılır */

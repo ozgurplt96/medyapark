@@ -1,6 +1,7 @@
-// Paket bedeli düzenleme (S12 boşluğu) ve Baskı/Montaj dökümü:
-// toplam paketi bir kez sayar, kısmi paketi toplama katmaz, dış paylaşımda
-// kapalı alanlar hiçbir çıktıya girmez, önizleme bayatsa dosya üretilmez.
+// Paket bedeli düzenleme (S12 boşluğu), İş dökümünün baskı/montaj bölümü ve
+// Baskı/montaj takip tablosu (S16: tek iç kullanım şablonu, bedel = maliyet):
+// paket bir kez sayılır, kısmi paket toplama girmez, satış bedeli hiçbir
+// rapora girmez, önizleme bayatsa dosya üretilmez.
 import { test, expect } from '@playwright/test';
 import fs from 'node:fs';
 import { girisYap, sql, rpc, rest, isOlustur, dlg, teamId as teamIdOf, ONEK, temizle, zipMetin } from '../lib/ortam.mjs';
@@ -25,10 +26,17 @@ async function kurulum(ad) {
   expect(t.durum).toBe(200);
   return { job, grp: +p.veri.price_group_id, ops: p.veri.ids.map(Number), tek: +t.veri.ids[0] };
 }
-async function raporAc(page, job, ic) {
-  await page.evaluate(([j, ic]) => rpAc('baski', { sablon: 'dokum', is: j, _alici: ic ? 'ic' : 'dis' }), [job, ic]);
-  await page.waitForFunction(([j, ic]) => ui._rpModel && ui._rpTur === 'baski' && ui._rpModel.sablon === 'dokum' && ui._rpModel.ic === ic
-    && rpAyar('baski').is === j && !rpDurum().yukleniyor, [job, ic]);
+/* İş dökümü › Baskı / montaj bölümü (eski "işe özel döküm"). */
+async function raporAc(page, job) {
+  await page.evaluate(j => rpAc('is', { is: j }), job);
+  await page.waitForFunction(j => ui._rpModel && ui._rpTur === 'is' && rpAyar('is').is === j && ui._rpModel.ozet
+    && !rpDurum().yukleniyor, job);
+  return page.evaluate(() => JSON.parse(JSON.stringify(ui._rpModel.baski)));
+}
+/* Baskı / montaj takip tablosu (tek şablon). */
+async function takipAc(page, job, ek = {}) {
+  await page.evaluate(([j, e]) => rpAc('baski', { donem: 'tum', is: j, ...e }), [job, ek]);
+  await page.waitForFunction(j => ui._rpModel && ui._rpTur === 'baski' && rpAyar('baski').is === j && !rpDurum().yukleniyor, job);
   return page.evaluate(() => JSON.parse(JSON.stringify(ui._rpModel)));
 }
 const paketHareket = grp => say(`select count(*) from entries e join operation_price_groups g on g.job_id=e.job_id
@@ -96,55 +104,56 @@ test.describe('Paket bedeli düzenleme', () => {
   });
 });
 
-test.describe('Baskı/montaj şablonları', () => {
-  test('işe özel döküm: paket bir kez sayılır, düzenleme sonrası toplam güncellenir, kısmi paket toplama girmez', async ({ page }) => {
+test.describe('Baskı/montaj raporları', () => {
+  test('İş dökümü: paket bir kez sayılır, düzenleme sonrası toplam güncellenir; takip tablosunda kısmi paket toplama girmez', async ({ page }) => {
     const { job, grp, ops } = await kurulum('Rapor toplam');
     await girisYap(page, 'uye');
-    let m = await raporAc(page, job, true);
+    let m = await raporAc(page, job);
     expect(m.toplamlar.TRY.tutar).toBeCloseTo(PK.maliyet + TEK.maliyet, 2);   // satır maliyetleri (700+300) eklenmez
-    m = await raporAc(page, job, false);
-    expect(m.toplamlar.TRY.tutar).toBeCloseTo(PK.satis + TEK.satis, 2);       // dış paylaşım = satış bedeli
+    expect(m.toplamlar.TRY.paket).toBeCloseTo(PK.maliyet, 2);
 
     await rest('uye', `operation_price_groups?id=eq.${grp}`, { method: 'PATCH', body: { cost_amount: 3000, updated_at: new Date().toISOString() } });
-    m = await raporAc(page, job, true);
+    m = await raporAc(page, job);
     expect(m.toplamlar.TRY.tutar).toBeCloseTo(3000 + TEK.maliyet, 2);
 
+    let t = await takipAc(page, job);
+    expect(t.toplamlar.TRY.tutar).toBeCloseTo(3000 + TEK.maliyet, 2);
     await page.evaluate(k => rpSec('baski', k, false), 'o' + ops[0]);             // paketin bir işlemi çıkarıldı
-    m = await page.evaluate(() => JSON.parse(JSON.stringify(ui._rpModel)));
-    expect(m.kismiPaket).toBe(true);
-    expect(m.toplamlar.TRY.tutar).toBeCloseTo(TEK.maliyet, 2);
-    expect(m.cikarilan.map(x => x.key)).toEqual(['o' + ops[0]]);              // çıkarılan geri eklenebilir listede
+    t = await page.evaluate(() => JSON.parse(JSON.stringify(ui._rpModel)));
+    expect(t.kismiPaket).toBe(true);
+    expect(t.toplamlar.TRY.tutar).toBeCloseTo(TEK.maliyet, 2);
+    expect(t.cikarilan.map(x => x.key)).toEqual(['o' + ops[0]]);              // çıkarılan geri eklenebilir listede
     await expect(page.locator('#rpPrev .rp3-cik')).toContainText('S13T paket baskı');
   });
 
-  test('dış paylaşım: maliyet ve iç notlar önizlemeye, modele ve dosyanın hiçbir parçasına girmez; satış bedeli girer', async ({ page }) => {
-    const { job } = await kurulum('Rapor dış');
+  test('raporlar iç kullanımdır: bedel maliyettir, satış bedeli hiçbir çıktıya girmez; iç/dış ve alıcı seçimi yalnız mecra tablosunda', async ({ page }) => {
+    const { job } = await kurulum('Rapor maliyet');
     await girisYap(page, 'uye');
-    const m = await raporAc(page, job, false);
-    expect(m.ic).toBe(false);
-    const json = JSON.stringify(m);
-    for (const yasak of [GIZLI, PK_NOT, String(PK.maliyet), String(TEK.maliyet)]) expect(json).not.toContain(yasak);
-    expect(json).toContain(String(TEK.satis));
+    const t = await takipAc(page, job, { _alici: 'dis', sablon: 'takip' });   // eski bağlantı ayarları sessizce düşer
+    expect(t.bedelAd).toBe('Maliyet');
+    const json = JSON.stringify(t);
+    for (const yasak of [String(PK.satis), String(TEK.satis)]) expect(json).not.toContain(yasak);
+    expect(json).toContain(GIZLI);                                           // iç not iç raporda yer alır
+    expect(await page.locator('#rpAlici').innerHTML()).toBe('');              // alıcı / başlık alanı yok
+    await expect(page.locator('#rpKapsam')).not.toContainText('Dış paylaşım');
     const onizleme = await page.locator('#rpPrev').innerText();
-    for (const yasak of [GIZLI, PK_NOT, '1.234,5', '321,25']) expect(onizleme).not.toContain(yasak);
-    expect(onizleme).toContain('432,50');
-
+    for (const yasak of ['2.345,75', '432,50']) expect(onizleme).not.toContain(yasak);
+    expect(onizleme).toContain('321,25');
     const [indir] = await Promise.all([page.waitForEvent('download'), page.locator('#rpXlsB').click()]);
     const ham = zipMetin(fs.readFileSync(await indir.path()));
     expect(ham).toContain('S13T paket baskı');
-    for (const yasak of [GIZLI, PK_NOT, '1234.5', '321.25', '>700<', '>300<']) expect(ham).not.toContain(yasak);
-    for (const s of ['takip']) {                                              // takip şablonu da aynı kural
-      const t = await page.evaluate(([j, s]) => rpAc('baski', { sablon: s, donem: 'tum', is: j }), [job, s])
-        .then(() => page.waitForFunction(() => ui._rpModel && ui._rpModel.sablon === 'takip' && !rpDurum().yukleniyor))
-        .then(() => page.evaluate(() => JSON.stringify(ui._rpModel)));
-      for (const yasak of [GIZLI, PK_NOT, String(PK.maliyet), String(TEK.maliyet)]) expect(t).not.toContain(yasak);
-    }
+    expect(ham).toContain('Maliyet');
+    for (const yasak of ['2345.75', '432.5<', 'Satış bedeli']) expect(ham).not.toContain(yasak);
+    await page.evaluate(() => rpAc('mecra'));
+    await page.waitForFunction(() => ui._rpTur === 'mecra' && ui._rpModel && !rpDurum().yukleniyor);
+    await expect(page.locator('#rpKapsam')).toContainText('Dış paylaşım');     // mecra tablosunda kalır
+    await expect(page.locator('#rpAlici summary')).toContainText('Başlık, alıcı ve açıklama');
   });
 
   test('önizleme açıkken kayıt değişirse bayat dosya indirilmez; önizleme yenilenir', async ({ page }) => {
     const { job, grp } = await kurulum('Rapor bayat');
     await girisYap(page, 'uye');
-    await raporAc(page, job, true);
+    await takipAc(page, job);
     await rest('uye2', `operation_price_groups?id=eq.${grp}`, { method: 'PATCH', body: { cost_amount: 4000 } });
     let indirildi = false; page.on('download', () => { indirildi = true; });
     await page.locator('#rpXlsB').click();
@@ -153,7 +162,7 @@ test.describe('Baskı/montaj şablonları', () => {
     const m = await page.evaluate(() => JSON.parse(JSON.stringify(ui._rpModel)));
     expect(m.toplamlar.TRY.tutar).toBeCloseTo(4000 + TEK.maliyet, 2);
     const [indir] = await Promise.all([page.waitForEvent('download'), page.locator('#rpXlsB').click()]);
-    expect(indir.suggestedFilename()).toMatch(/Baski_Montaj_Dokumu.*\.xlsx$/);
+    expect(indir.suggestedFilename()).toMatch(/Baski_Montaj_Takip.*\.xlsx$/);
   });
 });
 
@@ -179,7 +188,7 @@ test.describe('Üretim kalemi (baskı ↔ montaj bağı)', () => {
     expect(kk(ids[3])).toBe(''); expect(kk(ids[4])).toBe('');
     await girisYap(page, 'uye');
 
-    const d = await raporAc(page, job, true);
+    const d = await raporAc(page, job);
     const k1 = d.bolumler.find(b => b.tip === 'kalem').satirlar.find(s => s.tip === 'kalem');
     expect(k1.rows.map(r => r.urun)).toEqual(['S13T baskı A', 'S13T baskı B']);
     expect(k1.montaj).toMatchObject({ bedel: [{ pb: 'TRY', v: 250 }], kapsar: 2 });
@@ -190,9 +199,7 @@ test.describe('Üretim kalemi (baskı ↔ montaj bağı)', () => {
     expect(hiz[0]).toMatchObject({ adet: 4, birim: 'gün' });                  // 4 gün vinç 4 baskı değildir
     expect(d.toplamlar.TRY).toMatchObject({ baski: 1000, montaj: 250, hizmet: 1290, tutar: 2540 });
 
-    await page.evaluate(j => rpAc('baski', { sablon: 'takip', donem: 'ozel', bas: '2031-06-01', bit: '2031-06-30', is: j, _alici: 'ic' }), job);
-    await page.waitForFunction(() => ui._rpModel && ui._rpModel.sablon === 'takip' && !rpDurum().yukleniyor);
-    const t = await page.evaluate(() => JSON.parse(JSON.stringify(ui._rpModel)));
+    const t = await takipAc(page, job, { donem: 'ozel', bas: '2031-06-01', bit: '2031-06-30' });
     const ortak = t.satirlar.find(s => s.rows && s.rows.length === 2);
     expect(ortak).toMatchObject({ mSpan: 2, bedel: [{ pb: 'TRY', v: 1250 }] });   // 600+400+250, montaj bir kez
     expect(ortak.rows[0]).toMatchObject({ mTarih: '2031-06-05', urun: 'S13T baskı A' });
@@ -247,9 +254,7 @@ test.describe('Üretim kalemi (baskı ↔ montaj bağı)', () => {
     expect(kk(ids[3])).toBe(kk(ids[0]));
     /* tarihsiz kalem dönem seçiliyken sessizce kaybolmaz: sayısı söylenir */
     sql(`update work_operations set planned_date=null where id=${ids[4]}`);
-    await page.evaluate(j => rpAc('baski', { sablon: 'takip', donem: 'ozel', bas: '2031-06-01', bit: '2031-06-30', is: j, _alici: 'ic' }), job);
-    await page.waitForFunction(() => ui._rpModel && ui._rpModel.sablon === 'takip' && !rpDurum().yukleniyor);
-    const t = await page.evaluate(() => JSON.parse(JSON.stringify(ui._rpModel)));
+    const t = await takipAc(page, job, { donem: 'ozel', bas: '2031-06-01', bit: '2031-06-30' });
     expect(t.tarihsizDisarda).toBe(1);
     expect(t.uyari.join(' ')).toContain('tarihi girilmemiş');
     const ortak = t.satirlar.find(s => s.rows && s.rows.length === 2);
@@ -259,33 +264,33 @@ test.describe('Üretim kalemi (baskı ↔ montaj bağı)', () => {
 });
 
 test.describe('Diğer raporlar', () => {
-  const planAc = (page, kisi) => page.evaluate(k => rpAc('plan', { kisi: k, donem: 'ozel', bas: '2027-03-15', bit: '2027-03-15', randevu: true }), kisi)
+  const planAc = page => page.evaluate(() => rpAc('plan', { donem: 'ozel', bas: '2027-03-15', bit: '2027-03-15' }))
     .then(() => page.waitForFunction(() => ui._rpModel && ui._rpTur === 'plan' && !rpDurum().yukleniyor));
 
-  test('kişisel çalışma planı: randevu yalnız sahibinin planında; başkası için plan erişim genişletmez', async ({ browser }) => {
-    const uye = teamIdOf('uye');
+  test('kişisel çalışma planım: yalnız oturum sahibinin planı; kişisel randevu başkasına sızmaz', async ({ browser }) => {
     const s1 = await (await browser.newContext()).newPage();
-    await girisYap(s1, 'uye'); await planAc(s1, uye);
+    await girisYap(s1, 'uye'); await planAc(s1);
     await expect(s1.locator('#rpPrev')).toContainText('S13 özel randevu');            // pozitif kontrol
+    await expect(s1.locator('#rpKapsam select, #rpKapsam #rpKisi')).toHaveCount(0);   // kişi seçimi yok
     const s2 = await (await browser.newContext()).newPage();
-    await girisYap(s2, 'uye2'); await planAc(s2, uye);
+    await girisYap(s2, 'uye2'); await planAc(s2);
     await expect(s2.locator('#rpPrev')).not.toContainText('S13 özel randevu');
     expect(JSON.stringify(await s2.evaluate(() => ui._rpModel))).not.toContain('S13 özel randevu');
+    await s2.evaluate(() => rpAc('plan', { kisi: 1, donem: 'hafta' }));               // eski bağlantının kişi ayarı yok sayılır
+    await s2.waitForFunction(() => ui._rpModel && ui._rpTur === 'plan' && !rpDurum().yukleniyor);
+    expect(await s2.evaluate(() => ui._rpModel.kisi)).toBe(await s2.evaluate(() => ui._me.name));
   });
 
-  test('iş özeti: dış paylaşımda iç güncelleme metni yok, iç kullanımda var', async ({ page }) => {
-    const job = await isOlustur('uye', 'İş özeti');
+  test('iş dökümü: iç güncelleme metni yer alır; başlık otomatik, alıcı alanı yok', async ({ page }) => {
+    const job = await isOlustur('uye', 'İş dökümü');
     const e = await rest('uye', 'entries', { method: 'POST', body: { job_id: job, body: 'S13T iç yazışma metni', created_by_team_id: teamIdOf('uye') } });
     expect(e.durum).toBe(201);
     await girisYap(page, 'uye');
-    const ac = ic => page.evaluate(([j, ic]) => rpAc('is', ic ? { is: j, _alici: 'ic', kisiler: true, guncelleme: true, aksiyon: true, muhasebe: true } : { is: j }), [job, ic])
-      .then(() => page.waitForFunction(() => ui._rpModel && ui._rpTur === 'is' && !rpDurum().yukleniyor));
-    await ac(true);
+    await page.evaluate(j => rpAc('is', { is: j, _alici: 'dis', guncelleme: false }), job);    // eski ayarlar düşer
+    await page.waitForFunction(() => ui._rpModel && ui._rpTur === 'is' && ui._rpModel.ozet && !rpDurum().yukleniyor);
     await expect(page.locator('#rpPrev')).toContainText('S13T iç yazışma metni');
-    await ac(false);
-    await expect(page.locator('#rpPrev')).toContainText(ONEK + 'İş özeti');
-    await expect(page.locator('#rpPrev')).not.toContainText('S13T iç yazışma metni');
-    expect(JSON.stringify(await page.evaluate(() => ui._rpModel))).not.toContain('S13T iç yazışma metni');
+    expect(await page.evaluate(() => ui._rpModel.baslik)).toBe(ONEK + 'İş dökümü — iş dökümü');
+    expect(await page.locator('#rpAlici').innerHTML()).toBe('');
   });
 });
 
@@ -297,7 +302,7 @@ test.describe('Çıktı ve bağlantı güvenliği', () => {
       { operation_type: 'montaj', description: '+1+2', planned_date: '2031-05-02' }] });
     expect(r.durum).toBe(200);
     await girisYap(page, 'uye');
-    await raporAc(page, job, false);
+    await takipAc(page, job);
     const [indir] = await Promise.all([page.waitForEvent('download'), page.locator('#rpXlsB').click()]);
     const b64 = fs.readFileSync(await indir.path()).toString('base64');
     const sonuc = await page.evaluate(async b => {

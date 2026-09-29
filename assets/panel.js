@@ -4094,7 +4094,7 @@ async function workAc(id,odak){
           title="${takipEdiyorum?'Bu iş Panelim → Takip Ettiğim İşler listenden çıkar':'Bu iş Panelim → Takip Ettiğim İşler listene eklenir'}">
           ${takipEdiyorum?'★ Takibi Bırak':'☆ Takibe Al'}</button>
         <button class="btn btn-outline btn-sm" onclick="jobForm(null,${j.id})">Düzenle</button>
-        <button class="btn btn-ghost btn-sm" onclick="rpAc('is',{is:${j.id}})" title="Bu işin durumunu ve geçmişini PDF olarak paylaşın">${ic('download',15)} İş özeti</button>
+        <button class="btn btn-ghost btn-sm" onclick="rpAc('is',{is:${j.id}})" title="Bu işin özeti, yayınları, baskı/montaj maliyetleri, önemli geçmişi ve belgeleri (PDF)">${ic('download',15)} İş dökümü</button>
       </div></div>
 
     ${workFazHtml(j)}
@@ -4126,7 +4126,7 @@ async function workAc(id,odak){
 
     ${wBolum({id:'wOpKart',baslik:'Baskı &amp; Montaj',sayiId:'wOpSayi',sayi:opN,govde:'wOps',
       bos:!opN,ipucu:'Bu işe bağlı baskı/montaj kaydı yok.',
-      eylem:`${opN?`<button class="btn btn-ghost btn-sm" onclick="rpAc('baski',{sablon:'dokum',kurum:${j.customer_id||0},is:${j.id}})" title="Bu işin baskı/montaj dökümü (PDF/Excel)">${ic('download',15)} Döküm</button>`:''}
+      eylem:`${opN?`<button class="btn btn-ghost btn-sm" onclick="rpAc('is',{is:${j.id}})" title="Bu işin dökümü: baskı/montaj kalemleri ve maliyetleri dahil (PDF)">${ic('download',15)} İş dökümü</button>`:''}
         <button class="btn btn-sm act act-ops" onclick="opForm(0,${j.id})">${ic('plus',15)} Kayıt Ekle</button>`})}
 
     ${/* S2 §27: bos bolum sessiz kalir. */''}
@@ -6432,10 +6432,9 @@ async function opDel(id){
 function opTakipRapor(){
   const f=opFiltre();
   const [from,to]=f.donem==='ozel'?[f.from,f.to]:opDonem(f.donem);
-  const p={sablon:'takip'};
+  const p={};
   if(f.donem==='ay') p.donem='ay'; else if(f.donem==='gecen') p.donem='gecen'; else if(f.donem==='yil') p.donem='yil';
   else if(from||to){ p.donem='ozel'; p.bas=from||''; p.bit=to||''; } else p.donem='tum';
-  if(f.kapsam==='iptal'||f.kapsam==='tum') p.iptal=true;
   rpAc('baski',p);
 }
 function opImport(){
@@ -7950,31 +7949,12 @@ async function ftrReset(){ if(!await mpConfirm('Footer menüsü varsayılana dö
    süresince okunabilir kalsın diye korunur. */
 const JOBLBL={...FAZ_ETIKET,
   tasarim:'Tasarım (eski)',yayin:'Yayın (eski)',arsiv:'Arşiv (eski)'};
-function haftaAraligi(off){
-  const d=new Date(); const g=(d.getDay()+6)%7;           /* pazartesi = 0 */
-  const bas=new Date(d.getFullYear(),d.getMonth(),d.getDate()-g+(off||0)*7);
-  const bit=new Date(bas); bit.setDate(bas.getDate()+6);
-  /* S5: YEREL gun. `toISOString()` TR'de pazartesi 00:00-03:00 arasi haftayi
-     bir onceki haftaya, ay preset'ini ise gun boyu bir gun geriye kaydiriyordu. */
-  return [_cIso(bas),_cIso(bit)];
-}
-
-/* ============ RAPORLAR (Sprint 5) ====================================
-   Raporlar ikinci bir veri sistemi DEGILDIR. Her rapor kanonik kayitlarin
-   bir PROJEKSIYONUDUR; rapora ozel tablo / elle tutulan durum YOK.
-
-   Tek kural: BIR RAPOR = BIR VERI KUMESI URETICISI.
-     rapBaglam(b,e)          -> kanonik kayitlar tek turda okunur
-     RAPOR[i].satirlar(ctx)  -> normalize satirlar
-       ├─ rapOnizle()        -> ayni satirlar, ayni sutun `get`leri
-       └─ rapUret()          -> ayni satirlar, ayni sutun `get`leri
-   Onizleme ile Excel ayri sorgu ya da ayri alan turetimi KULLANMAZ.
-
-   Uc zaman kavrami ayri tutulur (S2 §5):
-     is donemi   -> satirin kendi tarih sutunlari + Bilgi'deki aralik
-     okunma ani  -> ctx.okunma (rapBaglam'in veriyi cektigi an)
-     uretim ani  -> Bilgi sayfasi + dosya adi
-   Dosya adindaki tarih asla is donemi yerine okunmaz. */
+/* ============ RAPOR YARDIMCILARI ======================================
+   S16: eski "Hızlı Excel tabloları" (S5 çoklu sayfa: iş takibi, aksiyon
+   planı, teklifler) KALDIRILDI — Raporlar dört hazır çıktıdır
+   (assets/rapor.js). İş listesi İşler › Liste'den dışa aktarılır; aksiyon
+   planının yerini Kişisel çalışma planım aldı; teklif listesi Teklifler
+   ekranındaki Excel düğmesindedir (teklifExcel). */
 
 /* Yerel gun sinirlari -> timestamptz filtresi. [b 00:00, e+1 00:00) */
 function rapSinir(b,e){
@@ -7983,11 +7963,8 @@ function rapSinir(b,e){
 }
 /* PostgREST yaniti `max_rows` (1000) ile SESSIZCE kesilir. Rapor eksik
    veriyle "tamam" gorunmemeli: sayfa sayfa sonuna kadar okunur.
-   S5.1: Panelim'in toplu okumalari (entry_relevance_all,
-   work_followers_all) da bunu kullanir. `kur()` KARARLI bir siralama
-   (benzersiz anahtarla biten) vermelidir, yoksa sayfa sinirinda satir
-   kayar. Sayfa boyu sunucu tavanina esittir: daha buyuk secilirse
-   ilk sayfa kisa gelir ve dongu erken biterdi. */
+   `kur()` KARARLI bir siralama (benzersiz anahtarla biten) vermelidir,
+   yoksa sayfa sinirinda satir kayar. Sayfa boyu sunucu tavanina esittir. */
 async function rapHepsi(kur){
   const out=[]; const N=1000;
   for(let i=0;i<200;i++){
@@ -7998,241 +7975,26 @@ async function rapHepsi(kur){
   }
   return out;
 }
-const rapTr=iso=>{ const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso||'')); return m?`${m[3]}.${m[2]}.${m[1]}`:''; };
-/* timestamptz -> yerel 'YYYY-MM-DD' */
-const rapGun=ts=>ts?_cIso(new Date(ts)):'';
 const RAP_MUH={yok:'Yok',hazir:'Hazır',gonderildi:'Gönderildi',islendi:'İşlendi'};
 const RAP_TEKLIF={yeni:'Yeni',gorusuldu:'Görüşüldü',onaylandi:'Onaylandı',iptal:'İptal'};
-/* Calisan icin iki kategori: Aktif / Arsiv. `bekliyor` saklanan deger
-   olarak kalir, raporda Aktif'in ikincil baglamidir. */
-const rapYasam=j=>(j&&j.lifecycle_status==='kapandi')?'Arşiv':'Aktif';
-const rapBekliyor=j=>(j&&j.lifecycle_status==='bekliyor')?'Bekliyor':'';
-/* Operasyon: gunluk UI kapsami + AYRINTI kaybolmaz. */
-const RAP_LED_NOT='LED kısa dönem/yayın rotasyonlarının tamamı V0 aylık doluluk modelinde temsil edilmeyebilir.';
 
-async function rapBaglam(b,e){
-  const [ts0,ts1]=rapSinir(b,e);
-  /* Ay listesi: araligin kapsadigi aylar (yerel). */
-  const aylar=[]; { const d=new Date(+b.slice(0,4),+b.slice(5,7)-1,1); const son=e.slice(0,7);
-    for(let i=0;i<60;i++){ const ym=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
-      aylar.push(ym); if(ym>=son)break; d.setMonth(d.getMonth()+1); } }
-  const [jobs,cust,team,cts,fol,rel,aksiyon,sonGunc,teklif]=await Promise.all([
-    rapHepsi(()=>sb.from('jobs').select('*').order('id')),
-    rapHepsi(()=>sb.from('customers').select('id,firma').order('id')),
-    api('team_list'),
-    rapHepsi(()=>sb.from('contacts').select('id,name').order('id')),
-    rapHepsi(()=>sb.from('work_followers').select('job_id,team_id').order('job_id').order('team_id')),
-    rapHepsi(()=>sb.from('entry_relevance').select('entry_id,team_id').order('entry_id').order('team_id')),
-    /* Aksiyon Plani: TARIHLI insan Entry'leri. Sistem hareketi YOK,
-       tarihsiz duz guncelleme YOK, kisisel etkinlik (ayri tablo) YOK. */
-    rapHepsi(()=>sb.from('entries').select('id,job_id,customer_id,contact_id,body,action_status,assignee_id,due_at,is_urgent,created_by_team_id')
-      .neq('source','system').not('due_at','is',null).gte('due_at',ts0).lt('due_at',ts1)
-      .order('due_at').order('id')),
-    /* Is Takibi "son guncelleme": yalniz INSAN yazimi, en yeni once. */
-    rapHepsi(()=>sb.from('entries').select('id,job_id,body,occurred_at').neq('source','system')
-      .not('job_id','is',null).order('occurred_at',{ascending:false}).order('id',{ascending:false})),
-    rapHepsi(()=>sb.from('quotes').select('id,customer_id,customer_name,firma,telefon,eposta,total,status,created_at,kaynak,gecerlilik,work_id,revision_no')
-      .gte('created_at',ts0).lt('created_at',ts1).order('created_at').order('id'))
-  ]);
-  const idx=(arr,f)=>{ const m={}; (arr||[]).forEach(x=>m[x.id]=f?f(x):x); return m; };
-  const grup=(arr,k,v)=>{ const m={}; (arr||[]).forEach(x=>(m[x[k]]=m[x[k]]||[]).push(v(x))); return m; };
-  const son={}; sonGunc.forEach(x=>{ if(!son[x.job_id]) son[x.job_id]=x; });
-  return {b,e,aylar,okunma:new Date(),
-    jobs, jm:idx(jobs), cm:idx(cust,x=>x.firma||''), tm:idx(team||[],x=>x.name||''),
-    km:idx(cts,x=>x.name||''), folJ:grup(fol,'job_id',x=>x.team_id), relE:grup(rel,'entry_id',x=>x.team_id),
-    aksiyon, sonGunc:son, teklif};
-}
-const rapAdlar=(tm,ids)=>[...new Set((ids||[]).filter(Boolean))].map(id=>tm[id]).filter(Boolean)
-  .sort((a,b)=>a.localeCompare(b,'tr')).join(', ');
-
-/* ---- Rapor tanimlari. Sutun `get`leri onizleme VE Excel icin ORTAK. ---- */
-const RAPOR=[
- {id:'aksiyon', ad:'Aksiyon Planı', sayfa:'Aksiyon Planı', dosya:'Aksiyon_Plani', varsayilan:1, donemli:true,
-  aciklama:'Son tarihi seçilen aralıkta olan güncellemeler — acil ve gecikenler öne çıkar',
-  kapsam:'Son tarihi aralıkta olan insan güncellemeleri. Sistem hareketleri, tarihsiz güncellemeler, iptal edilenler ve kişisel etkinlikler dahil değildir.',
-  satirlar:c=>{
-    const bugun=_cIso(new Date());
-    return c.aksiyon.filter(x=>x.action_status!=='cancelled').map(x=>{
-      const j=c.jm[x.job_id]||null; const gun=rapGun(x.due_at);
-      const kapali=x.action_status==='done';
-      const fark=Math.round((new Date(bugun+'T00:00:00')-new Date(gun+'T00:00:00'))/864e5);
-      /* Mevcut deterministik tanim: gun gecmeden gecikme yok (gecikti()). */
-      const gec=kapali?'Tamamlandı':fark>0?`${fark} gün gecikti`:fark===0?'Bugün':'';
-      /* Bir Entry = bir satir. Ilgili = etiketlenenler; eski `assignee_id`
-         varsa ayni kumeye katilir ama ayri "Sorumlu" kavrami DONDURMEZ. */
-      const ilgili=rapAdlar(c.tm,[...(c.relE[x.id]||[]),x.assignee_id]);
-      return {gun,gec,acil:!!x.is_urgent,metin:x.body||'',ilgili,
-        is:j?j.title||'':'', kurum:c.cm[j?j.customer_id:x.customer_id]||'',
-        asama:j?(FAZ_ETIKET[j.status]||JOBLBL[j.status]||j.status||''):'',
-        durum:j?[rapYasam(j),rapBekliyor(j)].filter(Boolean).join(' · '):'',
-        kisi:c.km[x.contact_id]||'', yazan:c.tm[x.created_by_team_id]||''};
-    }).sort((p,q)=>p.gun.localeCompare(q.gun)||(q.acil-p.acil));
-  },
-  cols:[{key:'gun',label:'Son tarih',w:12,tip:'tarih'},{key:'gec',label:'Gecikme',w:14},
-    {label:'Acil',w:7,get:r=>r.acil?'Acil':''},{key:'metin',label:'Güncelleme',w:56},
-    {key:'ilgili',label:'İlgili',w:26},{key:'is',label:'İş',w:32},{key:'kurum',label:'Kurum',w:30},
-    {key:'asama',label:'Aşama',w:10},{key:'durum',label:'İş durumu',w:16},{key:'kisi',label:'Kişi',w:18},
-    {key:'yazan',label:'Yazan',w:16}]},
-
- {id:'is', ad:'İş Takibi', sayfa:'İş Takibi', dosya:'Is_Takibi', varsayilan:1, donemli:false,
-  aciklama:'Şirketin iş tablosu: aktif işler önce, arşiv sonra — tarih aralığından bağımsız',
-  kapsam:'Tüm işler (aktif + arşiv). "Son güncelleme" yalnız insan yazımı güncellemedir.',
-  satirlar:c=>{
-    const FS=Object.fromEntries(FAZ_SIRA.map((k,i)=>[k,i]));
-    return c.jobs.map(j=>{ const sg=c.sonGunc[j.id];
-      return {j, ilgili:rapAdlar(c.tm,c.folJ[j.id]), kurum:c.cm[j.customer_id]||'', is:j.title||'',
-        asama:FAZ_ETIKET[j.status]||JOBLBL[j.status]||j.status||'', durum:rapYasam(j), bek:rapBekliyor(j),
-        acil:!!j.is_urgent, son:sg?sg.body||'':'', sonTarih:sg?rapGun(sg.occurred_at):'',
-        kisi:c.km[j.primary_contact_id]||'', muh:RAP_MUH[j.accounting_status||'yok']||j.accounting_status||''};
-    }).sort((p,q)=>(p.durum==='Arşiv')-(q.durum==='Arşiv')||(q.acil-p.acil)
-      ||((FS[p.j.status]??9)-(FS[q.j.status]??9))||p.is.localeCompare(q.is,'tr'));
-  },
-  cols:[{key:'ilgili',label:'İlgili',w:24},{key:'kurum',label:'Kurum',w:30},{key:'is',label:'İş',w:36},
-    {key:'asama',label:'Aşama',w:10},{key:'durum',label:'Durum',w:9},{key:'bek',label:'Bekliyor',w:10},
-    {label:'Acil',w:7,get:r=>r.acil?'Acil':''},{key:'son',label:'Son güncelleme',w:56},
-    {key:'sonTarih',label:'Son güncelleme tarihi',w:14,tip:'tarih'},{key:'kisi',label:'Kişi',w:18},
-    {key:'muh',label:'Muhasebe',w:12}]},
-
- /* S15: 'op' (Baskı & Montaj), 'dol' (Doluluk Detayı) ve 'ozet' (Doluluk
-    Özeti) hızlı tabloları KALDIRILDI. Aynı kayıtların şablonlu çıktısı artık
-    Raporlar › Baskı / montaj ve Raporlar › Mecra doluluk tablosu'dadır;
-    ikinci, çelişen bir dışa aktarım yolu bırakılmaz. */
- {id:'teklif', ad:'Teklifler', sayfa:'Teklifler', dosya:'Teklifler', varsayilan:0, donemli:true,
-  aciklama:'Seçilen aralıkta oluşturulan teklifler; kurum, bağlı iş, durum ve tutar',
-  kapsam:'Oluşturulma tarihi aralıkta olan teklifler. Kurum ve iş yalnız AÇIK bağlantıdan okunur; isim benzerliğiyle eşleştirme yapılmaz.',
-  satirlar:c=>c.teklif.map(q=>({no:'#'+q.id+(q.revision_no>1?` (rev ${q.revision_no})`:''), tarih:rapGun(q.created_at),
-    kurum:q.customer_id&&c.cm[q.customer_id]?c.cm[q.customer_id]:'', firmaForm:q.firma||'',
-    talepEden:q.customer_name||'', is:q.work_id&&c.jm[q.work_id]?c.jm[q.work_id].title||'':'',
-    durum:RAP_TEKLIF[q.status]||q.status||'Yeni', tutar:q.total, gecerlilik:q.gecerlilik||'',
-    kaynak:q.kaynak||'', tel:q.telefon||'', mail:q.eposta||''})),
-  cols:[{key:'no',label:'Teklif',w:10},{key:'tarih',label:'Tarih',w:12,tip:'tarih'},{key:'kurum',label:'Kurum (bağlı)',w:28},
-    {key:'firmaForm',label:'Firma (talepte yazılan)',w:24},{key:'talepEden',label:'Talep eden',w:20},{key:'is',label:'İş',w:30},
-    {key:'durum',label:'Durum',w:11},{key:'tutar',label:'Tutar',w:12,tip:'sayi'},{key:'gecerlilik',label:'Geçerlilik',w:12,tip:'tarih'},
-    {key:'kaynak',label:'Kaynak',w:12},{key:'tel',label:'Telefon',w:15},{key:'mail',label:'E-posta',w:24}]}
-];
-
-/* S12: eski S5 çoklu Excel sayfası. Raporlar girişinde "Hızlı Excel
-   tabloları" altında ikincil olarak yaşar (iş takibi, aksiyon planı,
-   teklifler, aylık doluluk). Yeni biçimli raporlar assets/rapor.js'te. */
-async function raporTablolari(c){
-  const [b,e]=haftaAraligi(0);
-  c.innerHTML=`<div class="sec-head">
-      <div><h3>Raporlar</h3><p class="sub">Uygulamadaki kayıtların seçtiğiniz dönem için anlık görüntüsü — önizleyin, Excel'e aktarın</p></div></div>
-
-    <div class="sec-card">
-      <label class="flabel" style="font-weight:700">İş dönemi</label>
-      <div class="row2" style="max-width:460px">
-        <div class="field"><label class="flabel" for="rb">Başlangıç</label><input class="inp" type="date" id="rb" value="${b}" onchange="rapDonemCiz()"></div>
-        <div class="field"><label class="flabel" for="re">Bitiş</label><input class="inp" type="date" id="re" value="${e}" onchange="rapDonemCiz()"></div>
-      </div>
-      <div class="rp-quick">
-        <button class="btn btn-ghost btn-sm" onclick="rapHafta(0)">Bu hafta</button>
-        <button class="btn btn-ghost btn-sm" onclick="rapHafta(1)">Gelecek hafta</button>
-        <button class="btn btn-ghost btn-sm" onclick="rapHafta(-1)">Geçen hafta</button>
-        <button class="btn btn-ghost btn-sm" onclick="rapAy()">Bu ay</button>
-        <button class="btn btn-ghost btn-sm" onclick="rapAy(1)">Gelecek ay</button>
-      </div>
-      <p class="rp-donem" id="rpDonem" aria-live="polite"></p>
-    </div>
-
-    <div class="sec-card">
-      <label class="flabel" style="font-weight:700">Raporlar</label>
-      <div class="rp-list">
-        ${RAPOR.map(r=>`<label class="rp-item"><input type="checkbox" id="r_${r.id}" ${r.varsayilan?'checked':''}>
-            <span><b>${esc(r.ad)}</b><em>${esc(r.aciklama)}</em></span></label>`).join('')}
-      </div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:16px">
-        <button class="btn btn-outline btn-sm" onclick="rapOnizle()">Önizleme</button>
-        <button class="btn btn-primary btn-sm" onclick="rapUret()">${ic('download',15)} Excel'e Aktar</button>
-      </div>
-      <div id="rapOut"></div>
-    </div>`;
-  rapDonemCiz();
-}
-function rapDonemCiz(){ const el=document.getElementById('rpDonem'); if(!el) return;
-  const b=gv('rb'), e=gv('re');
-  el.innerHTML=b&&e?`<b>İş dönemi:</b> ${esc(rapTr(b))} – ${esc(rapTr(e))}`:'İş dönemi seçilmedi.'; }
-function rapHafta(o){ const [b,e]=haftaAraligi(o);
-  document.getElementById('rb').value=b; document.getElementById('re').value=e; rapDonemCiz(); }
-function rapAy(o){ const d=new Date(); const m=d.getMonth()+(o||0);
-  const b=new Date(d.getFullYear(),m,1), e=new Date(d.getFullYear(),m+1,0);
-  document.getElementById('rb').value=_cIso(b); document.getElementById('re').value=_cIso(e); rapDonemCiz(); }
-
-/* Tek veri yolu: aralik dogrula -> baglam oku -> secili raporlarin satirlari. */
-async function rapHazirla(){
-  const b=gv('rb'), e=gv('re');
-  if(!b||!e){ mpAlert('Tarih aralığı seçin.'); return null; }
-  if(b>e){ mpAlert('Başlangıç tarihi bitişten sonra olamaz.'); return null; }
-  const secili=RAPOR.filter(r=>(document.getElementById('r_'+r.id)||{}).checked);
-  if(!secili.length) return {b,e,S:[]};
-  const ctx=await rapBaglam(b,e);
-  const S=secili.map(r=>({r, rows:r.satirlar(ctx)}));
-  ui._rapSon={b,e,S,okunma:ctx.okunma};   /* QA/kanit icin: son onizleme/aktarim verisi */
-  return {b,e,ctx,S};
-}
-function rapHucre(col,row){
-  const v=typeof col.get==='function'?col.get(row):row[col.key];
-  if(v===null||v===undefined) return '';
-  if(col.tip==='tarih') return rapTr(v);
-  if(col.tip==='sayi'&&v!==''&&Number.isFinite(Number(v))) return Number(v).toLocaleString('tr-TR');
-  return String(v);
-}
-const RAP_ONIZLE_SATIR=10;
-const rapLedVar=S=>S.some(x=>x.r.id==='dol'&&x.rows.some(r=>r.led));
-async function rapOnizle(){
-  const out=document.getElementById('rapOut'); out.innerHTML='<p class="muted" style="margin-top:14px">Hazırlanıyor…</p>';
-  let d; try{ d=await rapHazirla(); }catch(err){ out.innerHTML=`<div class="imp-warn" style="margin-top:14px">Rapor okunamadı: ${esc(err.message||err)}</div>`; return; }
-  if(!d){ out.innerHTML=''; return; }
-  if(!d.S.length){ out.innerHTML='<div class="banner" style="margin-top:14px">En az bir rapor seçin.</div>'; return; }
-  out.innerHTML=`<div class="rp-prev">
-    <div class="rp-prev-h"><b>İş dönemi: ${esc(rapTr(d.b))} – ${esc(rapTr(d.e))}</b>
-      <span>Veri okunma: ${esc(d.ctx.okunma.toLocaleString('tr-TR'))}</span></div>
-    ${d.S.map(({r,rows})=>`<section class="rp-sec">
-      <div class="rp-line"><b>${esc(r.ad)}</b><span>${rows.length} satır</span></div>
-      <p class="rp-kapsam">${r.donemli?'':'<b>Tarih aralığından bağımsız.</b> '}${esc(r.kapsam)}</p>
-      ${r.id==='dol'&&rapLedVar(d.S)?`<p class="rp-kapsam">${esc(RAP_LED_NOT)}</p>`:''}
-      ${rows.length?`<div class="tbl-wrap rp-tbl"><table class="tbl"><thead><tr>${r.cols.map(cl=>`<th>${esc(cl.label)}</th>`).join('')}</tr></thead>
-        <tbody>${rows.slice(0,RAP_ONIZLE_SATIR).map(row=>`<tr>${r.cols.map(cl=>`<td>${esc(rapHucre(cl,row))}</td>`).join('')}</tr>`).join('')}</tbody></table></div>
-        ${rows.length>RAP_ONIZLE_SATIR?`<p class="rp-kapsam">İlk ${RAP_ONIZLE_SATIR} satır gösteriliyor; Excel'de ${rows.length} satırın tamamı var.</p>`:''}`
-        :'<p class="empty" style="margin:6px 0 0">Bu dönemde kayıt yok.</p>'}
-    </section>`).join('')}</div>`;
-}
-/* Calisma kitabi olusturma - dosyaya yazmadan. QA ayni kitabi okuyabilsin
-   diye rapUret'ten ayri. */
-function rapKitap(d){
-  /* Veri sayfalari ONCE, Bilgi SONRA (ice aktarim ilk sayfayi okur).
-     Bos rapor da sayfa olarak yazilir: "bu donemde kayit yok" bir bilgidir,
-     sayfanin sessizce kaybolmasi degil. */
-  const wb=XLSX.utils.book_new();
-  d.S.forEach(({r,rows})=>XLSX.utils.book_append_sheet(wb,exportVeriSayfasi(r.cols,rows),r.sayfa.slice(0,31)));
-  const meta=[['Raporlar', d.S.map(x=>x.r.ad).join(', ')],
-    ['İş dönemi', `${rapTr(d.b)} – ${rapTr(d.e)}`], []];
-  d.S.forEach(({r,rows})=>{ meta.push([r.ad, `${rows.length} satır`]);
-    meta.push(['', (r.donemli?'':'Tarih aralığından bağımsız. ')+r.kapsam]); });
-  if(rapLedVar(d.S)){ meta.push([]); meta.push(['LED', RAP_LED_NOT]); }
-  /* Dosya adi: tek rapor -> rapor adi; donemsiz tek rapor -> uretim gunu;
-     aksi halde is donemi. Tarih daima baglamiyla - ve Bilgi o tarihin
-     NE oldugunu acikca yazar. */
-  const tek=d.S.length===1?d.S[0].r:null;
-  const uretimGunlu=!!(tek&&!tek.donemli);
-  const ad=uretimGunlu ? exportDosyaAdi('Medyapark',tek.dosya,_dt())
-    : exportDosyaAdi('Medyapark', tek?tek.dosya:'Rapor', d.b, d.e);
-  XLSX.utils.book_append_sheet(wb,exportMetaSheet('Medyapark Raporları',null,meta,d.ctx.okunma,
-    uretimGunlu?'Dosya adındaki tarih dışa aktarım günüdür; iş dönemi değildir.'
-               :'Dosya adındaki tarih aralığı iş dönemidir; dosyanın üretildiği gün değildir.'),'Bilgi');
-  return {wb, ad:ad+'.xlsx'};
-}
-async function rapUret(){
-  const out=document.getElementById('rapOut'); out.innerHTML='<p class="muted" style="margin-top:14px">Rapor hazırlanıyor…</p>';
-  let d; try{ d=await rapHazirla(); }catch(err){ out.innerHTML=`<div class="imp-warn" style="margin-top:14px">Rapor okunamadı: ${esc(err.message||err)}</div>`; return; }
-  if(!d){ out.innerHTML=''; return; }
-  if(!d.S.length){ out.innerHTML='<div class="banner" style="margin-top:14px">En az bir rapor seçin.</div>'; return; }
-  try{ await xlsxLoad(); }catch(err){ mpAlert(err.message); out.innerHTML=''; return; }
-  const {wb,ad}=rapKitap(d);
-  XLSX.writeFile(wb, ad);
-  const toplam=d.S.reduce((t,x)=>t+x.rows.length,0);
-  out.innerHTML=`<div class="imp-info" style="margin-top:14px">İndirildi: <b>${esc(ad)}</b> · ${d.S.length} rapor, ${toplam} satır</div>`;
-  return ad;
+/* Teklifler ekranı › Excel: tüm teklifler; kurum ve iş yalnız AÇIK
+   bağlantıdan okunur, isim benzerliğiyle eşleştirme yapılmaz. */
+async function teklifExcel(){
+  const r=await guard(async()=>{
+    const [q,cust,jobs]=await Promise.all([
+      rapHepsi(()=>sb.from('quotes').select('id,customer_id,customer_name,firma,telefon,eposta,total,status,created_at,kaynak,gecerlilik,work_id,revision_no').order('created_at').order('id')),
+      rapHepsi(()=>sb.from('customers').select('id,firma').order('id')),
+      rapHepsi(()=>sb.from('jobs').select('id,title').order('id'))]);
+    const cm={}; cust.forEach(c=>cm[c.id]=c.firma||''); const jm={}; jobs.forEach(j=>jm[j.id]=j.title||'');
+    return q.map(x=>({no:'#'+x.id+(x.revision_no>1?` (rev ${x.revision_no})`:''),tarih:x.created_at?_cIso(new Date(x.created_at)):'',
+      kurum:x.customer_id&&cm[x.customer_id]?cm[x.customer_id]:'',firmaForm:x.firma||'',talepEden:x.customer_name||'',
+      is:x.work_id&&jm[x.work_id]?jm[x.work_id]:'',durum:RAP_TEKLIF[x.status]||x.status||'Yeni',tutar:x.total,
+      gecerlilik:x.gecerlilik||'',kaynak:x.kaynak||'',tel:x.telefon||'',mail:x.eposta||''})); },'Teklifler okunamadı');
+  if(r===null) return;
+  await exportRows('medyapark-teklifler','Teklifler',[{key:'no',label:'Teklif',w:10},{key:'tarih',label:'Tarih',w:12,tip:'tarih'},{key:'kurum',label:'Kurum (bağlı)',w:28},
+    {key:'firmaForm',label:'Firma (talepte yazılan)',w:24},{key:'talepEden',label:'Talep eden',w:20},{key:'is',label:'İş',w:30},{key:'durum',label:'Durum',w:11},
+    {key:'tutar',label:'Tutar',w:12,tip:'sayi'},{key:'gecerlilik',label:'Geçerlilik',w:12,tip:'tarih'},{key:'kaynak',label:'Kaynak',w:12},{key:'tel',label:'Telefon',w:15},{key:'mail',label:'E-posta',w:24}],r);
 }
 
 /* ---------- ANASAYFA ---------- */
@@ -9824,7 +9586,7 @@ async function orgAc(id){
         <button class="btn btn-primary btn-sm" onclick="qcAc({custId:${o.id}})">${ic('plus',15)} Güncelleme</button>
         <button class="btn btn-sm act act-work" onclick="jobForm(null,null,{custId:${o.id}})">${ic('plus',15)} Yeni İş</button>
         <button class="btn btn-outline btn-sm" onclick="custForm(${o.id})">Düzenle</button>
-        <button class="btn btn-ghost btn-sm" onclick="rpAc('baski',{sablon:'takip',donem:'tum',kurum:${o.id}})" title="Bu kurumun baskı/montaj takip tablosu (PDF/Excel)">${ic('download',15)} Baskı/montaj tablosu</button></div></div>
+        <button class="btn btn-ghost btn-sm" onclick="rpAc('baski',{donem:'tum',kurum:${o.id}})" title="Bu kurumun baskı/montaj takip tablosu (PDF/Excel)">${ic('download',15)} Baskı/montaj tablosu</button></div></div>
 
     ${kimlik||o.relationship_evidence?`<div class="sec-card">
       <div class="sec-head" style="margin-bottom:8px"><h4 style="font-size:14px;margin:0">Kimlik</h4>
@@ -10234,7 +9996,8 @@ async function teklifler(c){
     <td>${q.kaynak==='panel'?'<span class="pill">panel</span> ':''}<button class="btn btn-outline btn-sm" onclick="${'${q.kaynak===\'panel\'?`qbEdit(${q.id})`:`quoteView(${q.id})`}'}">Aç</button> <button class="btn btn-danger btn-sm" onclick="quoteDel(${q.id})">Sil</button></td></tr>`).join('');
   c.innerHTML=`<div class="sec-card"><div class="sec-head">
       <div><h3>Teklifler</h3><p class="sub">${list.length} kayıt · siteden gelenler ve panelde hazırlananlar</p></div>
-      <button class="btn btn-primary btn-sm" onclick="qbNew()">${ic('plus',15)} Yeni Teklif Hazırla</button></div>
+      <div style="display:flex;gap:8px"><button class="btn btn-ghost btn-sm" onclick="teklifExcel()" title="Teklif listesini Excel'e aktar">${ic('download',15)} Excel</button>
+      <button class="btn btn-primary btn-sm" onclick="qbNew()">${ic('plus',15)} Yeni Teklif Hazırla</button></div></div>
     ${rows?`<table class="tbl"><thead><tr><th>#</th><th>Müşteri</th><th>Telefon</th><th>Tutar</th><th>Durum</th><th>Tarih</th><th></th></tr></thead><tbody>${rows}</tbody></table>`:'<p class="muted">Henüz teklif yok.</p>'}</div>`;
 }
 async function quoteView(id){

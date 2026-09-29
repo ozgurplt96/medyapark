@@ -190,3 +190,109 @@ kapsaması, "FİRMA" sütunundaki ARC/ERK satıcı kodları) kopyalanmadı.
   "Aynı üretim kalemi" seçimi; iş detayında "kalem N" rozeti.
 - Tohum `99_zzzzzzzzz_ps15_kalem_ornekleri.sql`: yalnız tohum işleri
   (sort 9201–9206, 9301), yalnız boşsa; açık eşleşme listesi.
+
+---
+
+# Sprint 16 — aylık mecra yönetimi ve işlev odaklı raporlar
+
+Migration yok (toplam 33). Referans: S15 mecra doluluk Excel'i (yönetim
+ekranının görsel mantığı) ve tarihsel "LED EKRANLAR YAYIN DURUMU" tablosu
+(yalnız okunuş; kayıtları aktarılmadı, ARC/ERK/POLAT satırları ekran ya da
+kapasite sayılmadı).
+
+## Ortak hesap (ekran = rapor)
+
+`assets/medya.js` › AYLIK DİLİM bölümü; rapor bunları doğrudan kullanır:
+
+| Fonksiyon | İş |
+|---|---|
+| `mdGunDilim(M,u,b,e,ref)` | yüzün günleri → ardışık dilimler (yayın > opsiyon > müsait; iptal bloklamaz; süresi dolmuş opsiyon bloklar; bitişsiz kayıt dönem sonuna kadar) |
+| `mdDonemAylari(b,e)` | dönem ayları; kısmi ay ve "dönem dışı" gün sayısı |
+| `mdAyHucre(seg,ay)` | bir aydaki dilimler (ay sınırına kırpılmış) + günlere oranlı renk dilimi; metin üretmez |
+
+`rpYuzSerit` / `rpDonemAylari` artık bunların takma adıdır, `rpDolHucre`
+yalnız rapor metnini (iç: kurum, dış: Dolu/Opsiyon/Müsait) yazar. Eski ve
+yeni rapor modeli 104 yüzde, altı dönem/alıcı bileşiminde birebir aynı
+çıktı (doğrulama: HEAD `rapor.js` aynı sayfada ayrı kapsamda çalıştırıldı).
+
+## Mecralar — aylık yönetim tablosu (ana görünüm)
+
+- İnce zaman çubukları kaldırıldı; ikinci ana görünüm yok. `mdStatikZaman` /
+  `mdLedZaman` aynı adla tablo çizer, çağıranlar değişmedi.
+- Statik: pano/pozisyon ve yüz sütunları yapışkan, aylar sütunda, A/B aynı
+  pano altında; başlık yapışkan, tablo kendi içinde kayar (`.mtb-wrap`).
+  Ay sütunu 3 ay 250, 6 ay 200, yıl 170 px — yazı küçültülmez.
+- Hücre: tek durumlu ay tam dolgu; karma ay beyaz zemin + üstte günlere
+  oranlı şerit + her dilim ayrı renkli blok (kurum · durum · kaydın kesin
+  dönemi). Yenileme ayrı kayıt = ayrı blok.
+- Durum metni `mdKayitDurumAd` ile: Yayında / Planlandı (kesikli çerçeve,
+  "şu anda yayında" gibi görünmez) / Bitti (açık ton, metin koyu) / Opsiyon.
+  Süresi dolmuş opsiyon sol kırmızı çizgi + "⚠ Opsiyon süresi doldu".
+- Tıklama yazmaz: kayıt bloğu `mKayitAc`, müsait dilim `mdBosAc(uid,s,e)` →
+  `mForm` yüzey + dilimin başlangıç/bitişi (boş ayda ayın sınırları).
+  Kayıt anındaki çakışma denetimi (`media_placements_create`) aynen geçerli.
+- Kurum/iş süzgeci kayıt sorusudur: eşleşmeyen kayıt soluk görünür ama
+  dilimler yüzeyin TÜM kayıtlarıyla hesaplanır — süzgeç sahte müsaitlik
+  üretemez. Durum süzgeci ve müsaitlik araması `mdDurumHesap` (değişmedi).
+- İşaretler ayrışır: bugün = mavi dikey çizgi + başlıkta "Bugün N";
+  durum tarihi = kesikli gri; müsaitlik araması = yeşil bant; seçili yüz =
+  mavi sol şerit; odak (Takvimde göster) = amber çerçeve.
+- LED: satır = kampanya (tarihsel LED tablosunun okunuşu); ayda kaydın o
+  aya düşen kısmı. Kampanyasız ay boş beyazdır, müsait boyanmaz.
+- Derin bağlantı: `medyaOdak` kaydın tüm ay bloklarını vurgular, ilkini
+  yapışkan sütunların arkasında kalmayacak biçimde yatayda görünür alana alır.
+
+## Raporlar — dört seçenek
+
+`RP_TURLER` sırası ve `#/rapor/<tür>` adresleri değişmedi (geçmiş girdileri
+bozulmasın). "Hızlı Excel tabloları" kaldırıldı: iş listesi İşler › Liste'de,
+teklif listesi Teklifler ekranında (`teklifExcel`), aksiyon planının yerini
+Kişisel çalışma planım aldı.
+
+| Rapor | Giriş | Çıktı |
+|---|---|---|
+| Mecra doluluk tablosu | dönem, mecra, ürün, iç/dış, başlık/alıcı (tek dışa gönderilebilen rapor) | PDF · Excel (S15 düzeni aynen) |
+| Baskı / montaj takip tablosu | dönem, isteğe bağlı kurum/iş | PDF · Excel |
+| İş dökümü | yalnız aranabilir iş seçici (kurum `data-ek` yardımcı bilgi) | PDF |
+| Kişisel çalışma planım | Bugün / Bu hafta / Tarih aralığı | A5 PDF |
+
+`rpEskiBaglanti`: `rpAc('baski',{sablon:'dokum'})` → İş dökümü; diğer
+raporlarda varsayılanda olmayan eski ayarlar (`_alici`, `sablon`, `kisi`,
+`iptal`…) sessizce düşer. Başlık/alıcı/açıklama yalnız `metinAyar` taşıyan
+mecra tablosunda. Önizleme ve dosyalar yine aynı modelden.
+
+**Baskı / montaj takip tablosu:** 11 sütun korunur; bedel = kayıtlı maliyet
+(sütun adı "Maliyet", satış bedeli okunmaz bile). Kalemler kurum/iş grup
+bandında (ara toplam + durum özeti). Kalem durumu: Tamamlandı (yeşil metin),
+Devam ediyor (mavi metin), Bekliyor (gri), Gecikti · N gün (kırmızı metin +
+açık kırmızı zemin) — mecra renkleri kullanılmaz. Hesap `rpKalemleriKur` /
+`rpPaketKur` / `rpToplamKur` / `rpKalemSirala` ortak yardımcılarında; eski
+modelle 25 kalem ve toplamlar, 13 işin dökümü birebir aynı. PDF: sütun
+başlığı sayfa üstünde tekrar eder (`rpPdfBelge` `o.sayfaUstu`), grup bandı
+kendi tablosunun tekrarlanan başlığıdır; Not hücresi birleşik değil
+(pdfmake birleşik hücrede uzun metni kırpıyordu). Excel: sabit ölçek, elle
+sayfa sonu; kalem ve grup bandı bölünmez, taşan grup "(devam)" bandıyla sürer.
+
+**İş dökümü:** özet sabit (kurum, ilgili kişiler, Medyapark ekibi, güncel
+aşama, önemli tarihler, açık aksiyonlar); Yayınlar / Baskı-montaj (eski işe
+özel döküm, maliyetle) / Güncellemeler ve önemli geçmiş / Belgeler dahil
+et-çıkar. Kaydı olmayan bölüm devre dışı ve PDF'e girmez. Geçmişteki sistem
+olayları yalnız tür koduyla seçilir (`RP_GECMIS_KURAL`): iş/sözleşme/teklif/
+muhasebe olayları her zaman; yayın, baskı-montaj ve belge olayları yalnız o
+bölüm rapor dışındaysa; `document_changed` hiç. Aynı gün + tür + metin tek
+satır. Veri okuma hatası "kayıt yok" gibi gösterilmez.
+
+**Kişisel çalışma planım:** yalnız oturum sahibi. Görev = açık aksiyon VE
+(bana atanmış ∨ beni etiketlemiş ∨ benim açtığım ve atanmamış) + sahibi
+olduğum işlerin planlanan baskı/montajı + kendi randevularım. Takip edilen
+iş ya da düz güncelleme görev değildir; tamamlanan/iptal ve arşivdeki işin
+kayıtları girmez; kayıt anahtarıyla bir kez. Bilgi için: beni etiketleyen ya
+da takip/sahip olduğum işte acil düz güncelleme, son 7 gün, en çok 12.
+
+## Doğrulama (29.09.2026)
+
+- Temiz test yığını (33 migration + commit'li tohumlar): e2e 103/103,
+  erişim ve mecra SQL denetimleri geçti.
+- Çıktılar Excel'in kendisiyle PDF'e basılıp sayfa sayfa incelendi.
+- Mecralar M1 tam yıl, üç grup açık: 1.104 hücre ~20 ms; 1440 ve 390 px'te
+  sayfa taşması yok.
