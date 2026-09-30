@@ -160,6 +160,19 @@ export async function girisYap(page, kim) {
   await page.waitForLoadState('networkidle');
 }
 
+/* S18 — PDF'in gerçek metni (indirilen dosyanın baytlarından). pdfmake
+   gömülü yazı tipiyle Identity-H kodlar; metin ToUnicode tablosundan
+   okunmalı. Bunu PyMuPDF yapar. Araç yoksa null döner — çağıran test
+   bunu "atlandı" olarak raporlar, sessizce geçmez. */
+export function pdfMetin(buf) {
+  try {
+    return execFileSync('python', ['-X', 'utf8', '-c',
+      'import sys,pymupdf\nd=pymupdf.open(stream=sys.stdin.buffer.read(),filetype="pdf")\nsys.stdout.write("\\n".join(p.get_text() for p in d))'],
+      { input: Buffer.from(buf), encoding: 'utf8', maxBuffer: 64 << 20 })
+      .replace(/\s+/g, ' ');           /* tablo hücresinde satır sonuna bölünen metin tek boşluk */
+  } catch { return null; }
+}
+
 /* S15 — XLSX'in TÜM parçalarının ham metni (paylaşılan metinler, sayfa XML,
    yorumlar, metadata). Dış paylaşım sızıntı taraması hücre görünümüne değil
    dosyanın kendisine bakar. Yalnız standart zip (deflate/stored). */

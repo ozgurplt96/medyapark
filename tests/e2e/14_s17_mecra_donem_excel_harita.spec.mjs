@@ -207,9 +207,9 @@ test.describe('Dönemsel durumlar: sayaç = tablo = Excel', () => {
     await page.evaluate(() => ui._mSec.add(-1));
     const oku = async () => page.evaluate(async () => { const wb = new ExcelJS.Workbook(); await wb.xlsx.load(await ui._mdSonXls.blob.arrayBuffer());
       /* Yüz kodu iki satırlık birleşik hücrededir: yalnız ana (master) hücre sayılır. */
-      return wb.worksheets.map(ws => { const yz = []; for (let r = 6; r <= ws.rowCount; r++) { const c = ws.getCell(r, 2);
+      return wb.worksheets.map(ws => { const yz = []; for (let r = 4; r <= ws.rowCount; r++) { const c = ws.getCell(r, 2);
           if (c.isMerged && c.master.address !== c.address) continue; if (c.value) yz.push(String(c.value)); }
-        return { ad: ws.name, r1: String(ws.getCell(1, 1).value), r2: String(ws.getCell(2, 1).value), h5: ws.getRow(5).values.slice(1).map(String), yz }; }); });
+        return { ad: ws.name, r1: String(ws.getCell(1, 1).value), r2: String(ws.getCell(2, 1).value), h5: ws.getRow(3).values.slice(1).map(String), yz }; }); });
     const [d1] = await Promise.all([page.waitForEvent('download'), page.evaluate(a => mdExcel({ alan: a }), F.alan)]);
     expect(d1.suggestedFilename()).toMatch(/^Medyapark_Doluluk_.+_Musait_2037-03-01_2037-03-31\.xlsx$/);
     let x = await oku();
@@ -229,8 +229,8 @@ test.describe('Dönemsel durumlar: sayaç = tablo = Excel', () => {
     const led = x.find(w => w.h5[0] === 'Kampanya');
     expect(led).toBeTruthy();
     const ledHucre = await page.evaluate(async p => { const wb = new ExcelJS.Workbook(); await wb.xlsx.load(await ui._mdSonXls.blob.arrayBuffer());
-      const ws = wb.worksheets.find(w => w.getCell(5, 1).value === 'Kampanya'); const out = [];
-      for (let r = 6; r <= ws.rowCount; r++) out.push(ws.getRow(r).values.slice(1).map(v => v == null ? '' : String(v))); return out; });
+      const ws = wb.worksheets.find(w => w.getCell(3, 1).value === 'Kampanya'); const out = [];
+      for (let r = 4; r <= ws.rowCount; r++) out.push(ws.getRow(r).values.slice(1).map(v => v == null ? '' : String(v))); return out; });
     expect(ledHucre.flat().join('|')).not.toMatch(/Müsait/);
     expect(ledHucre.some(r => r[3] === 'Tüm ay')).toBe(true);              // Mart 2037 kampanyası
     expect(d2.suggestedFilename()).toContain('2037-03-01_2037-03-31');
