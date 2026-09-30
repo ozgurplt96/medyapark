@@ -194,7 +194,7 @@ Kalan düşük öncelikli işler (bilinen açık P0/P1 yok):
 
 | Önem | Konu | Not |
 |---|---|---|
-| P3 | Güncelleme (Entry) oluşturmada tekillik anahtarı yok: kayıp yanıttan sonra tekrar ikinci güncelleme üretebilir | etkisi mükerrer bir not satırı (yetki/veri kaybı yok, kullanıcı kendi güncellemesini silebilir); aynı desen `entry_create_with_documents`'e uygulanabilir |
+| — | Güncelleme (Entry) oluşturmada tekillik anahtarı yok | **kapandı** — S18-04 (`docs/S18_DENETIM_BULGULARI.md`) |
 | — | Belge kaydı / dosya silme yarışı | **kapandı** — B42 (kabul turu). Kalan teorik durum: doğrudan veritabanı oturumunda REPEATABLE READ ile yapılan silme kilitten sonra eski görüntüyle karar verebilir; uygulama, Storage API ve PostgREST bu yolu kullanmaz (READ COMMITTED doğrulandı) |
 | P3 | Aranabilir seçici yalnız kurum listelerinde; eski tedarikçi, mecra ve iş seçicileri yerel liste | listeler kısa; gerekirse aynı `data-ara` işaretiyle |
 | P3 | PDF içerik doğrulaması otomatik değil | görsel inceleme her sürümde tekrarlanmalı |
