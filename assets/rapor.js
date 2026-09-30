@@ -152,7 +152,6 @@ function rpPdfBelge(m,icerik,o){
 function rpKisalt(t,n){ t=String(t||''); if(t.length<=n) return t;
   const k=t.slice(0,n); const i=k.lastIndexOf(' '); return (i>n*0.6?k.slice(0,i):k).replace(/[\s,·—–-]+$/,'')+'…'; }
 const rpH2=(t,ek)=>({text:t,style:'h2',headlineLevel:1,...(ek||{})});
-const rpH3=(t,ek)=>({text:t,style:'h3',headlineLevel:1,...(ek||{})});
 /* Tablo: başlık her sayfada tekrar eder; satır sayfa sonunda bölünmez. */
 /* `o.ust`: grup başlıkları tablonun TEKRARLANAN başlık satırlarıdır —
    başlık ilk veri satırından asla ayrılmaz ve devam sayfasında da görünür. */
@@ -214,8 +213,8 @@ async function rpXlsDosya(m,sayfalar){
     ws.getCell('A1').value=m.baslik; ws.getCell('A1').font={bold:true,size:14};
     const alt=[m.tur, ...rpKunye(m).map(([k,v])=>`${k}: ${v}`)].join('   ·   ');
     ws.getCell('A2').value=alt; ws.getCell('A2').font={size:9,color:{argb:'FF55555B'}};
-    if(s.not||m.aciklama){ ws.getCell('A3').value=s.not||m.aciklama; ws.getCell('A3').font={size:9,italic:!!s.not}; }
-    const H=5;
+    /* S18: not/açıklama sabit üst alanda değil, verinin altında (rpXlsAltNot). */
+    const H=3;
     const hr=ws.getRow(H);
     s.kol.forEach((k,i)=>{ const c=hr.getCell(i+1); c.value=k.b;
       c.font={bold:true,size:10}; c.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFF0F0F3'}};
@@ -236,7 +235,8 @@ async function rpXlsDosya(m,sayfalar){
       s.alt.forEach(r=>{ alt2++; const row=ws.getRow(alt2);
         r.forEach((v,i)=>{ if(v&&typeof v==='object'&&'v' in v){ rpXlsHucre(row.getCell(i+1),v.tip,v.v); row.getCell(i+1).font={bold:!!v.kalin}; }
           else { rpXlsHucre(row.getCell(i+1),'metin',v); row.getCell(i+1).font={bold:true}; } }); }); }
-    ws.pageSetup.printArea=`A1:${kolHarf}${alt2}`;
+    const altNot=rpXlsAltNot(ws,alt2+1,s.kol.length,[s.not?{t:s.not}:null,m.aciklama&&m.aciklama!==s.not?{t:m.aciklama}:null]);
+    ws.pageSetup.printArea=`A1:${kolHarf}${altNot}`;
     ws.pageSetup.printTitlesRow=`${H}:${H}`;
   });
   const buf=await wb.xlsx.writeBuffer();
@@ -249,13 +249,6 @@ async function rpXlsDosya(m,sayfalar){
 function rpDurum(){ if(!ui._rp) ui._rp={ayar:{},alici:{},baslik:{},secim:{},veri:{},gordu:{}}; return ui._rp; }
 function rpSecimOf(tur){ const R=rpDurum(); if(!R.secim[tur]) R.secim[tur]={mod:'tum',cik:new Set(),sec:new Set()}; return R.secim[tur]; }
 function rpDahil(tur,key){ const s=rpSecimOf(tur); return s.mod==='tum'?!s.cik.has(key):s.sec.has(key); }
-/* Varsayılan olarak DIŞARIDA başlayan kayıt (ör. etiketlenmediğim
-   güncelleme) ilk görüldüğü an bir kez çıkarılır; kullanıcı sonra ekler. */
-function rpVarsayilanDisi(tur,key){
-  const R=rpDurum(); const g=(R.gordu[tur]=R.gordu[tur]||new Set());
-  if(g.has(key)) return; g.add(key);
-  const s=rpSecimOf(tur); if(s.mod==='tum') s.cik.add(key);
-}
 
 /* ==========================================================
    GİRİŞ EKRANI
@@ -369,7 +362,6 @@ async function rpSet(tur,k,v,yenidenCiz){
   if(yenidenCiz) rpKontrolCiz(tur);
   await rpYenile(tur,{veri:RPD[tur].veriAnahtar(a)!==(rpDurum().veriAnahtar||{})[tur]});
 }
-function rpSetKontrolsuz(tur,k,v){ rpAyar(tur)[k]=v; }
 async function rpYenile(tur,o){
   o=o||{};
   const R=rpDurum(), D=RPD[tur], a=rpAyar(tur);
@@ -844,8 +836,11 @@ RPD_MECRA={
    Ay içinde değişen hücre iki satır boyunca BİRLEŞİR ve dilimleri renk
    işaretiyle alt alta taşır (keskin geçişli dolgu Excel baskısında
    çizgili göründüğü için kullanılmaz). */
+/* S18: sabit üst alan yalnız başlık (1), kısa dönem/kapsam (2) ve sütun
+   başlıkları (3); veri 4. satırdan başlar. Renk anahtarı ve açıklama
+   verinin ALTINDA tek bir alt nottur (rpXlsAltNot). */
 function rpXlsDoluluk(ws,m,sf,panolar){
-  const ay=m.aylar, F='Arial', H=5, son=2+ay.length, GEN=24;
+  const ay=m.aylar, F='Arial', H=3, son=2+ay.length, GEN=24;
   /* S17: bir haftadan kısa kısmi ay (ör. varsayılan dönemin "Haziran (30)"
      sütunu) dar sütundur; tam ay genişliğinde boş gri alan basılmaz. */
   const W=ay.map(a=>(!a.tam&&rpDn(a.e)-rpDn(a.s)+1<=7)?15:GEN);
@@ -854,12 +849,6 @@ function rpXlsDoluluk(ws,m,sf,panolar){
   const bilgi=[`Dönem: ${rpTr(m.bas)} – ${rpTr(m.bit)}`,m.kapsam||'',sf.olcu?`Ölçü: ${sf.olcu}`:'',m.ic?'İç kullanım':'Dış paylaşım',
     m.alici?`Hazırlanan: ${m.alici}`:'',`Hazırlanma: ${rpAnTr(m.an)}`].filter(Boolean).join('   ·   ');
   const c2=ws.getCell(2,1); c2.value=bilgi; c2.font={name:F,size:9,color:{argb:'FF55555B'}};
-  const lej=[...['yayin','opsiyon','musait','disi'].map(t=>[RP_DR[t].ad,RP_DR[t].fill,RP_DR[t].ink]),['Ay içinde değişim: dilimler alt alta','#FFFFFF','#55555B']];
-  lej.forEach(([t,f,k],i)=>{ const c=ws.getCell(3,3+i); c.value=t;
-    c.fill={type:'pattern',pattern:'solid',fgColor:{argb:rpArgb(f)}}; c.font={name:F,bold:i<4,size:9,color:{argb:rpArgb(k)}};
-    c.alignment={horizontal:'center',vertical:'middle',wrapText:true}; c.border=rpXKenar(); });
-  ws.getRow(3).height=26;
-  if(m.aciklama){ const c=ws.getCell(4,1); c.value=m.aciklama; c.font={name:F,size:9}; }
   const hr=ws.getRow(H); hr.height=30;
   [['No',1],['Yüz',2],...ay.map((a,i)=>[a.ad,3+i])].forEach(([t,k])=>{ const c=hr.getCell(k); c.value=t;
     c.font={name:F,bold:true,size:10}; c.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFFFE699'}};
@@ -877,7 +866,7 @@ function rpXlsDoluluk(ws,m,sf,panolar){
   const genPt=[5,10,...W].reduce((t,w)=>t+(w*7+5)*0.75,0);
   const olcek=Math.min(1,(842-0.8*72)*sayfaGen/genPt*0.92);
   const sayfaYuk=(595-72-24)/olcek;
-  let dolu=[1,2,3,4,H].reduce((t,k)=>t+(ws.getRow(k).height||15),0);
+  let dolu=[1,2,H].reduce((t,k)=>t+(ws.getRow(k).height||15),0);
   panolar.forEach(p=>{ const r0=r;
     p.yuzler.forEach(f=>{
       const kod=ws.getCell(r,2); kod.value=f.kod; kod.font={name:F,bold:true,size:10};
@@ -916,8 +905,9 @@ function rpXlsDoluluk(ws,m,sf,panolar){
     if(dolu+ph>sayfaYuk&&r0>H+1){ ws.getRow(r0-1).addPageBreak(); dolu=(ws.getRow(H).height||30); }
     dolu+=ph;
   });
+  const sonSatir=rpXlsAltNot(ws,r,son,[{renk:true},...(m.aciklama?[{t:m.aciklama}]:[])]);
   ws.views=[{state:'frozen',xSplit:2,ySplit:H,topLeftCell:'C'+(H+1),activeCell:'C'+(H+1)}];
-  ws.pageSetup.printArea=`A1:${ws.getColumn(son).letter}${r-1}`;
+  ws.pageSetup.printArea=`A1:${ws.getColumn(son).letter}${sonSatir}`;
   ws.pageSetup.printTitlesRow=`${H}:${H}`;
   ws.pageSetup.printTitlesColumn='A:B';
   /* Altı ay bir sayfa genişliği; on iki ay iki sayfa — yazı küçültülüp tek sayfaya sıkıştırılmaz. */
@@ -929,15 +919,12 @@ function rpXlsDoluluk(ws,m,sf,panolar){
    aylar sütunda; ayda kampanyanın (dönemle kırpılmış) günleri. Kampanyasız
    ay BOŞ ve beyazdır — "müsait slot" yazılmaz, kapasite hesaplanmaz. */
 function rpXlsLedAylik(ws,m,L){
-  const ay=m.aylar, F='Arial', H=5, GEN=13, ilk=3, son=ilk+ay.length;
+  const ay=m.aylar, F='Arial', H=3, GEN=13, ilk=3, son=ilk+ay.length;
   [26,12,19,...ay.map(()=>GEN)].forEach((w,i)=>{ ws.getColumn(i+1).width=w; });
   const c1=ws.getCell(1,1); c1.value=`${L.baslik} — LED yayınları`; c1.font={name:F,bold:true,size:14};
   const c2=ws.getCell(2,1); c2.value=[`Dönem: ${rpTr(m.bas)} – ${rpTr(m.bit)}`,m.kapsam||'',L.sure?`Kreatif: ${L.sure}`:'',
     'İç kullanım',`Hazırlanma: ${rpAnTr(m.an)}`].filter(Boolean).join('   ·   ');
   c2.font={name:F,size:9,color:{argb:'FF55555B'}};
-  const c3=ws.getCell(3,1); c3.value='Her satır bir kampanyadır; aynı ayda birden çok kampanya yayında olabilir. Boş ay satılabilir boş slot anlamına gelmez; LED kapasitesi hesaplanmaz.';
-  c3.font={name:F,size:9,italic:true,color:{argb:'FF55555B'}};
-  if(m.aciklama){ const c=ws.getCell(4,1); c.value=m.aciklama; c.font={name:F,size:9}; }
   const hr=ws.getRow(H); hr.height=30;
   ['Kampanya','Durum','Dönem',...ay.map(a=>a.ad)].forEach((t,i)=>{ const c=hr.getCell(i+1); c.value=t;
     c.font={name:F,bold:true,size:10}; c.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFFFE699'}};
@@ -957,10 +944,32 @@ function rpXlsLedAylik(ws,m,L){
     const sat=(t,n)=>t?Math.ceil(String(t).length/n):0;
     row.height=Math.max(22,sat(k.kurum,24)*13+sat(k.is,30)*11+6,sat(k.durum,11)*12+6); r++;
   });
+  const sonSatir=rpXlsAltNot(ws,r,son,[{t:'Her satır bir kampanyadır; aynı ayda birden çok kampanya yayında olabilir. Boş ay satılabilir boş slot anlamına gelmez; LED kapasitesi hesaplanmaz.'},
+    ...(m.aciklama?[{t:m.aciklama}]:[])]);
   ws.views=[{state:'frozen',xSplit:ilk,ySplit:H,topLeftCell:ws.getCell(H+1,ilk+1).address,activeCell:ws.getCell(H+1,ilk+1).address}];
-  ws.pageSetup.printArea=`A1:${ws.getColumn(son).letter}${Math.max(H,r-1)}`;
+  ws.pageSetup.printArea=`A1:${ws.getColumn(son).letter}${sonSatir}`;
   ws.pageSetup.printTitlesRow=`${H}:${H}`;
   ws.pageSetup.printTitlesColumn='A:C';
+}
+/* S18 — verinin altında tek alt not (sabit üst alanda değil). `r` son veri
+   satırından sonraki satırdır; bir boş satır bırakılır. Satırlar tablonun
+   genişliği boyunca birleştirilir (metin kaydırılır). Son yazılan satırı döner.
+   {renk:true} doluluk renk anahtarıdır (renk metinle birlikte). */
+function rpXlsAltNot(ws,r,sonKol,notlar){
+  const F='Arial'; let rr=r;
+  notlar.filter(n=>n&&(n.renk||n.t)).forEach(n=>{ rr++;
+    const c=ws.getCell(rr,1);
+    if(n.renk) c.value={richText:[{text:'Renk anahtarı:  ',font:{name:F,bold:true,size:8.5,color:{argb:'FF55555B'}}},
+      ...['yayin','opsiyon','musait','disi'].flatMap(t=>[{text:'■ ',font:{name:F,size:10,color:{argb:rpArgb(RP_DR[t].bar)}}},
+        {text:RP_DR[t].ad+(t==='disi'?' (müsait sayılmaz)':'')+'    ',font:{name:F,size:8.5,color:{argb:rpArgb(RP_DR[t].ink)}}}]),
+      {text:'·  Ay içinde durum değişen hücrede dilimler tarihleriyle alt alta yazılır.',font:{name:F,size:8.5,color:{argb:'FF55555B'}}}]};
+    else { c.value=String(n.t); c.font={name:F,size:8.5,italic:true,color:{argb:'FF55555B'}}; }
+    c.alignment={wrapText:true,vertical:'top'};
+    if(sonKol>1) ws.mergeCells(rr,1,rr,sonKol);
+    const uz=n.renk?120:String(n.t).length;
+    ws.getRow(rr).height=Math.max(15,Math.ceil(uz/Math.max(40,sonKol*14))*12+4);
+  });
+  return rr;
 }
 function rpMecraDonem(n){ const a=rpAyar('mecra'); const d=mdGun(rpBugun());
   if(n==='yil'){ a.bas=`${d.getFullYear()}-01-01`; a.bit=`${d.getFullYear()}-12-31`; }
@@ -1381,14 +1390,14 @@ function rpXlsToplam(ws,r,m,etiketSon,degerKol){
    "(devam)" bandıyla sürer. Sabit ölçek: Excel "sığdır" açıkken elle
    konan sayfa sonlarını yok sayar. */
 function rpTakipXls(ws,m){
-  const F='Arial', H=5;
+  const F='Arial', H=3;            /* S18: başlık · bilgi · sütunlar; 3–4. boş satırlar kaldırıldı */
   const W=[11,20,32,10,16,13,15,11,22,16,34]; W.forEach((w,i)=>{ ws.getColumn(i+1).width=w; });
   rpXlsBaslik(ws,m,(m.bilgi||[]).map(([k,v])=>`${k}: ${v}`));
   rpXlsHeader(ws,H,RP_TKOL,'FFFFE699',[3,6]);
   const genPt=W.reduce((t,w)=>t+(w*7+5)*0.75,0);
   const olcek=Math.min(1,(842-0.8*72)/genPt*0.93);
   const sayfaYuk=(595-72-28)/olcek;
-  let dolu=[1,2,3,4,H].reduce((t,k)=>t+(ws.getRow(k).height||15),0);
+  let dolu=[1,2,H].reduce((t,k)=>t+(ws.getRow(k).height||15),0);
   let r=H+1;
   const hucre=(rr,k,tip,v,pb,ek)=>{ const c=ws.getCell(rr,k); rpXlsDeger(c,tip,v,pb);
     c.font={name:F,size:10,...(ek&&ek.font||{})}; c.alignment={vertical:'top',wrapText:true,horizontal:ek&&ek.sag?'right':'left'}; c.border=rpXKenar(); return c; };

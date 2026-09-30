@@ -84,8 +84,6 @@ function mdAralikNokta(b,e){ return b?`${mdNokta(b)} – ${e?mdNokta(e):'?'}`:''
    başlangıç günü geldi diye yayına DÖNÜŞMEZ; yalnız "Yayına çevir"
    eylemiyle. */
 const MD_TAAHHUT={reserved:'Opsiyon',confirmed:'Yayın',cancelled:'İptal'};
-const MD_KOD_ETIKET={bos:'Müsait',dolu:'Yayında',rezerve:'Opsiyonlu',yakinda:'Yakında boşalacak',
-  opsuresi:'Opsiyon süresi geçmiş',eski:'Eski kayıt',pasif:'Pasif',iptal:'İptal'};
 
 /* ==========================================================
    PAYLAŞILAN KAPSAM / SORGU KATMANI (B50)
@@ -129,9 +127,6 @@ function mdArsiv(a){ return !!a&&a.legacy_archived===true; }
    Kurum bilinmiyorsa BOŞ döner: eski aylık kayıtların çoğunda kurum yok
    ve her hücreye "kurum yok" yazmak matrisi okunmaz hale getiriyordu
    (S8.1 §15). Hücrenin kesik çerçevesi ve title'ı zaten bunu söyler. */
-function mdOrgEtiket(ad){ const w=orgKisa(ad||'',40).split(/\s+/).filter(Boolean);
-  if(!w.length) return ''; let k=w[0]; if(k.length<5&&w[1]) k+=' '+w[1];
-  return k.length>13?k.slice(0,12)+'…':k; }
 
 
 /* ==========================================================
@@ -858,8 +853,6 @@ const MD_DURUM_IPUCU={'':'Seçili kapsamdaki bütün yüzeyler',
   bosalacak:'Doluluk zincirinden sonra gerçek boşluğun dönem içinde başladığı statik yüzeyler'};
 const MD_YAKINDA_GUN=30;                 // yalnız yüzey ayrıntısındaki "bugün" satırı (mdYuzeyDurum)
 const mdDurumAd=k=>(MD_DURUM.find(x=>x[0]===k)||[0,''])[1];
-/* Uyumluluk: harita ve yüz ayrıntısının "Bugün" satırı. Durum tarihi yok. */
-function mdRefGun(){ return mdBugun(); }
 function mdKayitKey(r){ return r.placement_id?'p'+r.placement_id:'b'+r.booking_id; }
 
 /* Dönem içinde boşalma. Bir gün önce bloklu, o gün boş olmalı ve o gün
@@ -1099,7 +1092,7 @@ const MD_RENK={
 /* Ay sütunu genişliği ay SAYISINA göre: kısa dönem geniş, yıl dar ama
    okunur; yazı küçültülmez, tablo kendi içinde kayar. */
 function mdAyGen(n){ return n<=4?250:n<=7?200:170; }
-const MD_PANO_GEN=118, MD_YUZ_GEN=40, MD_KMP_GEN=230;
+const MD_YUZ_GEN=40, MD_KMP_GEN=230;
 function mdCssSerit(dilim){ const top=dilim.reduce((t,d)=>t+d.gun,0)||1; let x=0;
   return `linear-gradient(90deg,${dilim.map(d=>{ const a=x/top*100; x+=d.gun; const b=x/top*100;
     return `${MD_RENK[d.tip].bar} ${a.toFixed(2)}% ${b.toFixed(2)}%`; }).join(',')})`; }
@@ -1118,7 +1111,7 @@ function mdAyKismi(ay){ if(ay.tam) return ''; const s=+ay.s.slice(8), e=+ay.e.sl
 function mdTabloBas(ek,aylar,ilk){
   const buYm=mdYm(mdBugun());
   return `<thead><tr>${ilk}
-    ${aylar.map(ay=>`<th scope="col" class="mtb-ay${ay.ym===buYm?' bu':''}${ay.tam?'':' kismi'}" data-ym="${ay.ym}"
+    ${aylar.map(ay=>`<th scope="col" class="mtb-ay${ay.ym===buYm?' bu':''}${ay.tam?'':' kismi'}${mdKisaAy(ay)?' dar':''}" data-ym="${ay.ym}"
         ${ay.tam?'':`title="${esc(`Seçili dönem bu ayın yalnız ${mdNokta(ay.s)} – ${mdNokta(ay.e)} günlerini kapsar`)}"`}>
       <span class="mtb-ay-t">${esc(AY_UZUN[+ay.ym.slice(5,7)-1])} <em>${esc(ay.ym.slice(0,4))}</em></span>${ay.tam?'':`<i class="mtb-kismi">${esc(mdAyKismi(ay))}</i>`}${ay.ym===buYm?`<i class="mtb-bu-e">Bugün ${+mdBugun().slice(8)}</i>`:''}${mdAyIsaret(ay,true)}</th>`).join('')}
   </tr></thead>`;
@@ -1128,9 +1121,17 @@ function mdTabloBas(ek,aylar,ilk){
 const MD_KISA_GEN=120;
 function mdKisaAy(a){ return !a.tam&&mdDn(a.e)-mdDn(a.s)+1<=7; }
 function mdAyKol(aylar){ return aylar.map(a=>mdKisaAy(a)?`<col style="width:${MD_KISA_GEN}px">`:'<col>').join(''); }
-function mdTabloAc(ek,sabitGen,sinif){
+/* S18: Pano sütunu içeriğine göre: sıra no + seçim kutusu + en uzun pano
+   kodu + iç boşluk. Kod kırpılmaz (uzun kodda sütun genişler); artan alan
+   ay sütunlarına kalır. Genişlik `--pg` ile hem <col>'a hem yapışkan Yüz
+   sütununun `left` konumuna verilir (ikisi aynı sayıdan beslenmeli). */
+function mdPanoGen(gr){
+  const uz=Math.max(4,...gr.map(g=>String(g.base||'').length));
+  return Math.min(220,Math.max(80,Math.ceil(56+uz*8.4)));
+}
+function mdTabloAc(ek,sabitGen,sinif,stil){
   const g=mdAyGen(ek.aylar.length);
-  return `<div class="mtb-wrap"><table class="mtb ${sinif||''}" style="min-width:${sabitGen+ek.aylar.reduce((t,a)=>t+(mdKisaAy(a)?MD_KISA_GEN:g),0)}px">`;
+  return `<div class="mtb-wrap"><table class="mtb ${sinif||''}" style="min-width:${sabitGen+ek.aylar.reduce((t,a)=>t+(mdKisaAy(a)?MD_KISA_GEN:g),0)}px;${stil||''}">`;
 }
 /* Kaydın hücre metni: kurum (yoksa iş), durum ve KESİN dönem. Dönem
    kaydın tamamıdır (Excel'deki gibi); kesinliği bilinmeyen gün yazılmaz. */
@@ -1218,6 +1219,7 @@ function mdStatikZaman(M,a,yuzler,ek,acik,S,st){
   const gun=mdBugun();
   const aylar=ek.aylar;
   const gr=groupUnits(yuzler);
+  const pg=mdPanoGen(gr);
   /* Kurum/iş süzgeci bir KAYIT sorusudur: eşleşmeyen kayıt soluklaşır ama
      yüzeyi bloklamaya devam eder — gizlenen kayıt yüzeyi müsait GÖSTEREMEZ.
      Dilimler daima yüzeyin TÜM engelleyici kayıtlarıyla hesaplanır. */
@@ -1252,7 +1254,7 @@ function mdStatikZaman(M,a,yuzler,ek,acik,S,st){
   }).join('');
 
   return `<section class="sec-card md-alan" data-a="${a.id}">${baslik}
-    ${mdTabloAc(ek,MD_PANO_GEN+MD_YUZ_GEN)}
+    ${mdTabloAc(ek,pg+MD_YUZ_GEN,'',`--pg:${pg}px`)}
       <colgroup><col class="c-pano"><col class="c-yuz">${mdAyKol(aylar)}</colgroup>
       ${mdTabloBas(ek,aylar,'<th scope="col" class="mtb-pano">Pano</th><th scope="col" class="mtb-yz">Yüz</th>')}
       <tbody>${rows}</tbody></table></div></section>`;
@@ -1330,9 +1332,6 @@ function mdLedZaman(M,a,l,ek,acik,S){
 /* ==========================================================
    ÇOKLU SEÇİM → tek toplu yerleşim (B36)
    ========================================================== */
-function mdSec(uid,on){ if(on) ui._mSec.add(uid); else ui._mSec.delete(uid);
-  const tr=document.querySelector(`tr[data-u="${uid}"]`); if(tr) tr.classList.toggle('md-sel',on);
-  mdSecimCiz(); }
 function mdTumunuSec(ids,on){ ids.forEach(i=>on?ui._mSec.add(i):ui._mSec.delete(i)); mdCiz(); }
 /* Seçim çubuğu — TEK doğruluk kaynağı bu çizimde render edilen yüzlerdir
    (S8.1 §17). Önceki davranışta `ui._mSec` küresel bir Set'ti ve hiçbir
@@ -2043,8 +2042,9 @@ function mdXlsModel(M,st,S,k){
   const suz=[st.kurum&&`Kurum: ${M.cmap[st.kurum]||'#'+st.kurum}`,st.is&&`İş: ${(M.jmap[st.is]||{}).title||'#'+st.is}`,
     st.urun&&k.alan==null&&`Ürün: ${M.pm[st.urun]||''}`,st.q&&`Arama: “${st.q}”`,S.etkin.gizli&&`Geçmiş aylar gizli (arama: ${mdNokta(S.etkin.esas.bas)} – ${mdNokta(S.etkin.esas.bit)})`].filter(Boolean);
   const m={tur:'Mecralar — doluluk tablosu',baslik:`Doluluk tablosu — ${adParca.join(' · ')}`,an:new Date(),ic:true,dis:false,
-    alici:'',aciklama:suz.length?'Süzgeç: '+suz.join('   ·   '):'',bas:S.B,bit:S.E,aylar,
-    kapsam:`Durum: ${mdDurumAd(S.durum)}`,sayfalar:[],led:[]};
+    /* S18: süzgeçler 2. satırdaki kısa kapsam bilgisinde; sabit üst alanda ayrı açıklama satırı yok. */
+    alici:'',aciklama:'',bas:S.B,bit:S.E,aylar,
+    kapsam:[`Durum: ${mdDurumAd(S.durum)}`,...suz].join('   ·   '),sayfalar:[],led:[]};
   sl.forEach(({m:mc,gruplar})=>gruplar.forEach(g=>{
     const a=g.a;
     if(g.esz){

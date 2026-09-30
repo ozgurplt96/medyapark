@@ -92,7 +92,9 @@ textarea.inp{resize:vertical;min-height:70px;}
 
 /* ---------- kabuk ---------- */
 .app{display:flex;min-height:100vh;}
-.side{width:252px;flex:0 0 252px;color:#4b5563;display:flex;flex-direction:column;
+/* S18: 252 → 216 px. Ölçüm (tüm gruplar açık, Yönetim + Team): en uzun öğe
+   "Planlama Talepleri" 200 px'te kırılıyor, 208'de sığıyor; 8 px pay. Yazı küçültülmedi. */
+.side{width:216px;flex:0 0 216px;color:#4b5563;display:flex;flex-direction:column;
   position:sticky;top:0;height:100vh;padding:0 0 8px;
   background:#ffffff;border-right:1px solid var(--c-line);}
 .brand{padding:18px 16px 16px;border-bottom:1px solid var(--c-line2);margin-bottom:10px;}
@@ -1916,21 +1918,14 @@ i.tk-p.tk-ozel{border-radius:3px;}
   padding:6px 13px;font:600 13px/1.3 var(--f);transition:.12s;}
 .md-sp:hover{border-color:var(--c-ink3);color:var(--c-ink);}
 .md-sp.on{background:var(--c-ink);border-color:var(--c-ink);color:#fff;}
-.md-sp:focus-visible,.md-yk-c:focus-visible,.md-bar:focus-visible,.md-gt:focus-visible,.md-sk:focus-visible{outline:2px solid var(--c-accent);outline-offset:2px;}
+.md-sp:focus-visible,.md-gt:focus-visible{outline:2px solid var(--c-accent);outline-offset:2px;}
 .md-sp-all{border-style:dashed;}
 /* Alan/tür seçici KALDIRILDI (S8.1 §10): aynı kavram hem soyut filtre
    hem görünür grup olarak iki kez sorulmaz. Kalan üç kontrol. */
 .md-fbar .fbar-row{display:grid;grid-template-columns:minmax(200px,1.4fr) repeat(3,minmax(150px,1fr));gap:8px;}
 
 /* ---------- Mecra seçici (site-first, S8.1 §9) ---------- */
-.md-sk-h{font-size:13.5px;color:var(--c-ink2);margin:0 2px 10px;}
-.md-skl{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:10px;}
-.md-sk{display:flex;flex-direction:column;align-items:flex-start;gap:4px;text-align:left;width:100%;
-  background:var(--c-card);border:1px solid var(--c-line);border-radius:var(--r);padding:14px 16px;transition:.12s;}
-.md-sk:hover{border-color:var(--c-ink3);box-shadow:var(--sh-1);}
-.md-sk-t{font:700 15px/1.3 var(--f);color:var(--c-ink);}
-.md-sk-g{font-size:12.5px;color:var(--c-ink3);}
-.md-sk-o{font-size:12.5px;color:var(--c-ink2);margin-top:2px;}
+
 
 /* ---------- Katlanabilir grup başlığı (S8.1 §11) ---------- */
 .md-gt{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;flex:1;min-width:0;text-align:left;
@@ -1978,7 +1973,7 @@ i.tk-p.tk-ozel{border-radius:3px;}
 .md-tbl tr.md-sel td{background:#f3f7ff;}
 .md-org{font-weight:600;color:var(--c-ink);}
 .md-is{color:var(--c-ink2);display:inline-block;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom;}
-.md-odak td,.md-kmp.md-odak,.rg-row.md-odak,.md-tlr.md-odak{background:#fff7e0 !important;}
+.md-odak td,.rg-row.md-odak{background:#fff7e0 !important;}
 section.md-odak{box-shadow:0 0 0 2px var(--c-warn);}
 .md-odak-b{display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:#fff7e0;border:1px solid #f3dca0;
   border-radius:var(--r);padding:9px 12px;margin:0 0 12px;font-size:13px;}
@@ -1995,10 +1990,6 @@ section.md-odak{box-shadow:0 0 0 2px var(--c-warn);}
 .md-led{border-left:3px solid var(--c-violet);}
 .md-led-n{margin:0 0 8px;font-size:13.5px;}
 .md-kmpl{list-style:none;margin:0;padding:0;border:1px solid var(--c-line2);border-radius:10px;}
-.md-kmp{display:grid;grid-template-columns:minmax(150px,1.2fr) minmax(140px,1.4fr) 170px auto;gap:10px;align-items:center;
-  padding:9px 12px;border-top:1px solid var(--c-line2);cursor:pointer;font-size:13.5px;}
-.md-kmp:first-child{border-top:none;}
-.md-kmp:hover{background:var(--c-alt);}
 .md-kmp-o{font-weight:700;}
 .md-kmp-i{color:var(--c-ink2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .md-kmp-s{display:flex;gap:6px;justify-content:flex-end;align-items:center;}
@@ -2020,7 +2011,6 @@ button.rcell{border:0;padding:0;font-family:inherit;position:relative;}
 
 /* Yıl — LED eşzamanlı kampanya çizelgesi */
 .md-tl{position:relative;overflow-x:auto;}
-.md-tlr{display:grid;grid-template-columns:230px minmax(760px,1fr);border-top:1px solid var(--c-line2);align-items:stretch;}
 .md-tlh{border-top:none;}
 .md-tll{display:flex;flex-direction:column;justify-content:center;padding:6px 8px;font-size:13px;min-width:0;}
 .md-tll b,.md-tll span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
@@ -2032,18 +2022,10 @@ button.rcell{border:0;padding:0;font-family:inherit;position:relative;}
 .md-tlt{position:relative;display:grid;min-height:52px;}
 .md-tlt>i{border-left:1px solid var(--c-line2);font-style:normal;}
 .md-tlh .md-tlt>i{font:700 12px/1 var(--f);color:var(--c-ink2);padding:10px 4px;text-align:center;}
-.md-bar{position:absolute;top:12px;height:28px;border-radius:6px;padding:0 7px;display:flex;align-items:center;
-  font:600 11.5px/1 var(--f);overflow:hidden;white-space:nowrap;border:1px solid transparent;}
-.md-bar span{overflow:hidden;text-overflow:ellipsis;}
-.md-bar.st-kes{background:var(--c-violet-soft);color:var(--c-violet);border-color:#d8cdfd;}
-.md-bar.st-rez{background:var(--c-orange-soft);color:var(--c-orange);border-color:#f8dcc4;}
-.md-bar.st-eski{background:var(--c-line2);color:var(--c-ink2);border-style:dashed;border-color:var(--c-ink3);}
 .md-bugun{position:absolute;top:2px;bottom:2px;width:2px;background:var(--c-accent);opacity:.65;pointer-events:none;}
 
 /* bağlam sorusu (Kurum / İş) */
-.md-soru-k{margin:0 2px 10px;}
-.md-soru{font-size:15px;font-weight:700;margin:0;}
-.md-soru-s{font-size:13px;color:var(--c-ink2);margin:2px 0 0;}
+
 
 /* form + detay */
 .md-hdf{display:flex;flex-wrap:wrap;gap:5px;max-height:120px;overflow:auto;}
@@ -2066,21 +2048,18 @@ button.rcell{border:0;padding:0;font-family:inherit;position:relative;}
 
 @media (max-width:1100px){
   .md-fbar .fbar-row{grid-template-columns:1fr 1fr;}
-  .md-kmp{grid-template-columns:1fr 1fr;}
 }
 @media (max-width:640px){
   .md-fbar .fbar-row{grid-template-columns:1fr;}
-  .md-kmp{grid-template-columns:1fr;gap:3px;}
   .md-kmp-s{justify-content:flex-start;}
   .md-okunma{flex-direction:column;gap:2px;}
-  .md-tlr{grid-template-columns:130px minmax(620px,1fr);}
   .md-hl{grid-template-columns:1fr auto;}
   .md-dl{grid-template-columns:90px 1fr;}
   .md-secim>span{min-width:0;}
   .md-ah-r{margin-left:0;}
   /* Dar ekranda grup başlığı tek sütuna iner; özet satırı başlığın
      altında kalır ve bağlamsal eylem erişilebilir olmayı sürdürür. */
-  .md-skl{grid-template-columns:1fr;}
+
   /* Kontrol duvarı yok (S8.1 §19): mecra çipleri tek satırda yatay
      kayar, açıklama satırı gizlenir, arama tam genişlik, üç seçici iki
      sütuna sığar. Grup özetleri ilk ekranda görünür kalır. */
@@ -2108,113 +2087,49 @@ button.rcell{border:0;padding:0;font-family:inherit;position:relative;}
    Eski ızgara sınıfları (.rgrid/.rcell) Halil'in başka ekranlarında
    kullanıldığı için ayrı ad alanı olarak korunur.
    ========================================================== */
-.mtl-wrap{overflow-x:auto;overflow-y:visible;padding-bottom:4px;}
-.mtl{min-width:640px;}
 
-.mtl-row{display:flex;align-items:stretch;gap:10px;margin-bottom:7px;}
-.mtl-row:last-child{margin-bottom:0;}
 /* Fiziksel pozisyonlar arasında hafif ayırıcı (§4). */
-.mtl-row+.mtl-row:not(.mtl-kmp){border-top:1px solid var(--c-line,#eceef1);padding-top:7px;}
-.mtl-head+.mtl-row{border-top:0;padding-top:0;}
 
-.mtl-lbl{flex:0 0 122px;width:122px;display:flex;align-items:center;gap:7px;
-  position:sticky;left:0;z-index:3;background:var(--c-card,#fff);
-  font-size:13px;font-weight:700;color:var(--c-ink,#1d1d1f);min-width:0;}
-.mtl-lbl-w{flex-basis:172px;width:172px;flex-direction:column;align-items:flex-start;gap:1px;justify-content:center;}
-.mtl-ad{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;}
-.mtl-alt{font-size:11.5px;font-weight:500;color:var(--c-ink3,#86868b);
-  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;}
 .mtl-cb{flex:0 0 auto;margin:0;cursor:pointer;}
 
 /* A/B kendi dar sütununda; şeritlerle tam hizalı. */
-.mtl-ab{flex:0 0 15px;width:15px;display:flex;flex-direction:column;gap:3px;padding:2px 0;
-  position:sticky;left:122px;z-index:3;background:var(--c-card,#fff);}
-.mtl-ab i{flex:1 1 0;display:flex;align-items:center;justify-content:center;font-style:normal;
-  font-size:11px;font-weight:800;color:var(--c-ink3,#86868b);line-height:1;}
+
 
 /* Ay ızgarası ARKA planda AYRI bir katmandır; satırın yüksekliğini
    ŞERİTLER belirler. (Önceden şeritler mutlak konumluydu ve satır
    yüksekliği etiket sütunundan geliyordu; A/B harfleri şeritlerle
    9px kayıyordu.) */
-.mtl-trk{position:relative;flex:1 1 auto;min-width:0;}
+
 /* Başlık satırının izi hâlâ ızgaradır (ay adları yan yana dizilir);
    veri satırlarında ızgara ayrı bir arka plan katmanıdır. */
-.mtl-trk-g{display:grid;}
-.mtl-bg{position:absolute;inset:0;display:grid;z-index:0;}
-.mtl-gl{border-left:1px solid var(--c-line,#f0f2f4);min-height:100%;}
-.mtl-gl:first-child{border-left:0;}
-.mtl-gl.bu{background:rgba(31,111,235,.035);}
+
 
 /* Bugün: net ama kayıtları bastırmayan çizgi. */
-.mtl-bugun-l{position:absolute;top:0;bottom:0;width:1px;background:#1f6feb;opacity:.55;z-index:2;pointer-events:none;}
-.mtl-bugun{position:absolute;top:0;bottom:0;width:1px;background:#1f6feb;opacity:.7;z-index:2;}
-.mtl-bugun i{position:absolute;top:-1px;left:3px;font-style:normal;font-size:9.5px;font-weight:800;
-  letter-spacing:.03em;color:#1f6feb;white-space:nowrap;}
 
-.mtl-head{position:sticky;top:0;z-index:4;background:var(--c-card,#fff);padding-bottom:5px;margin-bottom:9px;
-  border-bottom:1px solid var(--c-line,#e6e8eb);}
-.mtl-head .mtl-lbl{z-index:5;font-size:11px;font-weight:700;letter-spacing:.04em;
-  text-transform:uppercase;color:var(--c-ink3,#86868b);}
-.mtl-mh{display:flex;align-items:baseline;justify-content:center;gap:3px;padding:3px 0;
-  border-left:1px solid var(--c-line,#f0f2f4);font-size:11.5px;font-weight:700;color:var(--c-ink2,#6e6e73);}
-.mtl-mh:first-child{border-left:0;}
-.mtl-mh em{font-style:normal;font-size:10px;font-weight:600;color:var(--c-ink3,#86868b);}
-.mtl-mh.bu{color:#1f6feb;background:rgba(31,111,235,.06);border-radius:5px 5px 0 0;}
 
 /* Şeritler: A ve B ayrı; okunabilir yükseklik (§4: ~20-24px). */
-.mtl-lanes{position:relative;display:flex;flex-direction:column;gap:3px;padding:2px 0;z-index:1;}
-.mtl-sat{position:relative;flex:1 1 0;display:flex;align-items:stretch;min-height:22px;}
+
 
 /* BOŞ zemin: nötr. Yıl boyunca yeşil şerit YOK. */
-.mtl-lane{position:relative;flex:1 1 auto;border-radius:5px;
-  background:#f6f7f9;box-shadow:inset 0 0 0 1px #eceef1;cursor:pointer;}
-.mtl-lane:hover{background:#f0f2f5;}
-.mtl-lane.mtl-yok{background:repeating-linear-gradient(45deg,#f6f7f9,#f6f7f9 4px,#eef0f3 4px,#eef0f3 8px);
-  box-shadow:none;cursor:default;}
-.mtl-lane.mtl-pasif{background:#f1f2f4;box-shadow:inset 0 0 0 1px #e6e8eb;cursor:default;}
-.mtl-pasif-t{position:absolute;left:7px;top:50%;transform:translateY(-50%);font-size:10.5px;
-  font-weight:700;color:#98a1ab;pointer-events:none;}
+
 /* Müsaitlik aramasının OLUMLU sonucu — yeşil yalnız burada. */
-.mtl-lane.musait{background:rgba(52,168,83,.14);box-shadow:inset 0 0 0 1px rgba(52,168,83,.38);}
+
 
 /* Kayıt çubuğu: yazı dikey ortalı, taşan ad üç noktayla kesilir. */
-.mtl-bar{position:absolute;top:0;bottom:0;border:0;border-radius:5px;padding:0 6px;cursor:pointer;
-  display:flex;align-items:center;justify-content:flex-start;overflow:hidden;color:#fff;
-  font:600 11px/1 inherit;letter-spacing:.01em;z-index:2;}
-.mtl-bar span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;}
-.mtl-bar.kes{background:#3b6fd4;}                    /* rezervasyon: sakin mavi */
-.mtl-bar.ops{background:#d98324;}                    /* opsiyon: amber */
+                    /* rezervasyon: sakin mavi */
+                    /* opsiyon: amber */
 /* Geçmiş: AYNI tür rengi, düşük vurgu — ayrı bir "eski" türü DEĞİL. */
-.mtl-bar.gecmis{opacity:.45;}
+
 /* Gerçek uyarı: süresi geçmiş opsiyon. Kırmızı YALNIZ burada. */
-.mtl-bar.sur{box-shadow:inset 0 0 0 2px #c0392b;}
-.mtl-bar.soluk{opacity:.22;}
-.mtl-bar.vurgu{box-shadow:0 0 0 2px #fff,0 0 0 4px rgba(59,111,212,.55);z-index:4;}
-.mtl-bar:hover{filter:brightness(1.06);z-index:3;}
+
 /* Seçim/odak çerçevesi durum renginden AYIRT EDİLİR (mor halka). */
-.mtl-bar:focus-visible{outline:none;box-shadow:0 0 0 2px #fff,0 0 0 4px #7c4dff;z-index:5;}
+
 
 /* Bitişik yenileme: ince ayraç. Ayrı bir durum DEĞİL, lejantta yok. */
-.mtl-bar.bitisik{border-top-left-radius:0;border-bottom-left-radius:0;
-  box-shadow:inset 2px 0 0 0 rgba(255,255,255,.9);}
-.mtl-bar.bitisik.sur{box-shadow:inset 2px 0 0 0 rgba(255,255,255,.9),inset 0 0 0 2px #c0392b;}
 
-.mtl-bar.tsol{border-top-left-radius:0;border-bottom-left-radius:0;}
-.mtl-bar.tsol::before{content:"‹";position:absolute;left:2px;top:50%;transform:translateY(-50%);
-  font-size:12px;font-weight:900;opacity:.9;}
-.mtl-bar.tsag{border-top-right-radius:0;border-bottom-right-radius:0;}
-.mtl-bar.tsag::after{content:"›";position:absolute;right:2px;top:50%;transform:translateY(-50%);
-  font-size:12px;font-weight:900;opacity:.9;}
 
 /* Boş alan önizlemesi: hover / klavye odağı (§2). */
-.mtl-ipucu{position:absolute;top:2px;bottom:2px;border-radius:5px;pointer-events:none;
-  background:rgba(59,111,212,.13);box-shadow:inset 0 0 0 1px rgba(59,111,212,.45);
-  display:flex;align-items:center;padding:0 7px;font:600 10.5px/1 inherit;color:#2b4f96;
-  white-space:nowrap;overflow:hidden;z-index:3;}
 
-.mtl-kt{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
-.mtl-kmp .mtl-lane{background:transparent;box-shadow:none;cursor:default;}
-.mtl-kmp .mtl-lane:hover{background:transparent;}
 .md-ekran{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 10px;}
 .md-ekran .chip em{font-style:normal;font-weight:600;opacity:.7;margin-left:4px;}
 
@@ -2226,14 +2141,7 @@ button.rcell{border:0;padding:0;font-family:inherit;position:relative;}
 .rg-legend .sw.bos{background:#f6f7f9;box-shadow:inset 0 0 0 1px #dfe3e8;}
 .rg-legend .sw.musait{background:rgba(52,168,83,.25);box-shadow:inset 0 0 0 1px rgba(52,168,83,.55);}
 
-@media (max-width:760px){
-  .mtl{min-width:560px;}
-  .mtl-lbl{flex-basis:92px;width:92px;font-size:12px;}
-  .mtl-lbl-w{flex-basis:124px;width:124px;}
-  .mtl-ab{left:92px;}
-  .mtl-kt{gap:8px;}
-  .mtl-kt .year-nav .yr{font-size:12.5px;}
-}
+
 
 /* PS9 kapanış: süresi dolmuş opsiyon uyarısı + envanter ekleme önizleme */
 .md-ops-uyari{display:flex;flex-direction:column;gap:6px;margin:0 0 14px;padding:11px 13px;
@@ -2255,13 +2163,8 @@ button.rcell{border:0;padding:0;font-family:inherit;position:relative;}
 .md-fchip button{border:0;background:transparent;cursor:pointer;font-size:11px;line-height:1;
   color:var(--c-ink3,#86868b);padding:2px 3px;border-radius:50%;}
 .md-fchip button:hover{background:rgba(0,0,0,.08);color:var(--c-ink,#1d1d1f);}
-.md-ms{align-items:center;gap:8px;flex-wrap:wrap;}
-.md-ms-l{font-size:12.5px;font-weight:700;color:var(--c-ink2,#6e6e73);white-space:nowrap;}
-.md-ms .inp-sm{max-width:165px;}
 .md-ms-ozet{margin:0 0 12px;padding:9px 12px;border-radius:9px;font-size:13px;
   background:rgba(52,168,83,.10);box-shadow:inset 0 0 0 1px rgba(52,168,83,.32);color:var(--c-ink,#1d1d1f);}
-.mtl-ad.btn-link{font-weight:700;font-size:13px;padding:0;text-align:left;
-  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;}
 /* Lejant ekran başına tek: gövdenin sonunda. */
 .md-lejant .rg-legend{margin-top:4px;padding-top:0;border-top:0;}
 .md-lejant{margin:2px 0 0;padding:10px 14px;background:var(--c-card,#fff);border-radius:12px;
@@ -2273,12 +2176,9 @@ button.rcell{border:0;padding:0;font-family:inherit;position:relative;}
    bl-th, pill, pgr, sz-sec) yeniden kullanılır.
    ===================================================================== */
 /* Müsaitlik: tek kompakt grup — Başlangıç | Bitiş | Müsaitlik ara | Temizle */
-form.md-ms{display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap;margin:8px 0 0;
-  padding-top:10px;border-top:1px solid var(--c-hair,#eceef1);}
-form.md-ms .md-ms-l{align-self:center;margin-right:2px;}
+
 .md-ms-f{display:flex;flex-direction:column;gap:3px;font-size:11.5px;font-weight:600;color:var(--c-ink3,#86868b);}
 .md-ms-f .inp-sm{width:160px;max-width:none;}
-form.md-ms .btn{height:34px;}
 .md-ms-hata{flex-basis:100%;margin:2px 0 0;font-size:12.5px;font-weight:600;color:#b3272b;}
 .md-ms-hata[hidden]{display:none;}
 .md-ms-ozet{display:flex;flex-direction:column;gap:4px;}
@@ -2286,13 +2186,11 @@ form.md-ms .btn{height:34px;}
 .md-ms-ozet.hata span{color:var(--c-ink2,#6e6e73);}
 .md-ms-uyari{padding:6px 8px;border-radius:7px;background:rgba(245,166,35,.12);color:var(--c-ink,#1d1d1f);font-size:12.5px;}
 /* Aranan dönem takvimde işaretlenir: başlıkta etiketli bant, satırlarda zemin. */
-.mtl-ms-bant{position:absolute;top:0;bottom:0;background:rgba(52,168,83,.10);
-  box-shadow:inset 1px 0 0 rgba(52,168,83,.55),inset -1px 0 0 rgba(52,168,83,.55);pointer-events:none;z-index:1;}
-.mtl-ms-bant.b{background:rgba(52,168,83,.18);}
+
 /* Bugüne git: bugün zaten görünüyorsa sakin, kısa vurgu (sıçrama yok). */
-@keyframes mtlBugunVurgu{0%{box-shadow:0 0 0 0 rgba(31,111,235,.0);}30%{box-shadow:0 0 0 4px rgba(31,111,235,.28);opacity:1;}100%{box-shadow:0 0 0 0 rgba(31,111,235,0);}}
-.mtl-bugun.vurgu,.mtl-bugun-l.vurgu{animation:mtlBugunVurgu 1.4s ease-out 1;opacity:1;width:2px;}
-@media (prefers-reduced-motion: reduce){.mtl-bugun.vurgu,.mtl-bugun-l.vurgu{animation:none;width:3px;}}
+
+
+
 
 /* Hafıza > Belgeler — kompakt liste */
 .bl-fbar .fbar-row{gap:8px;flex-wrap:wrap;}
@@ -2353,11 +2251,8 @@ form.md-ms .btn{height:34px;}
 .bd-hist span{flex-basis:100%;color:var(--c-ink2,#6e6e73);}
 
 @media (max-width:760px){
-  form.md-ms{align-items:stretch;}
-  form.md-ms .md-ms-l{flex-basis:100%;}
   .md-ms-f{flex:1 1 140px;}
   .md-ms-f .inp-sm{width:100%;}
-  form.md-ms .btn{flex:1 1 auto;}
   .bl-fbar select.inp{flex:1 1 100%;}
   .bl-f2 .bl-not{margin:0;max-width:none;}
   .bx-main{flex-wrap:wrap;gap:8px 10px;}
@@ -2397,36 +2292,20 @@ form.md-ms .btn{height:34px;}
 .md-seg button:hover{background:#fff;color:var(--c-ink,#1d1d1f);}
 .md-seg button.on{background:var(--c-ink,#1d1d1f);color:#fff;box-shadow:0 1px 2px rgba(16,24,40,.18);}
 .md-seg button:focus-visible{outline:2px solid var(--c-accent);outline-offset:2px;}
-.md-rgun{display:flex;flex-direction:column;gap:3px;font-size:11.5px;font-weight:600;color:var(--c-ink3,#86868b);}
-.md-rgun input.inp{width:160px;height:34px;flex:0 0 auto;min-width:0;}
-.md-rgun-n{font-size:12.5px;color:var(--c-ink2,#6e6e73);align-self:center;}
 .md-durum-row .md-ms-hata{flex-basis:100%;}
 /* Aynı seçim dili: değeri olan süzgeç kutusu ve seçili ölçek */
 .md-fbar select.inp.inp-on,.bl-fbar select.inp.inp-on{background:#f1f3f7;border-color:var(--c-ink,#1d1d1f)!important;
   box-shadow:inset 0 0 0 1px var(--c-ink,#1d1d1f);font-weight:700;color:var(--c-ink,#1d1d1f);}
 .md-head .ws-switch button.on{background:var(--c-ink,#1d1d1f);color:#fff;}
-.md-dz-yakinda{background:rgba(52,168,83,.07);}
 .md-dz-opsiyon{background:rgba(217,131,36,.09);box-shadow:inset 0 0 0 1px rgba(217,131,36,.35);}
-.md-dz-yayinda{background:rgba(59,111,212,.08);box-shadow:inset 0 0 0 1px rgba(59,111,212,.32);}
 
 /* Şeritler: eşleşen yüz / eşleşmeyen yüz / boşalma günü / durum tarihi */
-.mtl-lane.yakinda{background:rgba(52,168,83,.07);box-shadow:inset 0 0 0 1px rgba(52,168,83,.3);}
-.mtl-lane.eslesmez{opacity:.55;}
-.mtl-lane.eslesmez::after{content:'';position:absolute;inset:0;background:repeating-linear-gradient(135deg,transparent 0 6px,rgba(0,0,0,.035) 6px 7px);pointer-events:none;}
-.mtl-bar.vurgu{box-shadow:0 0 0 2px #fff,0 0 0 4px rgba(29,29,31,.55);z-index:4;}
-.mtl-bar.gecmis{opacity:.5;}
-.mtl-bar.gecmis.vurgu{opacity:.75;}
-.mtl-bosalma{position:absolute;top:-1px;bottom:-1px;width:0;border-left:2px solid #2e9e57;z-index:5;pointer-events:none;}
-.mtl-bosalma i{position:absolute;left:3px;top:50%;transform:translateY(-50%);font:700 10.5px/1 var(--f);font-style:normal;
-  color:#1f7a3a;background:#fff;padding:1px 3px;border-radius:3px;white-space:nowrap;box-shadow:0 0 0 1px rgba(52,168,83,.35);}
-.mtl-ref{position:absolute;top:0;bottom:0;width:0;border-left:1.5px dashed #6b7280;z-index:2;pointer-events:none;}
-.mtl-ref.b i{position:absolute;top:-1px;left:3px;font:800 9.5px/1 var(--f);font-style:normal;color:#4b5563;}
+
 .rg-legend .sw.yakinda{background:rgba(52,168,83,.12);box-shadow:inset 2px 0 0 #2e9e57,inset 0 0 0 1px rgba(52,168,83,.4);}
 .rg-legend .sw.ref{background:transparent;border-left:1.5px dashed #6b7280;border-radius:0;width:2px;}
 .rg-legend .sw.gecmis{opacity:.5;}
 /* Takvimde göster hedefi: satır + bar belirgin (renk tek başına değil kalın çerçeve) */
-.mtl-row.md-odak{background:#fff7e0;}
-.mtl-bar.md-odak,.mtl-row.md-odak .mtl-bar.md-odak{box-shadow:0 0 0 2px #fff,0 0 0 4px #b45309;z-index:6;}
+
 .md-odak-not{display:block;font-style:normal;font-size:12px;color:#8a5a00;margin-top:2px;}
 
 /* Harita (S11 §4) */
@@ -2448,7 +2327,6 @@ button.hrow{width:100%;border:0;background:transparent;text-align:left;font:inhe
 .hsel-y{display:inline-grid;place-items:center;min-width:26px;height:20px;border-radius:5px;background:var(--c-line2);font:800 11px/1 var(--f);color:var(--c-ink2);}
 @media (max-width:760px){
   .md-seg{width:100%;} .md-seg button{flex:1 1 auto;padding:8px 8px;}
-  .md-rgun{flex:1 1 150px;} .md-rgun input.inp{width:100%;}
 }
 .hmap-not{margin:0 0 10px;padding:8px 12px;border-radius:9px;background:#f1f5fb;color:#2f4a73;font-size:13px;box-shadow:inset 0 0 0 1px #d8e2f1;}
 /* S11 §5: aşama taslağı — seçilen aşama işaretli, Kaydet/Vazgeç görünür */
@@ -2646,8 +2524,8 @@ body.mdl-acik{overflow:hidden;}
 .rp3-tab tr.son td{border-bottom:1px solid #9c9ca3;}
 .rp3-tab tr.dis td{opacity:.45;}
 .rp3-dol td{min-width:132px;text-align:center;vertical-align:middle;}
-.rp3-dol .rp3-no{min-width:30px;font-weight:700;background:#fafafb;}
-.rp3-dol .rp3-yuz{min-width:78px;text-align:left;background:#fafafb;position:sticky;left:0;z-index:1;white-space:nowrap;}
+.rp3-dol .rp3-no{min-width:30px;width:1%;font-weight:700;background:#fafafb;}
+.rp3-dol .rp3-yuz{min-width:0;width:1%;text-align:left;background:#fafafb;position:sticky;left:0;z-index:1;white-space:nowrap;}
 .rp3-dol .rp3-yuz label{display:inline-flex;align-items:center;gap:6px;cursor:pointer;}
 .rp3-p{line-height:1.25;margin:1px 0;} .rp3-p b{display:block;font-size:12.5px;}
 .rp3-p small{display:block;font-size:11px;color:inherit;opacity:.9;margin-top:0;}
@@ -2692,9 +2570,9 @@ body.mdl-acik{overflow:hidden;}
 .mtb tbody th.mtb-pano{position:sticky;left:0;z-index:2;background:#fafafb;text-align:left;vertical-align:middle;
   padding:6px 8px;font-weight:600;border-right:1px solid #d6d6db;}
 .mtb thead th.mtb-pano{left:0;}
-.mtb .mtb-yz{position:sticky;left:118px;z-index:2;background:#fafafb;text-align:center;vertical-align:middle;padding:0;
+.mtb .mtb-yz{position:sticky;left:var(--pg,118px);z-index:2;background:#fafafb;text-align:center;vertical-align:middle;padding:0;
   border-right:1px solid #cfcfd6;}
-.mtb thead th.mtb-yz{left:118px;text-align:center;}
+.mtb thead th.mtb-yz{left:var(--pg,118px);text-align:center;}
 .mtb-yz b{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:6px;
   background:#eceef2;font-size:12px;color:var(--c-ink2);}
 .mtb-no{display:inline-block;min-width:16px;font-size:11px;color:var(--c-ink3);font-weight:600;margin-right:2px;}
@@ -2746,10 +2624,6 @@ body.mdl-acik{overflow:hidden;}
   color:#fff;background:#1f6feb;border-radius:3px;padding:2px 4px;}
 .mtb-bugun.vurgu{animation:mtbBugun 1.4s ease-out 1;opacity:1;width:3px;}
 @keyframes mtbBugun{0%{box-shadow:0 0 0 4px rgba(31,111,235,.35);}100%{box-shadow:none;}}
-.mtb-ref{position:absolute;top:0;bottom:0;width:0;border-left:1.5px dashed #4b5563;z-index:1;pointer-events:none;}
-.mtb-ref.b i{position:absolute;top:1px;left:3px;font:800 9.5px/1 var(--f);font-style:normal;color:#4b5563;}
-.mtb-ms{position:absolute;bottom:0;height:4px;background:#2e9e57;z-index:1;pointer-events:none;}
-.mtb-ms.b{bottom:auto;top:0;height:4px;}
 @media (prefers-reduced-motion: reduce){.mtb-ay.vurgu,.mtb-b.md-odak,.mtb-bugun.vurgu{animation:none;}}
 /* LED: satır = kampanya */
 .mtb tbody th.mtb-kmp{position:sticky;left:0;z-index:2;background:#fafafb;text-align:left;vertical-align:middle;
@@ -2765,13 +2639,13 @@ body.mdl-acik{overflow:hidden;}
 /* Gösterge */
 .rg-legend .mtb-sw{width:18px;height:13px;border-radius:3px;border:1px solid rgba(0,0,0,.12);}
 .rg-legend .mtb-sw-bugun{width:3px;height:14px;border-radius:0;background:#1f6feb;}
-.rg-legend .mtb-sw-ms{width:18px;height:4px;border-radius:0;background:#2e9e57;}
 .rg-legend .mtb-uy{display:inline;}
-.mtb col.c-pano{width:118px;} .mtb col.c-yuz{width:40px;}
+.mtb col.c-pano{width:var(--pg,118px);} .mtb col.c-yuz{width:40px;}
 @media (max-width:760px){
   .mtb-wrap{max-height:70vh;}
   .mtb{font-size:12px;}
-  .mtb col.c-pano{width:78px;} .mtb .mtb-yz,.mtb thead th.mtb-yz{left:78px;}
+  /* sıra no gizli: pano sütunu ondan kazanılan 18 px kadar dar */
+  .mtb col.c-pano{width:calc(var(--pg,96px) - 18px);} .mtb .mtb-yz,.mtb thead th.mtb-yz{left:calc(var(--pg,96px) - 18px);}
   .mtb-no{display:none;}
 }
 .mtb-bu-e{font-style:normal;font:800 10px/1 var(--f);color:#fff;background:#1f6feb;border-radius:4px;padding:2px 5px;margin-left:6px;vertical-align:1px;}
@@ -2880,3 +2754,11 @@ form.md-ara.bekliyor .md-ara-go{box-shadow:0 0 0 3px rgba(241,201,107,.55);}
 .hg-tools button{white-space:nowrap;}
 .hg-tools>span:first-child{white-space:nowrap;}
 .hmap-main .hselbar{margin:12px 0 0;}
+
+/* S18 — pano sütunu içeriğe göre (mdPanoGen): no, kutu ve kod tek satırda */
+.mtb tbody th.mtb-pano{padding:6px 6px;}
+.mtb-pano .mtl-cb{margin:0 3px 0 0;}
+.mtb-ad.btn-link{white-space:nowrap;}
+.mtb-bos{white-space:normal;font-size:10.5px;}
+/* S18: dar kısmi ay sütununda (ör. "Haziran · yalnız 30") çip alt satıra iner, kırpılmaz */
+.mtb-ay.dar .mtb-kismi{display:block;width:max-content;margin:3px auto 0;}

@@ -708,6 +708,8 @@ function logYaz(act, body, q){
 }
 
 /* ---- Veri katmanı köprüsü: eski api(action,body) -> Supabase ---- */
+/* Silme 0 satır döndürdüğünde: kayıt başka biri tarafından silinmiş ya da yetki yok. */
+const SILINEMEDI='Kayıt silinemedi: artık yok ya da silme yetkiniz yok. Sayfayı yenileyip tekrar bakın.';
 const DELMAP={product_delete:'products',mecra_delete:'mecralar',alt_delete:'alt_mecralar',unit_delete:'units',customer_delete:'customers',contact_delete:'contacts',team_delete:'team',note_delete:'notes',quote_delete:'quotes',job_delete:'jobs',entry_delete:'entries',work_party_delete:'work_parties',operation_delete:'work_operations'};
 /* ---- Tema uyumlu diyaloglar (tarayıcı alert/confirm yerine) ---- */
 /* S13 — onay penceresi erişilebilirliği:
@@ -814,7 +816,11 @@ async function api(action, body){
   if(act.endsWith('_delete') && DELMAP[act]){
     const delId=(q.id!=null&&q.id!=='')?q.id:(body&&body.id);
     if(delId==null||delId==='') throw new Error('Silinecek kayıt belirtilmedi.');
-    const {error}=await sb.from(DELMAP[act]).delete().eq('id',delId); if(error)throw error; logYaz(act,body,q); return ok(); }
+    /* S18: RLS'in reddettiği silme (0 satır) başarı SAYILMAZ — rolü düşürülmüş
+       eski sekmede "silindi" deyip kaydı yerinde bırakıyordu. */
+    const {data:sil,error}=await sb.from(DELMAP[act]).delete().eq('id',delId).select('id'); if(error)throw error;
+    if(!sil||!sil.length) throw new Error(SILINEMEDI);
+    logYaz(act,body,q); return ok(); }
 
   switch(act){
     case 'dashboard_stats':{
@@ -890,7 +896,8 @@ async function api(action, body){
                       firma:c.firma||mm[j.mecra_id]||'—',kisi:km[j.customer_id]||'',mecra:mm[j.mecra_id]||''}; }); })()
       });
     }
-    case 'jobs_list':{ const {data,error}=await sb.from('jobs').select('*').order('sort').order('id'); if(error)throw error; return ok(data); }
+    /* S18: sessiz 1000 satır tavanı yok (S5.1 kalıbı) — tam liste sayfalı okunur. */
+    case 'jobs_list':{ return ok(await rapHepsi(()=>sb.from('jobs').select('*').order('sort').order('id'))); }
     /* S11 §5 — koşullu güncelleme (iyimser eşzamanlılık). Yalnız DEĞİŞEN
        alanlar yazılır ve satır, form açıldığındaki eski değerleri hâlâ
        taşıyorsa güncellenir. Başka biri arada aynı alanı değiştirdiyse 0
@@ -991,9 +998,9 @@ async function api(action, body){
     case 'media_update':{
       const {data,error}=await sb.rpc('media_placement_update',{p_id:body.id,p_patch:body.patch});
       if(error)throw error; if(data&&data.ok) logYaz(act,body); return ok(data); }
-    case 'media_jobs':{ const {data,error}=await sb.from('jobs')
-        .select('id,title,customer_id,lifecycle_status,status').order('title');
-      if(error)throw error; return ok(data); }
+    case 'media_jobs':{ const data=await rapHepsi(()=>sb.from('jobs')
+        .select('id,title,customer_id,lifecycle_status,status').order('title').order('id'));
+      return ok(data); }
     case 'media_work_parties':{ const {data,error}=await sb.from('work_parties')
         .select('customer_id,role').eq('job_id',q.job_id).not('customer_id','is',null);
       if(error)throw error; return ok(data); }
@@ -1045,11 +1052,13 @@ async function api(action, body){
       const data=await rapHepsi(()=>sb.from('customers').select('*').order('id',{ascending:false}));
       kurumEkYaz(data); return ok(data); }
     case 'customer_save': { const r=await saveRow('customers',body); logYaz(act,body); return ok(r); }
-    case 'customer_delete':{ const {error}=await sb.from('customers').delete().eq('id',body.id); if(error)throw error; return ok(true); }
+    case 'customer_delete':{ const {data:sil,error}=await sb.from('customers').delete().eq('id',body.id).select('id'); if(error)throw error;
+      if(!sil||!sil.length) throw new Error(SILINEMEDI); return ok(true); }
 
     case 'suppliers_list':{ const {data,error}=await sb.from('suppliers').select('*').order('firma'); if(error)throw error; return ok(data); }
     case 'supplier_save': { const r=await saveRow('suppliers',body); logYaz(act,body); return ok(r); }
-    case 'supplier_delete':{ const {error}=await sb.from('suppliers').delete().eq('id',body.id); if(error)throw error; return ok(true); }
+    case 'supplier_delete':{ const {data:sil,error}=await sb.from('suppliers').delete().eq('id',body.id).select('id'); if(error)throw error;
+      if(!sil||!sil.length) throw new Error(SILINEMEDI); return ok(true); }
 
     case 'quotes_list':{ const {data,error}=await sb.from('quotes').select('*').order('created_at',{ascending:false}); if(error)throw error; return ok(data); }
     case 'units_full':{
@@ -1197,7 +1206,7 @@ async function api(action, body){
       if(error)throw error; logYaz(act,{sayi:(body.docs||[]).length}); return ok(data); }
     case 'entry_create_docs':{
       const {data,error}=await sb.rpc('entry_create_with_documents',
-        {p_entry:body.entry, p_ilgili:body.ilgili||[], p_docs:body.docs||[]});
+        {p_entry:body.entry, p_ilgili:body.ilgili||[], p_docs:body.docs||[], p_islem:body.islem||null});
       if(error)throw error; logYaz('entry_save',{id:data}); return ok({id:data}); }
     case 'document_update':{
       const patch={}; ['title','doc_type','note'].forEach(k=>{ if(k in body) patch[k]=body[k]; });
@@ -1468,14 +1477,17 @@ async function api(action, body){
     /* ---- Baskı / Montaj operasyonları (Sprint 05) ----
        Work'ün structured child'ı; Booking parent zorunlu değildir. */
     case 'operations_list':{
-      let sel=sb.from('work_operations').select(q.belge?'*,'+BELGE_SEL:'*');
-      if(q.job_id)   sel=sel.eq('job_id',q.job_id);
-      if(q.from)     sel=sel.gte('planned_date',q.from);
-      if(q.to)       sel=sel.lte('planned_date',q.to);
-      if(q.type)     sel=sel.eq('operation_type',q.type);
-      if(q.status)   sel=sel.eq('status',q.status);
-      const {data,error}=await sel.order('planned_date',{ascending:true,nullsFirst:false})
-        .order('id').limit(q.limit?+q.limit:1000);
+      /* S18: açık limit yoksa sayfalı tam okuma (önceden sessiz 1000 tavanı).
+         Sorgu kurucusu değiştirilebilir: her sayfa TAZE sorgu kurar. */
+      const sirali=()=>{ let sel=sb.from('work_operations').select(q.belge?'*,'+BELGE_SEL:'*');
+        if(q.job_id)   sel=sel.eq('job_id',q.job_id);
+        if(q.from)     sel=sel.gte('planned_date',q.from);
+        if(q.to)       sel=sel.lte('planned_date',q.to);
+        if(q.type)     sel=sel.eq('operation_type',q.type);
+        if(q.status)   sel=sel.eq('status',q.status);
+        return sel.order('planned_date',{ascending:true,nullsFirst:false}).order('id'); };
+      if(!q.limit) return ok(await rapHepsi(sirali));
+      const {data,error}=await sirali().limit(+q.limit);
       if(error)throw error; return ok(data); }
     case 'operation_save':{
       const row={...body};
@@ -1511,10 +1523,10 @@ async function api(action, body){
        Gerçek iş kişileri yalnız `contacts` tablosundadır; legacy
        `customers.ilgili_kisi` Contact değildir (S02_001). */
     case 'contacts_list':{
-      let sel=sb.from('contacts').select('*');
-      if(q.customer_id) sel=sel.eq('customer_id',q.customer_id);
-      const {data,error}=await sel.order('is_primary',{ascending:false}).order('name');
-      if(error)throw error; return ok(data); }
+      const data=await rapHepsi(()=>{ let sel=sb.from('contacts').select('*');
+        if(q.customer_id) sel=sel.eq('customer_id',q.customer_id);
+        return sel.order('is_primary',{ascending:false}).order('name').order('id'); });
+      return ok(data); }
     case 'contact_save':{
       /* S13: `ana_kurum` yalnız "kurumun ana kişisi" düşürmesi içindir; satıra
          yazılmaz (düzenlemede customer_id artık gönderilmez). */
@@ -1636,7 +1648,8 @@ async function api(action, body){
 
     case 'pages_list':{ const {data,error}=await sb.from('pages').select('*').order('sort'); if(error)throw error; return ok(data); }
     case 'page_save':{ const row={slug:body.slug}; ['title','body','blocks','in_menu','sort'].forEach(k=>{ if(body[k]!==undefined)row[k]=body[k]; }); const {error}=await sb.from('pages').upsert(row,{onConflict:'slug'}); if(error)throw error; return ok(); }
-    case 'page_delete':{ const {error}=await sb.from('pages').delete().eq('slug',q.slug); if(error)throw error; return ok(); }
+    case 'page_delete':{ const {data:sil,error}=await sb.from('pages').delete().eq('slug',q.slug).select('slug'); if(error)throw error;
+      if(!sil||!sil.length) throw new Error(SILINEMEDI); return ok(); }
 
     case 'settings_get':{ const {data,error}=await sb.from('settings').select('k,v'); if(error)throw error; const o={}; data.forEach(r=>o[r.k]=r.v); return ok(o); }
     case 'settings_save':{ const rows=Object.entries(body).map(([k,v])=>({k,v})); const {error}=await sb.from('settings').upsert(rows,{onConflict:'k'}); if(error)throw error; logYaz(act,body); return ok(); }
@@ -1739,18 +1752,22 @@ async function kimlikDogrula(hemen){
   let s=null; try{ s=(await sb.auth.getSession()).data.session; }catch(e){ return; }
   if(!s){ oturumBitti('Oturumunuz sona erdi. Devam etmek için yeniden giriş yapın.'); return; }
   let me; try{ me=await api('me'); }catch(e){ return; }      /* ağ hatası: karar verilmez */
-  if(!me||me.active===false) oturumBitti('Bu hesabın panel erişimi artık etkin değil. Yöneticinizle iletişime geçin.',true);
+  if(!me||me.active===false){ oturumBitti('Bu hesabın panel erişimi artık etkin değil. Yöneticinizle iletişime geçin.',true); return; }
+  /* S18: yetki (app_role) değiştiyse açık sekme eski yüzeyi ve yönetici
+     düğmelerini göstermeye devam etmez: sunucu zaten reddeder, ama arayüz
+     yanıltıcı olurdu. */
+  if((me.app_role||'team_member')!==ui._role) oturumBitti('Hesabınızın yetkisi değişti. Paneli güncel yetkiyle açmak için sayfayı yenileyin.',true,'Yetkiniz değişti');
 }
-function oturumBitti(msg,kalici){
+function oturumBitti(msg,kalici,baslik){
   if(_oturumAcik) return; _oturumAcik=true;
   const bg=document.createElement('div'); bg.id='oturumBg'; bg.className='mpdlg-bg on';
   bg.innerHTML=`<div class="mpdlg" role="alertdialog" aria-modal="true" aria-labelledby="otT" aria-describedby="otM">
-    <div class="mpdlg-t" id="otT">${kalici?'Erişim kapandı':'Oturum sona erdi'}</div>
+    <div class="mpdlg-t" id="otT">${esc(baslik||(kalici?'Erişim kapandı':'Oturum sona erdi'))}</div>
     <div class="mpdlg-m" id="otM">${esc(msg)}${kalici?'':' Açık formunuz korunuyor; aynı hesapla giriş yapınca kaldığınız yerden devam edebilirsiniz.'}</div>
     ${kalici?'':`<div class="field"><label class="flabel" for="otE">E-posta</label><input class="inp" id="otE" type="email" autocomplete="username" value="${esc(ui._email||'')}"></div>
     <div class="field"><label class="flabel" for="otP">Şifre</label><input class="inp" id="otP" type="password" autocomplete="current-password"></div>
     <div class="lg-err" id="otH" role="alert" hidden></div>`}
-    <div class="mpdlg-b">${kalici?'<button class="btn btn-primary" onclick="location.reload()">Giriş ekranına dön</button>'
+    <div class="mpdlg-b">${kalici?`<button class="btn btn-primary" onclick="location.reload()">${baslik?'Sayfayı yenile':'Giriş ekranına dön'}</button>`
       :'<button class="btn btn-ghost" onclick="location.reload()">Sayfayı yenile</button><button class="btn btn-primary" id="otB" onclick="oturumYenidenGir()">Giriş yap</button>'}</div></div>`;
   document.body.appendChild(bg);
   const p=document.getElementById('otP'); if(p){ p.addEventListener('keydown',e=>{ if(e.key==='Enter') oturumYenidenGir(); }); p.focus(); }
@@ -3717,6 +3734,7 @@ function qcAc(a,b){
   const secili=new Set(duz?((ui._ilgiMap&&ui._ilgiMap[duz.id])||[]):[]);
 
   const duzDue=duz&&duz.due_at?String(new Date(duz.due_at).toLocaleDateString('sv-SE')):'';
+  if(!duz) islemYeni('qc');                        /* S18: yeni form = yeni oluşturma girişimi */
   modal(`<h3 style="margin:0 0 12px">${duz?'Güncellemeyi düzenle':'Bir güncelleme paylaş…'}</h3>
     <input type="hidden" id="qcId" value="${duz?duz.id:0}">
     ${kilitliKisi?`<input type="hidden" id="qcKisi" value="${kilitliKisi}">`:''}
@@ -3857,17 +3875,24 @@ async function qcKaydet(){
   row._ilgili=Array.from(document.querySelectorAll('.qcRel:checked')).map(x=>+x.value);
   modalBusy(true);
   let r=null;
-  if(!id&&ekBekleyen('qc').length){
+  if(!id){
     /* S6 §31: once dosyalar yuklenir; Entry + etiketler + belgeler TEK
-       veritabani isleminde yazilir. Yukleme ya da kayit basarisizsa bos
-       ya da yarim bir guncelleme OLUSMAZ; dosyalar temizlenir. */
-    if(!await ekYukle('qc')){ modalBusy(false);
+       veritabani isleminde yazilir. S18: dosyasiz yeni guncelleme de ayni
+       tek islemden gecer (onceden entries ve entry_relevance iki ayri
+       istekti) ve PS14 tekillik anahtarini tasir: yanit kaybolup tekrar
+       gonderilirse ikinci guncelleme OLUSMAZ. Sonuc belirsizse yuklenen
+       dosyalar SILINMEZ (kayit onlari gostermis olabilir); yalniz sunucunun
+       kesin reddettigi girisimde temizlenir. */
+    if(ekBekleyen('qc').length&&!await ekYukle('qc')){ modalBusy(false);
       mpAlert('Bazı dosyalar yüklenemedi. “Tekrar dene” ile yeniden deneyin ya da çıkarın.','Dosya'); return; }
     const docs=ekGovde('qc',[]).map(d=>{ const x={...d}; delete x.links; return x; });
-    try{ r=await api('entry_create_docs',{entry:row,ilgili:row._ilgili,docs}); }
-    catch(err){ await ekGeriAl('qc','Kaydedilemedi.'); modalBusy(false);
-      mpAlert((err&&err.message)||String(err),'Kayıt oluşturulamadı'); return; }
+    const s=await islemCalistir('qc','entry_create','Güncelleme: '+(body||'dosya').slice(0,40),
+      k=>api('entry_create_docs',{entry:row,ilgili:row._ilgili,docs,islem:k}),'Kayıt oluşturulamadı');
+    if(s.durum!=='tamam'){
+      if(s.durum==='hata'&&!s.onceKayitli&&docs.length) await ekGeriAl('qc','Kaydedilemedi.');
+      modalBusy(false); return; }
     ekBekleyen('qc').forEach(i=>{ i.kaydedildi=true; });
+    r=s.sonuc;
   } else {
     r=await guard(()=>api('entry_save',row),id?'Güncelleme kaydedilemedi':'Kayıt oluşturulamadı');
     if(r===null){ modalBusy(false); return; }
@@ -4059,7 +4084,7 @@ async function jobMove(id,status){
   ui._fazTaslak={id,st:status}; ui._dirty=true;
   await workAc(id,{bolum:'faz'});
 }
-async function jobDelete(id){ if(await mpConfirm('Bu iş kaydı silinsin mi? Bağlı güncellemeler de silinir. Belgeler silinmez; Hafıza > Belgeler\'de kalır.','İşi Sil')){ await api('job_delete&id='+id); renderSection(); } }
+async function jobDelete(id){ if(await mpConfirm('Bu iş kaydı silinsin mi? Bağlı güncellemeler de silinir. Belgeler silinmez; Hafıza > Belgeler\'de kalır.','İşi Sil')){ if(await guard(()=>api('job_delete&id='+id),'Silinemedi')===null) return; renderSection(); } }
 
 /* ---------- WORK DETAIL (07 §7) ---------- */
 /* S7.1 ust hiyerarsi: Ad -> Kurum/kisi -> ASAMA (belirgin) -> operasyonel
@@ -7512,7 +7537,7 @@ async function prodSave(){
   finally{ _prodKayit=false; if(b&&b.isConnected) b.disabled=false; }
   toast('Ürün kaydedildi.'); renderSection();
 }
-async function prodDel(id){ if(await mpConfirm('Ürün silinsin mi? Bu ürünü kullanan alanlarda ürün bağlantısı boşalır.','Ürünü Sil')){ await api('product_delete&id='+id); renderSection(); } }
+async function prodDel(id){ if(await mpConfirm('Ürün silinsin mi? Bu ürünü kullanan alanlarda ürün bağlantısı boşalır.','Ürünü Sil')){ if(await guard(()=>api('product_delete&id='+id),'Silinemedi')===null) return; renderSection(); } }
 
 
 /* Görünürlük seçici: her ikisi / sadece masaüstü / sadece mobil / gizle */
@@ -8261,7 +8286,7 @@ async function mecSave(){ const id=+gv('mid');
   if(r===null) return;
   mecTemizle(); toast('Mecra kaydedildi.');
   ui._mecralar=await api('mecra_list'); mecEdit(id||(r&&r.id)||0); }
-async function mecDel(id){ if(await mpConfirm('Mecra, tüm alt mecraları, pozisyonları ve DOLULUK GEÇMİŞİ birlikte silinir. Bu işlem geri alınamaz.','Mecrayı Sil')){ await api('mecra_delete&id='+id); renderSection(); } }
+async function mecDel(id){ if(await mpConfirm('Mecra, tüm alt mecraları, pozisyonları ve DOLULUK GEÇMİŞİ birlikte silinir. Bu işlem geri alınamaz.','Mecrayı Sil')){ if(await guard(()=>api('mecra_delete&id='+id),'Silinemedi')===null) return; renderSection(); } }
 async function mecReorder(id,dir){ let list=(ui._mecralar||[]).slice(); const idx=list.findIndex(x=>x.id===id); const j=idx+dir; if(idx<0||j<0||j>=list.length)return; [list[idx],list[j]]=[list[j],list[idx]]; for(let k=0;k<list.length;k++){ if((list[k].sort||0)!==k) await api('mecra_save',{id:list[k].id,sort:k}); } ui._mecralar=await api('mecra_list'); renderSection(); }
 
 async function loadAltList(mid){ const alts=await api('alt_list&mecra_id='+mid); ui._alts=alts;
@@ -8270,7 +8295,7 @@ async function loadAltList(mid){ const alts=await api('alt_list&mecra_id='+mid);
     <button class="btn btn-outline btn-sm" onclick="altEdit(${a.id},${mid})">Düzenle</button><button class="btn btn-danger btn-sm" onclick="altDel(${a.id},${mid})">Sil</button></div>`).join('') : '<p class="muted">Alt mecra yok.</p>';
 }
 async function altAdd(mid){ const pid=(ui._products[0]||{}).id||null; const r=await api('alt_save',{mecra_id:mid,product_id:pid,name:'Yeni Alan'}); ui._alts=await api('alt_list&mecra_id='+mid); altEdit(r.id,mid); }
-async function altDel(id,mid){ if(await mpConfirm('Alt mecra, pozisyonları ve doluluk geçmişiyle birlikte silinir.','Alt Mecrayı Sil')){ await api('alt_delete&id='+id); loadAltList(mid); } }
+async function altDel(id,mid){ if(await mpConfirm('Alt mecra, pozisyonları ve doluluk geçmişiyle birlikte silinir.','Alt Mecrayı Sil')){ if(await guard(()=>api('alt_delete&id='+id),'Silinemedi')===null) return; loadAltList(mid); } }
 
 async function altEdit(id,mid){ if(ui._dirty && !(await dirtyGuard())) return;
   const alts=await api('alt_list&mecra_id='+mid); ui._alts=alts; const a=alts.find(x=>x.id===id)||{galeri:[]};
@@ -8356,7 +8381,7 @@ async function unitAdd(altId,mid){ const alt=(ui._alts||await api('alt_list&mecr
   await api('unit_save',{alt_mecra_id:altId,mecra_id:mid,product_id:alt.product_id,name:'Yeni Pozisyon'}); altEdit(altId,mid); }
 async function unitSave(id,field,value){ const body={id}; body[field]=value; await api('unit_save',body); }
 function unitFoto(uid,altId,mid){ pickUpload('image/*',async u=>{ await api('unit_save',{id:uid,image:u}); altEdit(altId,mid); }); }
-async function unitDel(id,altId,mid){ if(await mpConfirm('Pozisyon ve doluluk geçmişi silinsin mi?','Pozisyonu Sil')){ await api('unit_delete&id='+id); altEdit(altId,mid); } }
+async function unitDel(id,altId,mid){ if(await mpConfirm('Pozisyon ve doluluk geçmişi silinsin mi?','Pozisyonu Sil')){ if(await guard(()=>api('unit_delete&id='+id),'Silinemedi')===null) return; altEdit(altId,mid); } }
 /* S8: eski birim takvimi (`loadUnitCal/drawUnitCal/cycleMonth`) KALDIRILDI.
    Çağıranı yoktu ve tıklamada aylık `bookings` yazıyordu — gizli ikinci
    bir doluluk yazarı olarak kalamazdı. */
@@ -10354,7 +10379,7 @@ function qbPrint(){
   w.document.close(); setTimeout(()=>w.print(),400);
 }
 
-async function quoteDel(id){ if(await mpConfirm('Teklif ve kalemleri silinsin mi?','Teklifi Sil')){ await api('quote_delete&id='+id); renderSection(); } }
+async function quoteDel(id){ if(await mpConfirm('Teklif ve kalemleri silinsin mi?','Teklifi Sil')){ if(await guard(()=>api('quote_delete&id='+id),'Silinemedi')===null) return; renderSection(); } }
 
 /* ---------- EKİP ---------- */
 async function ekip(c){
@@ -10564,7 +10589,7 @@ async function teamSave(){
   const r=await guard(()=>api('team_save',body),'Kaydedilemedi');
   if(r===null)return; closeModal(); renderSection(); toast('Profil kaydedildi.');
 }
-async function teamDel(id){ if(await mpConfirm('Ekip üyesi silinsin mi?','Üyeyi Sil')){ await api('team_delete&id='+id); ui._teamOpen=null; renderSection(); } }
+async function teamDel(id){ if(await mpConfirm('Ekip üyesi silinsin mi?','Üyeyi Sil')){ if(await guard(()=>api('team_delete&id='+id),'Silinemedi')===null) return; ui._teamOpen=null; renderSection(); } }
 
 /* ---------- SAYFALAR ---------- */
 async function sayfalar(c){
@@ -10737,7 +10762,7 @@ async function pageSaveBlocks(){
   finally{ _pageKayit=false; }
   ui._pages=await api('pages_list').catch(()=>ui._pages); toast('Sayfa kaydedildi.');
 }
-async function pageDel(slug){ if(await mpConfirm('Sayfa silinsin mi?','Sayfayı Sil')){ await api('page_delete&slug='+encodeURIComponent(slug)); renderSection(); } }
+async function pageDel(slug){ if(await mpConfirm('Sayfa silinsin mi?','Sayfayı Sil')){ if(await guard(()=>api('page_delete&slug='+encodeURIComponent(slug)),'Silinemedi')===null) return; renderSection(); } }
 /* S14: yeni sayfa artık upsert DEĞİL insert: aynı adresli bir sayfa varsa
    önceki davranış onun başlığını ve içeriğini BOŞ sayfayla eziyordu. */
 async function pageNew(){
@@ -10909,7 +10934,7 @@ async function noteSave(){
   }catch(e){ modalBusy(false); kayitHata(e,'Not kaydedilemedi'); return; }
   modalBusy(false); closeModal(); renderSection(); toast('Not kaydedildi.');
 }
-async function noteDel(id){ if(await mpConfirm('Not silinsin mi?','Notu Sil')){ await api('note_delete&id='+id); renderSection(); } }
+async function noteDel(id){ if(await mpConfirm('Not silinsin mi?','Notu Sil')){ if(await guard(()=>api('note_delete&id='+id),'Silinemedi')===null) return; renderSection(); } }
 
 /* ---------- AYARLAR ---------- */
 async function ayarlar(c){

@@ -96,9 +96,9 @@ begin
   if v > 0 then raise exception 'DENETİM 8 DÜŞTÜ: islem_anahtarlari istemciye açık (% yetki)', v; end if;
   select count(*) into v from pg_proc
    where pronamespace = 'public'::regnamespace
-     and proname in ('job_create', 'media_placements_create', 'operations_batch_create', 'document_create')
+     and proname in ('job_create', 'media_placements_create', 'operations_batch_create', 'document_create', 'entry_create_with_documents')
      and pg_get_function_identity_arguments(oid) like '%p_islem uuid';
-  if v <> 4 then raise exception 'DENETİM 8 DÜŞTÜ: % / 4 oluşturma yolu anahtar kabul ediyor', v; end if;
+  if v <> 5 then raise exception 'DENETİM 8 DÜŞTÜ: % / 5 oluşturma yolu anahtar kabul ediyor', v; end if;
   raise notice 'DENETİM 8 ✓ işlem tekillik anahtarı yerinde ve istemciye kapalı';
 
   ---------------------------------------------------------------- 9
@@ -124,5 +124,23 @@ begin
   if v <> 0 then raise exception 'DENETİM 10 DÜŞTÜ: belge silme hâlâ "önce dosya" sırasına bağlı'; end if;
   raise notice 'DENETİM 10 ✓ belge dosyası bütünlüğü (kilit + önce kayıt)';
 
-  raise notice '--- 10/10 DENETİM GEÇTİ ---';
+  ---------------------------------------------------------------- 11
+  -- PS18: sahip yetkisiyle çalışan tek public görünüm yalnız okunur; tetikleyici
+  -- fonksiyonları RPC olarak çağrılamaz; SECURITY DEFINER fonksiyonlarında
+  -- search_path sabittir.
+  select count(*) into v from information_schema.role_table_grants
+   where table_schema = 'public' and table_name = 'booking_availability_public'
+     and grantee in ('anon', 'authenticated') and privilege_type <> 'SELECT';
+  if v > 0 then raise exception 'DENETİM 11 DÜŞTÜ: public görünümde % yazma yetkisi', v; end if;
+  select count(*) into v from pg_proc p
+   where p.pronamespace = 'public'::regnamespace and p.prorettype = 'trigger'::regtype
+     and (has_function_privilege('anon', p.oid, 'execute') or has_function_privilege('authenticated', p.oid, 'execute'))
+     and p.prosecdef;
+  if v > 0 then raise exception 'DENETİM 11 DÜŞTÜ: % SECURITY DEFINER tetikleyici fonksiyonu istemciye açık', v; end if;
+  select count(*) into v from pg_proc p
+   where p.pronamespace = 'public'::regnamespace and p.prosecdef
+     and not exists (select 1 from unnest(coalesce(p.proconfig, '{}')) c where c like 'search_path=%');
+  if v > 0 then raise exception 'DENETİM 11 DÜŞTÜ: % SECURITY DEFINER fonksiyonunda search_path yok', v; end if;
+  raise notice 'DENETİM 11 ✓ public görünüm salt okunur, tetikleyiciler RPC değil, search_path sabit';
+  raise notice '--- 11/11 DENETİM GEÇTİ ---';
 end $$;
