@@ -296,3 +296,125 @@ da takip/sahip olduğum işte acil düz güncelleme, son 7 gün, en çok 12.
 - Çıktılar Excel'in kendisiyle PDF'e basılıp sayfa sayfa incelendi.
 - Mecralar M1 tam yıl, üç grup açık: 1.104 hücre ~20 ms; 1440 ve 390 px'te
   sayfa taşması yok.
+
+---
+
+# Sprint 17 — Mecralarda tek dönem, doğrudan Excel ve harita
+
+Migration yok (toplam 33). Değişen: `assets/medya.js`, `assets/panel.js`
+(adres katmanı + harita), `assets/rapor.js` (ortak yardımcılar, LED sayfası),
+`assets/panel.css`, `admin.html` (v147).
+
+## Tek dönem (uygulanan arama)
+
+Eski "durum tarihi", ayrı "müsaitlik araması" ve yıl/ölçek/çapa durumu
+kaldırıldı. `sessionStorage['mp_medya']` (sürüm 17) yalnız uygulanmış aramayı
+tutar: `bas`, `bit`, `hazir` ('6' | '3' | 'yil' | ''), `merkez`, `durum`,
+`site`, `urun`, `kurum`, `is`, `q`, `alan`, `gecmisGizle`, `acik`.
+
+- "Bugün" `Europe/Istanbul`dur (`mdBugun`, `Intl`).
+- Takvim ayı ekleme ay sonuna sınırlanır (`mdAyKaydir`): 31.08 + 3 ay = 30.11;
+  31.05 − 3 ay = 28/29.02.
+- Normal ilk açılış: 6 ay, merkez bugün → bugün−3 ay … bugün+3 ay
+  (30.09.2026 → 30.06–30.12.2026). Yedi ay sütununa değebilir; kısmi ilk/son
+  ay başlıkta ("yalnız 30", "1–30") ve özet satırında yazılır, dönem dışı
+  günler gri ve müsait sayılmaz.
+- Hazır dönemler: 6 ay = merkez ±3 ay; 3 ay = merkezden 3 ay ileri; Yıl =
+  merkezin takvim yılı. ‹ › hazır dönemin adımıyla (6/3/12 ay), özel aralık
+  kendi uzunluğu kadar kayar. Bugüne git merkezi bugüne alır; özel aralıkta
+  uzunluk korunur, başlangıç bugün olur. Süzgeçler korunur.
+- Elle aralık `mdHazirBul` ile bir hazır döneme denk değilse hiçbir hazır
+  dönem seçili görünmez.
+- Sürüm farkı (eski saklanmış yıl görünümü) → normal ilk açılış. Dokunulmamış
+  varsayılan dönem (`oto`) gün dönünce yeni bugüne göre kurulur.
+- Adres: `#/mecralar?lok=&grup=&bas=&bit=&durum=&gecmis=gizli`. Tarihli adres
+  aramanın tamamıdır ve varsayılanla ezilmez. S16 öncesi `?donem=YYYY-MM&olcek=N`
+  tarih aralığına çevrilir. Arama metni adrese yazılmaz.
+
+## Taslak ve uygulama
+
+Form taslağı (`ui._mdTaslak`, bellek) hiçbir hesaba, tabloya, adrese ya da
+Excel'e girmez. Yazarken ekran yeniden çizilmez; yalnız Ara / Enter uygular
+(tarih doğrulaması S10 kuralıyla aynı; en çok üç yıl). Bekleyen değişiklik
+"Bekleyen değişiklik · Aramayı uygula" göstergesiyle söylenir. Hazır dönem,
+‹ ›, Bugüne git yalnız dönemi uygular; formdaki diğer bekleyen değişiklik
+taslak olarak kalır. Aktif filtre etiketi kaldırma, programatik geçiş
+(`medyaGit`, kayıt bağlantısı, harita) uygulanan aramayı değiştirir.
+
+"Geçmiş ayları gizle" yalnız görünümdür (`mdEtkin`): bugünün ayından önceki
+kısım düşer, bugünün ayının geçmiş günleri silinmez; etkin dönem özet satırında
+yazar ve tablo, sayaç, Excel etkin dönemi kullanır. Tamamen geçmiş aralıkta
+boş durum + "Geçmiş ayları göster".
+
+## Durumlar — tek sonuç (`mdSonuc`)
+
+Sayaç, tablo satırları, vurgular, seçilebilir yüzler ve üç seviyedeki Excel
+aynı `mdSonuc(M, st)` nesnesinden beslenir. Tümü seçili ETKİN dönem [B, E] içindir.
+
+| Durum | Kural |
+|---|---|
+| Tümü | kapsamdaki bütün aktif statik yüzler; kurum/iş/metin süzgeci varsa dönemde eşleşen kaydı olanlar |
+| Opsiyonlu | dönemle kesişen, iptal edilmemiş opsiyon (süresi dolmuş dahil) |
+| Yayın | dönemle kesişen kesin yayın (geçmiş ve planlanan dahil; kayıtta Yayında/Planlandı/Bitti) |
+| Müsait | dönemin TAMAMINDA engelleyici kaydı olmayan statik yüz; kurum/iş daraltmaz |
+| Dönem içinde boşalacak | `mdBosalma`: önceki gün bloklu, o gün boş ve gün [B, E] içinde; kesintisiz yenileme ve ertesi gün başlayan kayıt birleşir; bitişsiz ya da ay bazlı/bitişsiz eski son halka tarih üretmez; kurum/iş boşalan zincirde aranır |
+
+- A/B ayrı; A/B'den yalnız biri sonuçtaysa diğeri tabloya ve Excel'e eklenmez.
+- Süzgeç bir yüzün diğer kayıtlarını hesaptan çıkarmaz: dilimler her zaman tüm
+  engelleyici kayıtlarla çizilir (eşleşmeyen kayıt soluk görünür).
+- LED: Opsiyonlu/Yayın dönemle kesişen kampanyaları getirir; Müsait/Boşalacak
+  LED'i dışarıda bırakır ve bunu söyler. Kapasite/boş slot yok.
+- Pasif yüzler sonuçta yer almaz, sayısı notta yazar.
+- Yüz ayrıntısı ve haritadaki "Bugün" satırı ayrı ve etiketlidir (`mdYuzeyDurum`);
+  eski "Yakında boşalacak" etiketi kaldırıldı.
+
+## Doğrudan Excel (`mdExcel`)
+
+"Doluluk tablosu" düğmesi artık Raporlar'a yönlendirmez. Üç seviye:
+genel (`{}`), mecra (`{site}`), ürün grubu (`{alan}`). Kapsam uygulanan
+sonucun tamamıdır: kaydırmayla erişilen satırlar, kapalı gruplar dahil; toplu
+kayıt seçim kutuları ve form taslağı kapsamı değiştirmez.
+
+- Sayfa düzeni Raporlar › Mecra doluluk tablosu ile aynıdır: `rpXlsDosya` +
+  `rpXlsDoluluk`; yüz dilimi `rpYuzSegModel`, pano düzeni `rpPanolar`
+  (RPD_MECRA de bunları kullanır — çıktısı değişmedi). Satır 2: dönem +
+  "Durum: …"; satır 4: kurum/iş/ürün/arama ve geçmiş gizleme süzgeçleri.
+  İç kullanımdır (kurum adları yazılır). Raporlar'ın ayarları okunmaz.
+- LED: `rpXlsLedAylik` — satır = kampanya, aylar sütunda, kampanyanın o aya
+  (dönemle kırpılmış) düşen günleri; boş ay beyaz ve metinsizdir.
+- Dosya adı: `Medyapark_Doluluk_<mecra>[_<ürün>][_<durum>]_<başlangıç>_<bitiş>.xlsx`.
+- Tazelik: indirme anında veri yeniden okunur; kapsamın kayıt imzası değiştiyse
+  dosya üretilmez, tablo yenilenir ve kullanıcıya söylenir. Arama indirme
+  sırasında değişirse dosya üretilmez. Veri okunurken, indirme sürerken ve sonuç
+  boşken düğmeler kilitlidir.
+
+## Harita
+
+- Liste (mecra → ürün → pano) daraltılabilir; "Listeyi gizle · haritayı
+  genişlet" üst çubukta her zaman erişilebilir. Arama (mecra/ürün/pano/konum),
+  "Yalnız konumu olanlar"; konumu olmayanlar ayrı `<details>` bölümünde.
+  Aramada eşleşen dallar açılır. Pinler listenin konumlu sonuçlarıdır.
+- Doluluk'ta uygulanan mecra/ürün kapsamı listeye "Doluluk kapsamı" etiketiyle
+  taşınır; kaldırmak yalnız haritayı etkiler.
+- Liste → pin (işaret + uçuş); pin → liste satırı (dal açılır, görünür alana,
+  odak). "Sonuçları haritaya sığdır" konumlu sonuçlara; hiç yoksa söyler.
+- Bilgi kartı haritanın ALTINDA (seçimde harita kaymaz): ad, mecra › ürün,
+  ölçü, konum; her yüz için uygulanan dönemin kayıtları ve ayrıca etiketli
+  "Bugün". Karma A/B tek renkli hükme indirgenmez. "Dolulukta göster" doğru
+  mecra/grubu açar, dönemi korur, panonun A/B satırlarını vurgular.
+- Konumsuz pano seçilince haritada seçili pin kalmaz, açık mesaj görünür.
+- Pin rengi mecradır (divIcon), doluluk değildir.
+- Konum: yalnız yönetici, yalnız "Konum ekle / Konumu düzenle" ile açılan
+  düzenleme modunda; tıklama/sürükleme yalnız taslak üretir, Kaydet tüm yüzleri
+  tek istekte yazar, Vazgeç yazmaz. Team için düzenleme denetimi yok; doğrudan
+  API de RLS'e takılır.
+- Google/OSM düşüşü korunur; ResizeObserver + `invalidateSize` ile sekme, liste
+  ve pencere değişiminde yeniden ölçülür. Harita ayarları (metinler, Google
+  anahtarı) yönetici için kapalı bir bölüme alındı.
+
+## Doğrulama (30.09.2026)
+
+- Temiz test yığını: e2e 113/113 (103 + S17'nin 10 senaryosu), erişim 10/10,
+  mecra 8/8. S16 ve adres testleri yeni durum modeline uyarlandı.
+- Excel dosyaları indirilen baytlardan (ExcelJS) okunarak doğrulandı: yüzler =
+  sonuç, durum başlıkta, taslak dosyaya girmiyor, LED boş ay "Müsait" yazmıyor.

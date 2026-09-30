@@ -2785,3 +2785,98 @@ body.mdl-acik{overflow:hidden;}
 .rp2-g1.rp4-gec{color:#a32117;}
 .rp2-chk.pasif{opacity:.6;}
 .rp2-chk em{font-style:normal;color:var(--c-ink3);font-size:12px;margin-left:4px;}
+
+/* ==========================================================
+   S17 — Mecralar: tek dönem araması, doğrudan Excel, harita
+   Mevcut dil yeniden kullanılır (md-seg, ws-switch, md-fchip, mtb-*,
+   hselbar); yeni renk sistemi yok.
+   ========================================================== */
+.md-ara .md-donem-row{display:flex;align-items:flex-end;gap:10px 14px;flex-wrap:wrap;margin:0 0 10px;}
+.md-hazir{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;}
+.md-hazir .ws-switch button.on{background:var(--c-ink,#1d1d1f);color:#fff;}
+.md-nav{width:34px;height:34px;border-radius:9px;border:1px solid var(--c-line);background:#fff;font:700 16px/1 var(--f);
+  color:var(--c-ink2);cursor:pointer;}
+.md-nav:hover{border-color:var(--c-ink3);color:var(--c-ink);}
+.md-nav:focus-visible,.md-bekleyen:focus-visible,.md-xls:focus-visible{outline:2px solid var(--c-accent);outline-offset:2px;}
+.md-ara .md-ms-f .inp-sm{width:160px;height:34px;}
+.md-ara .mtl-gk{align-self:center;font-size:13px;display:inline-flex;gap:6px;align-items:center;}
+.md-ara .md-site{margin:0 0 10px;}
+.md-ara-b{display:inline-flex;align-items:center;gap:10px;flex-wrap:wrap;margin-left:auto;}
+.md-ara-go{min-width:84px;height:34px;}
+.md-bekleyen{border:0;cursor:pointer;font:700 12.5px/1 var(--f);color:#7a4a00;background:#fff3d6;
+  box-shadow:inset 0 0 0 1px #f1c96b;border-radius:999px;padding:8px 12px;}
+.md-bekleyen[hidden]{display:none;}
+form.md-ara.bekliyor .md-ara-go{box-shadow:0 0 0 3px rgba(241,201,107,.55);}
+.md-sonuc{margin:0 0 12px;padding:10px 14px;border-radius:12px;background:var(--c-card,#fff);
+  box-shadow:inset 0 0 0 1px var(--c-line,#e6e8eb);display:flex;flex-direction:column;gap:5px;font-size:13px;}
+.md-sonuc-h{display:flex;align-items:baseline;gap:6px 12px;flex-wrap:wrap;}
+.md-sonuc-e{font:800 11px/1 var(--f);text-transform:uppercase;letter-spacing:.04em;color:var(--c-ink3);}
+.md-sonuc-c{font-size:12px;color:var(--c-ink2);background:var(--c-line2);border-radius:999px;padding:2px 8px;}
+.md-sonuc-s{font-size:13.5px;}
+.md-sonuc-k{font-size:12.5px;}
+.md-dz-musait{box-shadow:inset 0 0 0 1px rgba(52,168,83,.4);background:rgba(52,168,83,.06);}
+.md-dz-bosalacak{box-shadow:inset 0 0 0 1px rgba(52,168,83,.4);}
+.md-dz-yayin{box-shadow:inset 0 0 0 1px rgba(59,111,212,.32);background:rgba(59,111,212,.05);}
+.md-yil-h{display:flex;align-items:center;gap:10px;justify-content:space-between;margin:14px 2px 8px;}
+.md-yil-h .md-yil-t{margin:0;}
+.md-xls[disabled]{opacity:.5;cursor:not-allowed;}
+.mtb-ay.kismi{background:#f4f4f6;}
+.mtb-ay.kismi.bu{background:#ffe9a8;}
+.mtb-kismi{display:inline-block;font-style:normal;font:700 10.5px/1 var(--f);color:#5e5e64;background:#e4e4e8;
+  border-radius:4px;padding:2px 5px;margin-left:6px;vertical-align:1px;}
+.mtb-bos{display:block;margin-top:3px;font:700 11px/1.25 var(--f);color:#155a2a;}
+.mtb-b.bosalma{box-shadow:inset 0 0 0 2px #1f7a3a;}
+.md-bos{display:flex;align-items:center;gap:12px;flex-wrap:wrap;}
+@media (max-width:760px){
+  .md-ara-b{margin-left:0;width:100%;}
+  .md-ara-go{flex:1 1 auto;}
+  .md-ara .md-ms-f{flex:1 1 140px;} .md-ara .md-ms-f .inp-sm{width:100%;}
+  .md-yil-h{margin-top:10px;}
+}
+
+/* Harita (S17): daraltılabilir liste, bilgi kartı, konumsuzlar ayrı */
+.hmap-ayar summary{cursor:pointer;font-size:14px;}
+.hmap-ayar[open] summary{margin-bottom:4px;}
+.hmap-ust{display:flex;align-items:flex-start;justify-content:space-between;gap:10px 16px;flex-wrap:wrap;margin:0 0 10px;}
+.hmap-ust h3{margin:0 0 4px;font-size:16px;}
+.hmap-ust .hmap-kap{margin:0;}
+.hmap-ust-r{display:flex;gap:8px;flex-wrap:wrap;}
+.hmap-grid.liste-kapali{grid-template-columns:1fr;}
+.hmap-side[hidden]{display:none;}
+.hside-f{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 8px;}
+.hside-f .rp2-chk{margin:0;}
+.hmap-side .inp{margin-bottom:8px;}
+.hg-tools .sp{flex:1;}
+.hdot.yok{background:#fff;box-shadow:inset 0 0 0 1.5px #9c9ca3;border-radius:50%;}
+.hlist-bos{font-size:13px;padding:10px;}
+.hkonumsuz{border-top:1px solid var(--c-line2);margin-top:4px;}
+.hkonumsuz>summary{cursor:pointer;display:flex;align-items:center;gap:8px;padding:9px 10px;font-size:13px;font-weight:700;color:var(--c-ink2);}
+.hkonumsuz .hrow{padding-left:18px;}
+.hrow:focus-visible{outline:2px solid var(--c-accent);outline-offset:-2px;}
+.hmap-secnot{position:absolute;left:50%;transform:translateX(-50%);top:12px;z-index:600;max-width:90%;
+  background:#fff7e0;border:1px solid #f3dca0;color:#6e3d00;border-radius:10px;padding:8px 12px;font-size:13px;font-weight:600;
+  box-shadow:0 2px 8px rgba(16,24,40,.1);}
+.hmap-secnot[hidden]{display:none;}
+.hpin span{display:block;width:14px;height:14px;border-radius:50%;border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.45);}
+.hduzen[hidden]{display:none;}
+.hselbar{display:block;}
+.hk-h{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;flex-wrap:wrap;}
+.hk-ad{font-size:15px;}
+.hk-m{display:flex;align-items:center;gap:6px 12px;flex-wrap:wrap;margin:6px 0 0;font-size:12.5px;color:var(--c-ink2);}
+.hk-donem{margin:8px 0 0;font-size:12.5px;}
+.hk-yuzler{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:8px;margin:8px 0 0;}
+.hk-yuz{background:#fff;border:1px solid var(--c-line);border-radius:10px;padding:8px 10px;}
+.hk-yh{font-size:13px;margin:0 0 6px;}
+.hk-d{display:grid;grid-template-columns:52px 1fr;gap:6px;font-size:12.5px;padding:4px 0;border-top:1px solid var(--c-line2);}
+.hk-e{font:800 10.5px/1.6 var(--f);text-transform:uppercase;letter-spacing:.03em;color:var(--c-ink3);}
+.hk-e.hk-bu{color:#1f4fa8;}
+.hk-kl{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:3px;}
+.hk-kl .btn-link{font-weight:700;padding:0;}
+@media (max-width:760px){
+  .hmap-ust-r{width:100%;} .hmap-ust-r .btn{flex:1 1 auto;}
+  .hk-yuzler{grid-template-columns:1fr;}
+}
+.hg-tools{flex-wrap:nowrap;}
+.hg-tools button{white-space:nowrap;}
+.hg-tools>span:first-child{white-space:nowrap;}
+.hmap-main .hselbar{margin:12px 0 0;}

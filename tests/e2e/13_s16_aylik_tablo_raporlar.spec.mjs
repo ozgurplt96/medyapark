@@ -37,8 +37,10 @@ function fikstur() {
   return F;
 }
 async function tabloAc(page, F, ek = {}) {
-  await page.evaluate(([F, ek]) => medyaGit({ site: F.site, alan: '', kurum: '', is: '', q: '', urun: '', durum: '', msBas: '', msBit: '',
-    olcek: 12, ank: '2037-01', gecmisGizle: false, acik: { ['g' + F.alan]: true, ...(F.led ? { ['g' + F.led]: true } : {}) }, ...ek }), [F, ek]);
+  /* S17: dönem tek tarih aralığıdır (bas/bit); eski ölçek/çapa yok. */
+  await page.evaluate(([F, ek]) => medyaGit({ site: F.site, alan: '', kurum: '', is: '', q: '', urun: '', durum: '',
+    bas: '2037-01-01', bit: '2037-12-31', hazir: 'yil', merkez: '2037-01-01', gecmisGizle: false,
+    acik: { ['g' + F.alan]: true, ...(F.led ? { ['g' + F.led]: true } : {}) }, ...ek }), [F, ek]);
   await page.waitForFunction(u => document.querySelector(`#mdGovde tr[data-u="${u}"]`), F.A);
 }
 /* Yüzün verilen aydaki hücresi (sütun sırası başlıktaki data-ym'den). */
@@ -107,7 +109,7 @@ test.describe('Mecralar aylık yönetim tablosu', () => {
     const cNisan = await hucreSec(page, F.C, '2037-04');
     await expect(cNisan.locator(`.mtb-b[data-p="${F.p6}"]`)).toHaveClass(/soluk/);
     await expect(cNisan.locator('.t-musait')).toHaveCount(0);
-    await tabloAc(page, F, { olcek: 6, ank: '2037-10' });
+    await tabloAc(page, F, { bas: '2037-10-01', bit: '2038-03-31', hazir: '', merkez: '' });
     await expect(await hucreSec(page, F.A, '2038-01')).toContainText('20.12.2037–10.01.2038');   // yıl geçişi iki tarafta
   });
 

@@ -95,12 +95,19 @@ test('mecra lokasyonu ve dönemi adreste; bağlantı aynı pencereyi açar', asy
   const lok = +sql(`select min(id) from mecralar where operational`);
   await girisYap(page, 'uye');
   await page.evaluate(() => { location.hash = ''; });
+  /* S17: dönem tarih aralığıdır; S16 öncesi ?donem&olcek bağlantısı aralığa çevrilir. */
   await page.goto(`${APP}/admin#/mecralar?lok=${lok}&donem=2031-04&olcek=3`);
   await expect(page.locator('#ttl')).toHaveText('Mecralar');
-  const st = await page.evaluate(() => mdDurum());
-  expect([st.site, st.ank, st.olcek]).toEqual([lok, '2031-04', 3]);
+  let st = await page.evaluate(() => mdDurum());
+  expect([st.site, st.bas, st.bit]).toEqual([lok, '2031-04-01', '2031-06-30']);
   await expect.poll(() => hash(page)).toContain(`lok=${lok}`);
-  expect(await hash(page)).toContain('donem=2031-04');
+  expect(await hash(page)).toContain('bas=2031-04-01&bit=2031-06-30');
+  await page.goto(`${APP}/admin#/mecralar?lok=${lok}&bas=2031-02-10&bit=2031-05-10&durum=musait`);
+  await page.reload();
+  await page.waitForFunction(() => document.querySelector('#mdGovde .md-sonuc'));
+  st = await page.evaluate(() => mdDurum());
+  expect([st.bas, st.bit, st.durum, st.hazir]).toEqual(['2031-02-10', '2031-05-10', 'musait', '3']);   // adres varsayılanla ezilmez
+  await expect(page.locator('.md-sonuc')).toContainText('10.02.2031 – 10.05.2031');
 });
 
 test('açık belge ayrıntısı adreste; yenilemede yeniden açılır, kapanınca adresten düşer', async ({ page }) => {
