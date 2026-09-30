@@ -1980,7 +1980,8 @@ const navAyni=(a,b)=>!!a&&!!b&&a.v===b.v&&String(a.id||'')===String(b.id||'')&&a
 
      #/panelim  #/isler?sekme=liste  #/hafiza?sekme=belgeler  #/ajandam
      #/is/42  #/kurum/7  #/kisi/3  #/rapor/baski
-     #/mecralar?lok=2&grup=5&donem=2026-10&olcek=6   #/mecralar?gorunum=harita
+     #/mecralar?lok=2&grup=5&bas=2026-06-30&bit=2026-12-30&durum=musait   #/mecralar?gorunum=harita
+     (S16 öncesi ?donem=2026-10&olcek=6 bağlantıları tarih aralığına çevrilir)
      …?belge=15  (açık belge ayrıntısı)
 
    Adreste YALNIZ görünümü yeniden kuracak, hassas olmayan kimlikler durur:
@@ -2001,8 +2002,11 @@ function navEkParam(s){
       if(m.site) q.lok=m.site;
       const acik=Object.entries(m.acik||{}).filter(([,v])=>v===true).map(([k])=>k.slice(1));
       if(acik.length===1) q.grup=acik[0];
-      if(m.ank) q.donem=m.ank;
-      if(m.olcek&&+m.olcek!==12) q.olcek=m.olcek;
+      /* S17: uygulanan dönem ve durum adreste — yenileme, geri dönüş ve
+         paylaşılan bağlantı aynı aramayı açar. Arama metni YAZILMAZ. */
+      if(m.bas&&m.bit){ q.bas=m.bas; q.bit=m.bit; }
+      if(m.durum) q.durum=m.durum;
+      if(m.gecmisGizle) q.gecmis='gizli';
     }
   }catch(e){}
   return q;
@@ -2040,12 +2044,23 @@ function navParamUygula(h){
   if(h.s==='is-takibi'&&q.sekme) isTabYaz(q.sekme);
   if(h.s==='kurumlar'&&q.sekme&&/^[a-z]{2,20}$/.test(q.sekme)) hafYaz({...hafDurum(),tab:q.sekme});
   if(h.s==='ws-mecralar') ui._mecSub=q.gorunum==='harita'?'harita':'doluluk';
-  if((h.s==='ws-mecralar'||h.s==='listeler')&&typeof mdDurum==='function'&&(q.lok||q.donem||q.grup||q.olcek)){
+  if((h.s==='ws-mecralar'||h.s==='listeler')&&typeof mdDurum==='function'&&(q.lok||q.donem||q.grup||q.olcek||q.bas||q.bit||q.durum||q.gecmis)){
     const st=mdDurum();
     if(/^\d{1,9}$/.test(q.lok||'')) st.site=+q.lok;
-    if(/^20\d\d-(0[1-9]|1[0-2])$/.test(q.donem||'')){ st.ank=q.donem; st.yil=+q.donem.slice(0,4); }
-    if(['12','6','3'].includes(q.olcek)) st.olcek=+q.olcek;
+    /* Açık tarihli adres uygulanan dönemdir; varsayılanla EZİLMEZ.
+       Doğrulanmayan tarih yok sayılır (varsayılan/oturum dönemi kalır). */
+    const tarihOk=v=>/^\d{4}-\d{2}-\d{2}$/.test(v||'')&&!mdTarihDogrula(v).hata;
+    if(tarihOk(q.bas)&&tarihOk(q.bit)&&q.bas<=q.bit&&mdDn(q.bit)-mdDn(q.bas)<MD_MAX_GUN){
+      /* Tarihli adres aramanın tamamıdır: durum ve geçmiş gizleme de adresten. */
+      Object.assign(st,{bas:q.bas,bit:q.bit,durum:'',gecmisGizle:false},mdHazirBul(q.bas,q.bit)); }
+    else if(/^20\d\d-(0[1-9]|1[0-2])$/.test(q.donem||'')){
+      /* S16 öncesi bağlantı (?donem=YYYY-MM&olcek=N): ay penceresi tarih aralığına çevrilir. */
+      const n=['12','6','3'].includes(q.olcek)?+q.olcek:12, b=q.donem+'-01', e=mdAySonu(mdAyKaydir(b,n-1));
+      Object.assign(st,{bas:b,bit:e},mdHazirBul(b,e)); }
+    if(q.durum&&MD_DURUM.some(x=>x[0]===q.durum)) st.durum=q.durum;
+    if(q.gecmis) st.gecmisGizle=q.gecmis==='gizli';
     if(/^\d{1,9}$/.test(q.grup||'')) st.acik={...(st.acik||{}),[mdGrupKey({id:+q.grup})]:true};
+    ui._mdTaslak=null;
     mdDurumYaz(st);
   }
 }
@@ -8347,18 +8362,27 @@ async function unitDel(id,altId,mid){ if(await mpConfirm('Pozisyon ve doluluk ge
    bir doluluk yazarı olarak kalamazdı. */
 
 
-/* ---------- HARİTA (S11 §4) ----------
-   Doluluk sekmesiyle AYNI aktif kapsam ve AYNI durum hesabı (medya.js:
-   mdYukle / mdKapsamda / mdArsiv / mdYuzeyDurum / mdRefGun). Satır birimi
-   FİZİKSEL pano ya da LED ekranıdır:
+/* ---------- HARİTA (S11 §4 → S17) ----------
+   Doluluk sekmesiyle AYNI aktif kapsam ve AYNI hesap (medya.js: mdYukle /
+   mdSiteler / mdArsiv / mdYuzeyDurum / mdEtkin). Satır birimi FİZİKSEL
+   pano ya da LED ekranıdır:
      · A/B yüzleri aynı panonun iki yüzüdür → tek satır, tek konum;
      · LED kampanyaları pin DEĞİLDİR; fiziksel LED ekranları ayrı listelenir;
-     · kapsam dışı lokasyon, eski modelleme alanı ve pasif (ör. eski LED
-       yer tutucusu) envanter listeye girmez.
-   Koordinat uydurulmaz: konumu olmayan "Konum eklenmemiş" yazar.
-   Konum düzenleme yalnız yönetici ve yalnız "Konumu kaydet" ile yazılır;
-   bir panonun tüm yüzleri TEK istekte güncellenir. */
-let hMap=null, hCluster=null, hMarker=null, hRows=[], hSel=null, hQ='', hTaslak=null;
+     · kapsam dışı lokasyon, eski modelleme alanı ve pasif envanter yok.
+   S17 — Team kullanıcısı için bulma aracı:
+     · mecra → ürün → pano listesi daraltılabilir, tamamen gizlenip harita
+       genişletilebilir; arama, "yalnız konumu olanlar", konumsuzlar ayrı
+       açılabilir bölümde;
+     · liste ↔ pin karşılıklı seçim; "Sonuçları haritaya sığdır";
+     · bilgi kartı: ölçü, A/B yüzleri, Doluluk'ta UYGULANAN DÖNEMİN yayın /
+       opsiyon kayıtları ve ayrıca etiketli "Bugün" satırı;
+     · Doluluk'un uygulanan mecra / ürün kapsamı listeye taşınır (kaldırılabilir).
+   Pin KONUMU gösterir; rengi mecradır, doluluk değil. Koordinat uydurulmaz.
+   Konum yalnız yönetici, yalnız açık "Konumu düzenle" modunda ve yalnız
+   "Konumu kaydet" ile yazılır; haritaya tıklamak / sürüklemek tek başına
+   hiçbir şey yazmaz. Bir panonun tüm yüzleri TEK istekte güncellenir. */
+let hMap=null, hCluster=null, hMarker=null, hRows=[], hSel=null, hQ='', hTaslak=null, hDuzen=false, hPinler={}, hRo=null;
+function hDurum(){ if(!ui._hd) ui._hd={konumlu:false,listeKapali:false,konumsuzAcik:false,kapsamYok:''}; return ui._hd; }
 async function harita(c){
   let st={}, M=null, hata=null;
   try{ [st,M]=await Promise.all([api('settings_get'),(typeof mdYukle==='function')?mdYukle():null]); }
@@ -8368,51 +8392,64 @@ async function harita(c){
       <button class="btn btn-outline btn-sm" style="margin-left:8px" onclick="renderSection()">Yeniden dene</button></div></div>`;
     return; }
   ui._settings=st;
-  hRows=hFizikselListe(M); hSel=null; hTaslak=null; ui._dirty=false;
+  hRows=hFizikselListe(M); hSel=null; hTaslak=null; hDuzen=false; ui._dirty=false; hPinler={};
+  const H=hDurum();
   const pano=hRows.filter(r=>r.tip==='pano'), ekran=hRows.filter(r=>r.tip==='ekran');
   const yuz=pano.reduce((n,r)=>n+r.faces.length,0);
-  const ref=mdRefGun(mdDurum());
+  const E=mdEtkin(mdDurum());
 
   /* Harita sayfası metinleri, Google anahtarı ve koordinat işaretleme
-     mutation'dır — yöneticiye açık. Liste + harita herkese salt okuma. */
+     mutation'dır — yöneticiye açık, varsayılan KAPALI bir bölümde. */
   c.innerHTML=`
-  ${isAdmin()?`<div class="sec-card"><h3 style="margin:0 0 6px;font-size:16px">Harita Sayfası Metinleri</h3>
+  ${isAdmin()?`<details class="sec-card hmap-ayar"><summary><b>Harita ayarları</b> <span class="muted">— site harita sayfası ve Google Maps anahtarı (yönetici)</span></summary>
+    <h4 style="margin:12px 0 6px;font-size:14px">Harita sayfası metinleri</h4>
     <p class="muted" style="font-size:13px;margin:0 0 12px">Header'daki <b>Maps</b> butonuyla açılan sayfanın başlığı ve açıklaması.</p>
     <div class="field"><label class="flabel" for="mapTitle">Sayfa başlığı</label><input class="inp" id="mapTitle" value="${esc(st.mapTitle||'')}" placeholder="Reklam Alanlarımız — Adana Haritası"></div>
     <div class="field"><label class="flabel" for="mapDesc">Açıklama</label><textarea class="inp" id="mapDesc" placeholder="Kısa tanıtım metni…">${esc(st.mapDesc||'')}</textarea></div>
     <div class="field"><label class="flabel" for="mapKapak">Kapak görseli (sayfa üstü şerit)</label><div style="display:flex;gap:8px"><input class="inp" id="mapKapak" value="${esc(st.mapKapak||'')}"><button class="btn btn-outline btn-sm" style="flex:0 0 auto" onclick="pickUpload('image/*',u=>{document.getElementById('mapKapak').value=u;})">Yükle</button></div></div>
-    <button class="btn btn-primary btn-sm" onclick="saveMapTexts()">Kaydet</button></div>
-
-  <div class="sec-card"><h3 style="margin:0 0 6px;font-size:16px">Google Maps Anahtarı</h3>
+    <button class="btn btn-primary btn-sm" onclick="saveMapTexts()">Kaydet</button>
+    <h4 style="margin:18px 0 6px;font-size:14px">Google Maps anahtarı</h4>
     <p class="muted" style="font-size:13px;margin:0 0 12px">Buraya bir Google Maps API anahtarı yazarsanız site haritası <b>Google Maps</b> ile çalışır. Boş bırakırsanız ücretsiz OpenStreetMap kullanılır. Anahtar bu adreste reddedilirse panel haritası kendiliğinden OpenStreetMap'e geçer.
       <br><b>Önemli:</b> Google Cloud'da anahtara “HTTP yönlendiren” kısıtı koyun ve günlük kota sınırı tanımlayın.</p>
     <div class="field"><label class="flabel" for="gmKey">API anahtarı</label><input class="inp" id="gmKey" value="${esc(st.googleMapsKey||'')}" placeholder="AIza… (boş = OpenStreetMap)"></div>
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
       <button class="btn btn-primary btn-sm" onclick="saveGmKey()">Kaydet</button>
-      <span class="muted" style="font-size:12.5px">Tanımlı motor: <b>${st.googleMapsKey?'Google Maps':'OpenStreetMap (ücretsiz)'}</b></span></div></div>`:''}
+      <span class="muted" style="font-size:12.5px">Tanımlı motor: <b>${st.googleMapsKey?'Google Maps':'OpenStreetMap (ücretsiz)'}</b></span></div></details>`:''}
 
-  <div class="sec-card"><h3 style="margin:0 0 6px;font-size:16px">${isAdmin()?'Konumlar ve konum işaretleme':'Konumlar'}</h3>
-    <p class="muted hmap-kap">Aktif kapsam: <b>${pano.length} fiziksel pano</b> (${yuz} statik yüz)${ekran.length?` · <b>${ekran.length} LED ekranı</b>`:''}.
-      Konumu eklenmiş: <b id="hCount">${hRows.filter(r=>r.lat!=null).length}</b> / ${hRows.length} pano/ekran.
-      Yüz durumları <b>${esc(mdKisa(ref,true))}</b> tarihine göredir.
-      ${isAdmin()?'<br>Bir pano seçin, haritaya tıklayarak yerini işaretleyin ve <b>Konumu kaydet</b>e basın; A/B yüzleri aynı konumu paylaşır.'
-        :'<br>Bir pano seçin veya haritadaki pinlere tıklayın; konum işaretleme yönetici yetkisindedir.'}</p>
-    <div class="hmap-grid">
-      <div class="hmap-side">
-        <input class="inp" id="hSearch" placeholder="Pano / lokasyon / ürün ara…" oninput="hFilter(this.value)" style="margin-bottom:10px" aria-label="Harita listesinde ara">
-        <div id="hList" class="hlist"></div>
+  <div class="sec-card hmap-kart">
+    <div class="hmap-ust">
+      <div class="hmap-ust-l"><h3>Konumlar</h3>
+        <p class="muted hmap-kap">Envanter: <b>${pano.length} fiziksel pano</b> (${yuz} statik yüz)${ekran.length?` · <b>${ekran.length} LED ekranı</b>`:''}
+          · konumu kayıtlı: <b id="hCount">${hRows.filter(r=>r.lat!=null).length}</b> / ${hRows.length} pano/ekran.
+          <br>Pin yalnız konumu gösterir, rengi mecrayı belirtir (doluluğu değil). Dönem bilgisi Doluluk'ta uygulanan aramadan:
+          <b class="mono">${esc(mdNokta(E.bas))} – ${esc(mdNokta(E.bit))}</b>.</p></div>
+      <div class="hmap-ust-r">
+        <button type="button" class="btn btn-ghost btn-sm" id="hListeTog" aria-controls="hSide" aria-expanded="${!H.listeKapali}" onclick="hListeTog()">${H.listeKapali?'☰ Listeyi göster':'Listeyi gizle · haritayı genişlet'}</button>
+        <button type="button" class="btn btn-outline btn-sm" id="hSigdirB" onclick="hSigdir()">Sonuçları haritaya sığdır</button>
       </div>
-      <div>
-        <div id="hMapNote" class="hmap-not" style="display:none" role="status"></div>
-        ${isAdmin()?`<div class="hbar">
-          <input class="inp" id="hGeo" placeholder="Adres / yer ara — ör. M1 Adana AVM" onkeydown="if(event.key==='Enter'){event.preventDefault();hGeoSearch()}" aria-label="Adres ara">
-          <button class="btn btn-outline btn-sm" onclick="hGeoSearch()">Bul</button>
-          <input class="inp" id="hPaste" placeholder="Koordinat veya Maps linki yapıştır" onkeydown="if(event.key==='Enter'){event.preventDefault();hPasteCoord()}" aria-label="Koordinat yapıştır">
-          <button class="btn btn-outline btn-sm" onclick="hPasteCoord()">Uygula</button>
+    </div>
+    <div class="hmap-grid${H.listeKapali?' liste-kapali':''}" id="hGrid">
+      <aside class="hmap-side" id="hSide" ${H.listeKapali?'hidden':''} aria-label="Pano listesi">
+        <input class="inp" id="hSearch" type="search" placeholder="Mecra, ürün ya da pano ara…" value="${esc(hQ)}" oninput="hFilter(this.value)" aria-label="Pano listesinde ara">
+        <div class="hside-f">
+          <label class="rp2-chk"><input type="checkbox" id="hKonumlu" ${H.konumlu?'checked':''} onchange="hKonumluSec(this.checked)"> <span>Yalnız konumu olanlar</span></label>
+          <span id="hKapsam"></span>
         </div>
-        <div id="hGeoRes" class="hgeores" style="display:none"></div>`:''}
-        <div id="hSelBar" class="hselbar">Bir pano ya da LED ekranı seçin.</div>
-        <div class="hmap-kutu"><div id="hMapCanvas" class="hmap"></div><div id="hMapBos" class="hmap-bos" hidden></div></div>
+        <div id="hList" class="hlist"></div>
+      </aside>
+      <div class="hmap-main">
+        <div id="hMapNote" class="hmap-not" style="display:none" role="status"></div>
+        ${isAdmin()?`<div id="hDuzenBar" class="hduzen" hidden>
+          <div class="hbar">
+            <input class="inp" id="hGeo" placeholder="Adres / yer ara — ör. M1 Adana AVM" onkeydown="if(event.key==='Enter'){event.preventDefault();hGeoSearch()}" aria-label="Adres ara">
+            <button class="btn btn-outline btn-sm" onclick="hGeoSearch()">Bul</button>
+            <input class="inp" id="hPaste" placeholder="Koordinat veya Maps linki yapıştır" onkeydown="if(event.key==='Enter'){event.preventDefault();hPasteCoord()}" aria-label="Koordinat yapıştır">
+            <button class="btn btn-outline btn-sm" onclick="hPasteCoord()">Uygula</button>
+          </div>
+          <div id="hGeoRes" class="hgeores" style="display:none"></div></div>`:''}
+        <div class="hmap-kutu"><div id="hMapCanvas" class="hmap" role="region" aria-label="Pano haritası"></div>
+          <div id="hMapBos" class="hmap-bos" hidden></div><div id="hMapSecNot" class="hmap-secnot" role="status" hidden></div></div>
+        <div id="hSelBar" class="hselbar" aria-live="polite">Listeden bir pano seçin ya da haritadaki bir pine tıklayın.</div>
       </div>
     </div></div>`;
   hRenderList();
@@ -8421,7 +8458,7 @@ async function harita(c){
 /* Fiziksel pano / ekran listesi — Doluluk ile aynı kapsam kuralları. */
 function hFizikselListe(M){
   const out=[];
-  M.mecs.filter(mdKapsamda).forEach(m=>{
+  mdSiteler(M).forEach(m=>{
     const alanlar=(M.altByMec[m.id]||[]).filter(a=>!mdArsiv(a));
     const yetim=(M.orphanByMec[m.id]||[]).filter(u=>u.active!==false);
     const ekle=(a,us)=>{
@@ -8432,7 +8469,7 @@ function hFizikselListe(M){
         const k=g.faces.find(u=>u.lat!=null&&u.lng!=null)||null;
         out.push({id:g.faces[0].id, tip:esz?'ekran':'pano', ad:g.base, faces:g.faces,
           mec:m.name||'—', mecId:m.id, mecSort:m.sort||0, theme:m.theme_color||'#0071e3',
-          alt:a.name||'Diğer pozisyonlar', urun:(a.product_id!=null&&M.pm[a.product_id])||a.name||'',
+          alt:a.name||'Diğer pozisyonlar', urun:(a.product_id!=null&&M.pm[a.product_id])||a.name||'', urunId:a.product_id,
           altId:a.id, altSort:a.sort||0, lat:k?+k.lat:null, lng:k?+k.lng:null,
           konum:(g.faces.find(u=>u.konum)||{}).konum||''});
       });
@@ -8442,50 +8479,92 @@ function hFizikselListe(M){
   });
   return out;
 }
-function hFilter(q){ hQ=(q||'').toLocaleLowerCase('tr'); hRenderList(); }
-function hGrupAcik(){ if(!ui._hOpen) ui._hOpen={}; return ui._hOpen; }
-function hGrupTog(k){ const o=hGrupAcik(); o[k]=!(o[k]!==false); if(o[k]===true)delete o[k]; else o[k]=false; hRenderList(); }
-function hGrupHepsi(ac){ const o=hGrupAcik(); Object.keys(o).forEach(k=>delete o[k]); if(!ac){ hRows.forEach(r=>{ o['m'+r.mecId]=false; }); } hRenderList(); }
-function hVisible(){
-  return hRows.filter(r=>!hQ||[r.ad,r.alt,r.urun,r.mec,r.konum,...r.faces.map(u=>u.name)].some(x=>String(x||'').toLocaleLowerCase('tr').includes(hQ)));
+/* Doluluk'ta UYGULANAN mecra / ürün kapsamı listeye taşınır. Kullanıcı
+   kaldırabilir; bu yalnız haritayı etkiler, Doluluk aramasını değiştirmez. */
+function hKapsam(){
+  const st=mdDurum(), H=hDurum();
+  if(st.site==null&&!st.urun) return null;
+  const key=`${st.site??''}|${st.urun||''}`;
+  if(H.kapsamYok===key) return null;
+  const M=ui._M||{};
+  const ad=[st.site!=null?((M.mecById||{})[st.site]||{}).name:'',st.urun?(M.pm||{})[st.urun]:''].filter(Boolean).join(' · ');
+  return {site:st.site,urun:st.urun||'',key,ad};
 }
-function hRenderList(){ const box=document.getElementById('hList'); if(!box)return;
-  const cn=document.getElementById('hCount');
-  if(cn) cn.textContent=hRows.filter(r=>r.lat!=null).length;
+function hKapsamKaldir(){ const K=hKapsam(); if(!K) return; hDurum().kapsamYok=K.key; hRenderList(); hDrawAll(); }
+function hEslesir(r){ return !hQ||[r.ad,r.alt,r.urun,r.mec,r.konum,...r.faces.map(u=>u.name)].some(x=>String(x||'').toLocaleLowerCase('tr').includes(hQ)); }
+/* Listenin ve pinlerin ORTAK sonucu (arama + kapsam + konum süzgeci). */
+function hVisible(){
+  const K=hKapsam(), H=hDurum();
+  return hRows.filter(r=>(!K||((K.site==null||String(r.mecId)===String(K.site))&&(!K.urun||String(r.urunId)===String(K.urun))))
+    &&hEslesir(r)&&(!H.konumlu||r.lat!=null));
+}
+function hFilter(q){ hQ=(q||'').toLocaleLowerCase('tr').trim(); hRenderList(); hDrawAll(); }
+function hKonumluSec(v){ hDurum().konumlu=!!v; hRenderList(); hDrawAll(); }
+function hGrupAcik(){ if(!ui._hOpen) ui._hOpen={}; return ui._hOpen; }
+function hGrupTog(k){ const o=hGrupAcik(); if(o[k]===false) delete o[k]; else o[k]=false; hRenderList(); }
+function hGrupHepsi(ac){ const o=hGrupAcik(); Object.keys(o).forEach(k=>delete o[k]); if(!ac){ hRows.forEach(r=>{ o['m'+r.mecId]=false; }); } hRenderList(); }
+function hSatir(r,ek){ const ok=r.lat!=null;
+  return `<button type="button" class="hrow ${hSel===r.id?'on':''}" id="hr${r.id}" data-id="${r.id}" onclick="hPick(${r.id})" aria-pressed="${hSel===r.id}">
+    <span class="hdot ${ok?'':'yok'}" style="${ok?`background:${r.theme}`:''}" aria-hidden="true"></span>
+    <span class="hnm"><b>${esc(r.ad)}</b><span>${ek?esc(ek)+' · ':''}${r.tip==='ekran'?'LED ekranı':r.faces.length>1?r.faces.map(u=>posParts(u.name).surf).join(' · ')+' yüz':'tek yüz'}${r.konum?' · '+esc(r.konum):''}</span></span>
+    <span class="hst ${ok?'ok':''}">${ok?'✓ konum':'Konum yok'}</span></button>`; }
+function hRenderList(){ const box=document.getElementById('hList'); if(!box) return;
+  const cn=document.getElementById('hCount'); if(cn) cn.textContent=hRows.filter(r=>r.lat!=null).length;
+  const K=hKapsam(), H=hDurum();
+  const kk=document.getElementById('hKapsam');
+  if(kk) kk.innerHTML=K?`<span class="md-fchip">Doluluk kapsamı: <b>${esc(K.ad)}</b>
+      <button type="button" aria-label="Doluluk kapsamını haritadan kaldır" onclick="hKapsamKaldir()">✕</button></span>`:'';
   const list=hVisible();
-  if(!list.length){ box.innerHTML='<p class="muted" style="font-size:13px;padding:8px">Sonuç yok.</p>'; return; }
+  if(!list.length){ box.innerHTML=`<p class="muted hlist-bos">${hQ||K||H.konumlu?'Aramaya uyan pano yok.':'Kapsamda pano yok.'}</p>`; return; }
   const acik=hGrupAcik(); const aramaVar=!!hQ;
-  /* Lokasyon → ürün → fiziksel pano / ekran */
+  const konumlu=list.filter(r=>r.lat!=null), konumsuz=list.filter(r=>r.lat==null);
+  /* Lokasyon → ürün → fiziksel pano / ekran (yalnız konumu olanlar) */
   const mecs=new Map();
-  list.forEach(r=>{ if(!mecs.has(r.mecId)) mecs.set(r.mecId,{ad:r.mec,theme:r.theme,sort:r.mecSort,alts:new Map()});
-    const G=mecs.get(r.mecId); if(!G.alts.has(r.altId)) G.alts.set(r.altId,{ad:r.urun||r.alt,alan:r.alt,sort:r.altSort,rows:[],ekran:r.tip==='ekran'}); G.alts.get(r.altId).rows.push(r); });
-  const sayac=rows=>{ const ok=rows.filter(r=>r.lat!=null).length;
-    return `<span class="hsay ${ok===rows.length?'tam':(ok?'yari':'')}" title="Konumu eklenmiş / toplam">${ok}/${rows.length} konum</span>`; };
+  konumlu.forEach(r=>{ if(!mecs.has(r.mecId)) mecs.set(r.mecId,{ad:r.mec,theme:r.theme,sort:r.mecSort,alts:new Map()});
+    const G=mecs.get(r.mecId); if(!G.alts.has(r.altId)) G.alts.set(r.altId,{ad:r.urun||r.alt,sort:r.altSort,rows:[],ekran:r.tip==='ekran'}); G.alts.get(r.altId).rows.push(r); });
   let html='';
   [...mecs.entries()].sort((x,y)=>(x[1].sort-y[1].sort)||x[1].ad.localeCompare(y[1].ad,'tr')).forEach(([mid,G])=>{
     const tum=[...G.alts.values()].flatMap(A=>A.rows);
     const mOpen=aramaVar||acik['m'+mid]!==false;
-    html+=`<div class="hg ${mOpen?'open':''}"><button class="hg-h" onclick="hGrupTog('m${mid}')" aria-expanded="${mOpen}"><i class="hdot" style="background:${G.theme}"></i><b>${esc(G.ad)}</b>${sayac(tum)}<em class="chev"></em></button>`;
+    html+=`<div class="hg ${mOpen?'open':''}"><button type="button" class="hg-h" onclick="hGrupTog('m${mid}')" aria-expanded="${mOpen}"><i class="hdot" style="background:${G.theme}" aria-hidden="true"></i><b>${esc(G.ad)}</b><span class="hsay">${tum.length}</span><em class="chev"></em></button>`;
     if(mOpen){
       [...G.alts.entries()].sort((x,y)=>(x[1].sort-y[1].sort)||x[1].ad.localeCompare(y[1].ad,'tr')).forEach(([aid,A])=>{
         const aOpen=aramaVar||acik['a'+aid]!==false;
         const yuzN=A.rows.reduce((n,r)=>n+r.faces.length,0);
         const ne=A.ekran?`${A.rows.length} LED ekranı`:`${A.rows.length} pano · ${yuzN} yüz`;
-        html+=`<div class="hga ${aOpen?'open':''}"><button class="hga-h" onclick="hGrupTog('a${aid}')" aria-expanded="${aOpen}"><span>${esc(A.ad)} <em class="hga-n">${esc(ne)}</em></span>${sayac(A.rows)}<em class="chev"></em></button>`;
-        if(aOpen) html+=A.rows.map(r=>{ const ok=r.lat!=null;
-          return `<button type="button" class="hrow ${hSel===r.id?'on':''}" onclick="hPick(${r.id})" aria-pressed="${hSel===r.id}">
-            <span class="hdot" style="background:${ok?r.theme:'#d2d2d7'}"></span>
-            <span class="hnm"><b>${esc(r.ad)}</b><span>${r.tip==='ekran'?'LED ekranı':r.faces.length>1?r.faces.map(u=>posParts(u.name).surf).join(' · ')+' yüz':'tek yüz'}${r.konum?' · '+esc(r.konum):''}</span></span>
-            <span class="hst ${ok?'ok':''}">${ok?'✓ konum':'Konum eklenmemiş'}</span></button>`;}).join('');
+        html+=`<div class="hga ${aOpen?'open':''}"><button type="button" class="hga-h" onclick="hGrupTog('a${aid}')" aria-expanded="${aOpen}"><span>${esc(A.ad)} <em class="hga-n">${esc(ne)}</em></span><em class="chev"></em></button>`;
+        if(aOpen) html+=A.rows.map(r=>hSatir(r)).join('');
         html+=`</div>`; });
     }
     html+=`</div>`; });
-  box.innerHTML=`<div class="hg-tools"><button onclick="hGrupHepsi(true)">Tümünü aç</button><span>·</span><button onclick="hGrupHepsi(false)">Tümünü kapat</button></div>`+html;
+  if(!konumlu.length) html+=`<p class="muted hlist-bos">${H.konumlu?'Aramaya uyan konumlu pano yok.':'Aramaya uyan panoların konumu kayıtlı değil.'}</p>`;
+  /* Konumu olmayanlar ayrı ve açılabilir: haritada gösterilemezler. */
+  if(konumsuz.length&&!H.konumlu){
+    const acikK=aramaVar||H.konumsuzAcik||konumsuz.some(r=>r.id===hSel);
+    html+=`<details class="hkonumsuz" id="hKonumsuz" ${acikK?'open':''} ontoggle="hDurum().konumsuzAcik=this.open">
+      <summary>Konumu kayıtlı olmayanlar <span class="hsay">${konumsuz.length}</span></summary>
+      ${konumsuz.map(r=>hSatir(r,`${r.mec} › ${r.urun||r.alt}`)).join('')}</details>`;
+  }
+  box.innerHTML=`<div class="hg-tools"><span>${list.length} sonuç · ${konumlu.length} konumlu</span><span class="sp"></span><button type="button" onclick="hGrupHepsi(true)">Tümünü aç</button><span>·</span><button type="button" onclick="hGrupHepsi(false)">Tümünü kapat</button></div>`+html;
 }
+/* Liste gizle / göster: harita genişler; düğme üst çubukta her zaman erişilebilir. */
+function hListeTog(){
+  const H=hDurum(); H.listeKapali=!H.listeKapali;
+  const g=document.getElementById('hGrid'), s=document.getElementById('hSide'), b=document.getElementById('hListeTog');
+  if(g) g.classList.toggle('liste-kapali',H.listeKapali);
+  if(s) s.hidden=H.listeKapali;
+  if(b){ b.setAttribute('aria-expanded',!H.listeKapali); b.textContent=H.listeKapali?'☰ Listeyi göster':'Listeyi gizle · haritayı genişlet'; }
+  hBoyut();
+  if(!H.listeKapali&&hSel!=null) hSatirGoster(hSel);
+}
+/* Harita kutusu boyut değiştirince (sekme, liste, pencere) yeniden ölçülür. */
+let _hBoyutT=null;
+function hBoyut(){ clearTimeout(_hBoyutT); _hBoyutT=setTimeout(()=>{
+  if(hEngine==='leaflet'&&hMap){ try{ hMap.invalidateSize(); }catch(e){} }
+  else if(hEngine==='google'&&hgMap&&window.google&&google.maps&&google.maps.event){ try{ google.maps.event.trigger(hgMap,'resize'); }catch(e){} } },60); }
 /* Google Maps yükleyici. Anahtar bu adreste REDDEDİLİRSE (ör. yönlendiren
    kısıtı) Google bunu harita kurulduktan SONRA `gm_authFailure` ile
-   bildirir; önceki kod bu anda artık dinlemiyordu ve gri "Hata! Bir sorun
-   oluştu" alanı kalıyordu. Artık her durumda OpenStreetMap'e geçilir. */
+   bildirir; her durumda OpenStreetMap'e geçilir (S11). */
 let hGoogleLoading=null, hEngine='leaflet', hgMap=null, hgMarkers=[], hgSel=null;
 function hLoadGoogle(key){
   if(hGoogleLoading) return hGoogleLoading;
@@ -8512,6 +8591,9 @@ window.gm_authFailure=()=>{ _hGoogleRed=true;
 function hInitMap(yeniden){
   const el=document.getElementById('hMapCanvas'); if(!el)return;
   if(yeniden){ hNot(''); if(hMap){ try{ hMap.remove(); }catch(e){} hMap=null; } el.innerHTML=''; }
+  /* Kutu boyutu (liste aç/kapa, sekme, pencere) değişince harita yeniden ölçülür. */
+  if(hRo){ try{ hRo.disconnect(); }catch(e){} hRo=null; }
+  if(typeof ResizeObserver!=='undefined'){ hRo=new ResizeObserver(()=>hBoyut()); hRo.observe(el); }
   const key=String((ui._settings||{}).googleMapsKey||'').trim();
   if(key&&!_hGoogleRed){
     hLoadGoogle(key).then(()=>{ if(_hGoogleRed) hInitLeaflet(); else hInitGoogle(); })
@@ -8520,142 +8602,197 @@ function hInitMap(yeniden){
         hInitLeaflet(); });
   } else hInitLeaflet();
 }
+/* Haritaya tıklamak YALNIZ yöneticinin açık düzenleme modunda taslak konum
+   üretir; kaydetmez. Diğer her durumda hiçbir şey yazmaz. */
+function hHaritaTik(lat,lng){ if(!isAdmin()||!hDuzen||hSel==null) return; hPlace(lat,lng); }
 function hInitGoogle(){
   hEngine='google';
   hgMap=new google.maps.Map(document.getElementById('hMapCanvas'),{
     center:{lat:37.0000,lng:35.3213}, zoom:12, mapTypeId:'hybrid',
     mapTypeControl:true, streetViewControl:true, fullscreenControl:true, tilt:0});
-  hgMap.addListener('click',e=>{ if(!isAdmin())return;
-    if(hSel==null){ mpAlert('Önce listeden bir pano seçin.'); return; }
-    hPlace(e.latLng.lat(), e.latLng.lng()); });
-  hDrawAll();
+  hgMap.addListener('click',e=>hHaritaTik(e.latLng.lat(),e.latLng.lng()));
+  hDrawAll(); hSecIsaret(); if(hSel==null) hSigdir(true);
 }
 function hInitLeaflet(){
   const el=document.getElementById('hMapCanvas'); if(!el) return;
-  if(typeof L==='undefined'){ el.innerHTML=''; hNot('Harita kütüphanesi yüklenemedi.',true); return; }
+  if(typeof L==='undefined'){ el.innerHTML=''; hNot('Harita kütüphanesi yüklenemedi — liste kullanılabilir.',true); return; }
   if(hMap){ try{ hMap.remove(); }catch(e){} hMap=null; }
-  el.innerHTML=''; hgMap=null; hgMarkers=[]; hgSel=null;
+  el.innerHTML=''; hgMap=null; hgMarkers=[]; hgSel=null; hMarker=null;
   hEngine='leaflet';
   hMap=L.map('hMapCanvas').setView([37.0000,35.3213],12);
   let tileHata=0;
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'&copy; OpenStreetMap'})
-    .on('tileerror',()=>{ if(++tileHata===4) hNot('Harita katmanı yüklenemiyor (internet bağlantısı?).',true); })
+    .on('tileerror',()=>{ if(++tileHata===4) hNot('Harita katmanı yüklenemiyor (internet bağlantısı?) — liste kullanılabilir.',true); })
     .addTo(hMap);
   hCluster=L.markerClusterGroup({showCoverageOnHover:false,maxClusterRadius:50});
   hMap.addLayer(hCluster);
-  hMap.on('click',e=>{ if(!isAdmin())return; if(hSel==null){ mpAlert('Önce listeden bir pano seçin.'); return; } hPlace(e.latlng.lat,e.latlng.lng); });
-  hDrawAll(); setTimeout(()=>hMap&&hMap.invalidateSize(),200);
+  hMap.on('click',e=>hHaritaTik(e.latlng.lat,e.latlng.lng));
+  hDrawAll(); hSecIsaret(); if(hSel==null) hSigdir(true);
+  setTimeout(()=>hMap&&hMap.invalidateSize(),200);
 }
+/* Pinler = listenin konumlu sonuçları (seçili pano ayrı işaretle çizilir). */
 function hDrawAll(){
-  const list=hRows.filter(r=>r.lat!=null&&r.id!==hSel);
+  const gorunen=hVisible();
+  const list=gorunen.filter(r=>r.lat!=null&&r.id!==hSel);
   const bos=document.getElementById('hMapBos');
-  if(bos){ const n=hRows.filter(r=>r.lat!=null).length;
+  if(bos){ const n=gorunen.filter(r=>r.lat!=null).length, top=hRows.filter(r=>r.lat!=null).length;
     bos.hidden=!!n||!!hTaslak;
-    bos.textContent=n?'':'Bu kapsamda konumu eklenmiş pano yok. Konumlar eklendikçe burada pin olarak görünür; liste “Konum eklenmemiş” olanları gösterir.'; }
+    bos.textContent=n?'':top?'Aramaya uyan konumlu pano yok. Liste, konumu olmayanları ayrı bölümde gösterir.'
+      :'Kapsamda konumu kayıtlı pano yok. Konumlar eklendikçe burada pin olarak görünür; liste tüm panoları gösterir.'; }
+  hPinler={};
   if(hEngine==='google'){
     if(!hgMap)return;
     hgMarkers.forEach(m=>m.setMap(null)); hgMarkers=[];
     hgMarkers=list.map(r=>{ const mk=new google.maps.Marker({position:{lat:r.lat,lng:r.lng},map:hgMap,
         title:r.mec+' · '+r.ad, icon:{path:google.maps.SymbolPath.CIRCLE,scale:7,
         fillColor:r.theme,fillOpacity:1,strokeColor:'#fff',strokeWeight:2}});
-      mk.addListener('click',()=>hPick(r.id)); return mk; });
+      mk.addListener('click',()=>hPick(r.id,{pin:true})); hPinler[r.id]=mk; return mk; });
     return;
   }
   if(!hCluster)return; hCluster.clearLayers();
-  hCluster.addLayers(list.map(r=>{ const mk=L.marker([r.lat,r.lng],{title:r.mec+' · '+r.ad});
-    mk.on('click',()=>hPick(r.id)); return mk; }));
+  hCluster.addLayers(list.map(r=>{
+    const mk=L.marker([r.lat,r.lng],{title:r.mec+' · '+r.ad,alt:r.ad,keyboard:true,
+      icon:L.divIcon({className:'hpin',html:`<span data-id="${r.id}" style="background:${esc(r.theme)}"></span>`,iconSize:[18,18],iconAnchor:[9,9]})});
+    mk.on('click',()=>hPick(r.id,{pin:true})); hPinler[r.id]=mk; return mk; }));
 }
-/* Seçili pano: yüzlerin durum tarihindeki durumu + takvime geçiş. */
-async function hPick(id){
+/* Seçili panonun işareti. Konumu yoksa haritada HİÇBİR pin seçili gibi
+   kalmaz; açık bir mesaj görünür. Sürüklenebilirlik yalnız düzenlemede. */
+function hSecIsaret(){
+  const r=hRows.find(x=>x.id===hSel);
+  const sn=document.getElementById('hMapSecNot');
+  if(hEngine==='google'){ if(hgSel){ hgSel.setMap(null); hgSel=null; } }
+  else if(hMarker&&hMap){ hMap.removeLayer(hMarker); hMarker=null; }
+  if(sn){ sn.hidden=!(r&&r.lat==null&&!hTaslak); sn.textContent=r?`${r.ad}: konum kayıtlı değil — haritada gösterilemiyor.`:''; }
+  if(!r) return;
+  const p=hTaslak||(r.lat!=null?{lat:r.lat,lng:r.lng}:null);
+  if(!p) return;
+  hPlace(p.lat,p.lng,true);
+  if(!hTaslak) hFly(p.lat,p.lng,hEngine==='google'?18:16);
+}
+/* Seçim: liste satırı → pin; pin → liste satırı (dal açılır, görünür alana). */
+async function hPick(id,o){
+  o=o||{};
   if(hSel!==id&&ui._dirty&&!(await dirtyGuard())) return;
-  hSel=id; hTaslak=null; ui._dirty=false; hRenderList();
-  const r=hRows.find(x=>x.id===id); if(!r)return;
-  const M=ui._M; const ref=mdRefGun(mdDurum());
-  const bar=document.getElementById('hSelBar');
-  const yuzler=r.tip==='ekran'
-    ?(()=>{ const a=M&&M.altById[r.altId]; const y=a?mdYayinlar(M,a.id,ref):{aktif:[]};
-        return `<li><span class="hsel-y">LED</span><span>${y.aktif.length?`${y.aktif.length} kampanya yayında`:'Yayında kampanya yok'} <em class="muted">· eşzamanlı yayın alanı</em></span>
-          <button class="btn-link" onclick="hTakvimde(${r.faces[0].id},true)">Takvimde göster</button></li>`; })()
-    :r.faces.map(u=>{ const d=M?mdYuzeyDurum(M,u,ref):{etiket:'—',alt:''};
-        return `<li><span class="hsel-y">${esc(posParts(u.name).surf)}</span>
-          <span><span class="md-st md-st-${esc(d.kod||'bos')}">${esc(d.etiket)}</span>${d.alt?` <em class="muted">${esc(d.alt)}</em>`:''}${d.kayit&&d.kayit.customer_name?` · ${esc(orgKisa(d.kayit.customer_name,28))}`:''}</span>
-          <button class="btn-link" onclick="hTakvimde(${u.id})">Takvimde göster</button></li>`; }).join('');
-  bar.innerHTML=`<div class="hsel-h"><b>${esc(r.ad)}</b> <span class="muted">— ${esc(r.mec)} › ${esc(r.urun||r.alt)}</span>
-      <span class="hcoord" id="hCoord">${r.lat!=null?r.lat.toFixed(6)+', '+r.lng.toFixed(6):'Konum eklenmemiş'}</span>
-      ${isAdmin()?`<span class="hsel-a" id="hSelA"></span>`:''}</div>
-    <ul class="hsel-l" aria-label="Yüzlerin ${esc(mdKisa(ref,true))} tarihindeki durumu">${yuzler}</ul>`;
-  hSelEylem();
+  const r=hRows.find(x=>x.id===id); if(!r) return;
+  hSel=id; hTaslak=null; hDuzen=false; ui._dirty=false;
+  if(o.pin){ const a=hGrupAcik(); delete a['m'+r.mecId]; delete a['a'+r.altId]; }
+  hRenderList();
+  hKartCiz(r);
+  hDuzenBarCiz();
   hDrawAll();
-  if(hEngine==='google'){
-    if(hgSel){ hgSel.setMap(null); hgSel=null; }
-    if(r.lat!=null){ hPlace(r.lat,r.lng,true); hgMap&&(hgMap.panTo({lat:r.lat,lng:r.lng}),hgMap.setZoom(18)); }
-    return;
-  }
-  if(hMarker&&hMap){ hMap.removeLayer(hMarker); hMarker=null; }
-  if(r.lat!=null&&hMap){ hPlace(r.lat,r.lng,true); hMap.setView([r.lat,r.lng],16); }
+  hSecIsaret();
+  hSatirGoster(id,o.pin);
 }
-/* Konum eylemleri: yalnız yönetici; taslak varken Kaydet / Vazgeç. */
+function hSatirGoster(id,odak){
+  if(hDurum().listeKapali) return;
+  const el=document.getElementById('hr'+id);
+  if(!el) return;
+  el.scrollIntoView({block:'nearest'});
+  if(odak) try{ el.focus({preventScroll:true}); }catch(e){}
+}
+/* Bilgi kartı: pano, ürün, ölçü, A/B yüzleri; her yüz için Doluluk'ta
+   UYGULANAN dönemin yayın/opsiyon kayıtları ve AYRICA etiketli "Bugün".
+   Karma A/B tek renkli bir hükme indirgenmez; konum ≠ doluluk. */
+function hKartCiz(r){
+  const bar=document.getElementById('hSelBar'); if(!bar||!r) return;
+  const M=ui._M, E=mdEtkin(mdDurum()), gun=mdBugun();
+  const kesisir=x=>x.commitment!=='cancelled'&&x.block_start<=E.bit&&(x.block_end==null||x.block_end>=E.bas);
+  const olculer=[...new Set(r.faces.map(u=>u.olcu).filter(Boolean))];
+  const kayitlar=l=>l.length?`<ul class="hk-kl">${l.slice(0,4).map(x=>`<li><button type="button" class="btn-link" onclick="${x.placement_id?`mKayitAc(${x.placement_id})`:`mEskiAc(${x.booking_id})`}">${esc(x.customer_name?orgKisa(x.customer_name,28):'Kurum belirtilmemiş')}</button>
+      ${mdKayitRozet(x,mdZamansal(x,gun))} <span class="mono">${esc(mdDonem(x))}</span></li>`).join('')}${l.length>4?`<li class="muted">+${l.length-4} kayıt daha — Dolulukta göster</li>`:''}</ul>`
+    :'<span class="muted">Bu dönemde yayın ya da opsiyon kaydı yok.</span>';
+  const govde=r.tip==='ekran'
+    ?(()=>{ const l=(M.byArea[r.altId]||[]).filter(kesisir).sort((a,b)=>String(a.block_start).localeCompare(String(b.block_start)));
+        const y=mdYayinlar(M,r.altId,gun);
+        return `<div class="hk-yuz"><div class="hk-yh"><b>LED yayın alanı</b> <span class="muted">eşzamanlı kampanya · kapasite hesaplanmaz</span></div>
+          <div class="hk-d"><span class="hk-e">Dönem</span><div>${kayitlar(l)}</div></div>
+          <div class="hk-d"><span class="hk-e hk-bu">Bugün</span><div>${y.aktif.length?`${y.aktif.length} kampanya yayında`:'Yayında kampanya yok'}</div></div></div>`; })()
+    :r.faces.map(u=>{ const l=(M.byUnit[u.id]||[]).filter(kesisir).sort((a,b)=>String(a.block_start).localeCompare(String(b.block_start)));
+        const d=mdYuzeyDurum(M,u,gun), harf=mdYuzHarf(u.name);
+        return `<div class="hk-yuz"><div class="hk-yh"><b>${harf?`${harf} yüzü`:'Yüz'}</b> <span class="muted">${esc(u.name)}</span></div>
+          <div class="hk-d"><span class="hk-e">Dönem</span><div>${kayitlar(l)}</div></div>
+          <div class="hk-d"><span class="hk-e hk-bu">Bugün</span><div><span class="md-st md-st-${esc(d.kod||'bos')}">${esc(d.etiket)}</span>${d.alt?` <em class="muted">${esc(d.alt)}</em>`:''}</div></div></div>`; }).join('');
+  bar.innerHTML=`<div class="hk-h"><div class="hk-t"><b class="hk-ad">${esc(r.ad)}</b> <span class="muted">${esc(r.mec)} › ${esc(r.urun||r.alt)}</span></div>
+      <button type="button" class="btn btn-outline btn-sm" onclick="hTakvimde(${r.id})" title="Doluluk tablosunda bu panoyu aç; uygulanan dönem korunur">Dolulukta göster</button></div>
+    <div class="hk-m">${olculer.length?`<span>Ölçü: <b>${esc(olculer.join(' · '))}</b></span>`:''}${r.konum?`<span>${esc(r.konum)}</span>`:''}
+      <span class="hcoord" id="hCoord">${r.lat!=null?`${r.lat.toFixed(6)}, ${r.lng.toFixed(6)}`:'Konum kayıtlı değil'}</span>
+      ${isAdmin()?`<span class="hsel-a" id="hSelA"></span>`:''}</div>
+    <div class="hk-donem">Dönem: <b class="mono">${esc(mdNokta(E.bas))} – ${esc(mdNokta(E.bit))}</b> <span class="muted">(Doluluk araması) · “Bugün” bugünün anlık durumudur, dönem sonucu değildir.</span></div>
+    <div class="hk-yuzler">${govde}</div>`;
+  hSelEylem();
+}
+/* Konum eylemleri: yalnız yönetici. Açık düzenleme → taslak → Kaydet / Vazgeç. */
 function hSelEylem(){
   const a=document.getElementById('hSelA'); if(!a) return;
   const r=hRows.find(x=>x.id===hSel); if(!r){ a.innerHTML=''; return; }
+  if(!hDuzen){ a.innerHTML=`<button type="button" class="btn btn-ghost btn-sm" onclick="hDuzenBasla()">${r.lat!=null?'Konumu düzenle':'Konum ekle'}</button>
+      ${r.lat!=null?'<button type="button" class="btn btn-ghost btn-sm" onclick="hClear()">Konumu kaldır</button>':''}`; return; }
   a.innerHTML=hTaslak
     ?`<em class="hsel-kirli">Kaydedilmemiş konum</em>
-      <button class="btn btn-ghost btn-sm" onclick="hVazgec()">Vazgeç</button>
-      <button class="btn btn-primary btn-sm" id="hKaydetB" onclick="hSave()">Konumu kaydet</button>`
-    :(r.lat!=null?`<button class="btn btn-ghost btn-sm" onclick="hClear()">Konumu kaldır</button>`:'<em class="muted">Haritaya tıklayarak konum işaretleyin</em>');
+      <button type="button" class="btn btn-ghost btn-sm" onclick="hVazgec()">Vazgeç</button>
+      <button type="button" class="btn btn-primary btn-sm" id="hKaydetB" onclick="hSave()">Konumu kaydet</button>`
+    :`<em class="muted">Haritaya tıklayın ya da işareti sürükleyin</em>
+      <button type="button" class="btn btn-ghost btn-sm" onclick="hVazgec()">Vazgeç</button>`;
 }
-function hTakvimde(uid,led){
-  if(led){ const M=ui._M, u=M&&M.unitById[uid]; if(u&&typeof medyaAlanOdak==='function') return medyaAlanOdak(u.alt_mecra_id); }
-  if(typeof medyaYuzeyOdak==='function') medyaYuzeyOdak(uid);
+function hDuzenBarCiz(){ const b=document.getElementById('hDuzenBar'); if(b) b.hidden=!hDuzen; }
+function hDuzenBasla(){ if(!isAdmin()||hSel==null) return; hDuzen=true; hSelEylem(); hDuzenBarCiz(); hSecIsaret(); }
+function hTakvimde(id){
+  const r=hRows.find(x=>x.id===id); if(!r) return;
+  if(r.tip==='ekran'&&typeof medyaAlanOdak==='function') return medyaAlanOdak(r.altId);
+  if(typeof medyaYuzeyOdak==='function') medyaYuzeyOdak(r.faces.map(u=>u.id));
 }
 function hPlace(lat,lng,quiet){
   if(!quiet){ hTaslak={lat:+lat,lng:+lng}; ui._dirty=true; hSelEylem();
-    const bos=document.getElementById('hMapBos'); if(bos) bos.hidden=true; }
+    const bos=document.getElementById('hMapBos'); if(bos) bos.hidden=true;
+    const sn=document.getElementById('hMapSecNot'); if(sn) sn.hidden=true; }
+  const surukle=isAdmin()&&hDuzen;
   if(hEngine==='google'){
+    if(!hgMap) return;
     if(hgSel) hgSel.setMap(null);
-    hgSel=new google.maps.Marker({position:{lat:+lat,lng:+lng},map:hgMap,draggable:isAdmin(),
+    hgSel=new google.maps.Marker({position:{lat:+lat,lng:+lng},map:hgMap,draggable:surukle,zIndex:999,
       icon:{path:google.maps.SymbolPath.BACKWARD_CLOSED_ARROW,scale:6,fillColor:'#3455e6',fillOpacity:1,strokeColor:'#fff',strokeWeight:2}});
-    hgSel.addListener('dragend',()=>{ const p=hgSel.getPosition(); hTaslak={lat:p.lat(),lng:p.lng()}; ui._dirty=true; hSetCoordText(p.lat(),p.lng()); hSelEylem(); });
+    if(surukle) hgSel.addListener('dragend',()=>{ const p=hgSel.getPosition(); hTaslak={lat:p.lat(),lng:p.lng()}; ui._dirty=true; hSetCoordText(p.lat(),p.lng()); hSelEylem(); });
     hSetCoordText(lat,lng);
-    if(!quiet&&hgMap) hgMap.panTo({lat:+lat,lng:+lng});
+    if(!quiet) hgMap.panTo({lat:+lat,lng:+lng});
     return;
   }
   if(!hMap) return;
   if(hMarker) hMap.removeLayer(hMarker);
-  hMarker=L.marker([lat,lng],{draggable:isAdmin()}).addTo(hMap);
-  hMarker.on('dragend',()=>{ const p=hMarker.getLatLng(); hTaslak={lat:p.lat,lng:p.lng}; ui._dirty=true; hSetCoordText(p.lat,p.lng); hSelEylem(); });
+  hMarker=L.marker([lat,lng],{draggable:surukle,zIndexOffset:1000,title:'Seçili pano'}).addTo(hMap);
+  if(surukle) hMarker.on('dragend',()=>{ const p=hMarker.getLatLng(); hTaslak={lat:p.lat,lng:p.lng}; ui._dirty=true; hSetCoordText(p.lat,p.lng); hSelEylem(); });
   hSetCoordText(lat,lng);
   if(!quiet) hMap.panTo([lat,lng]);
 }
 function hSetCoordText(lat,lng){ const el=document.getElementById('hCoord'); if(el)el.textContent=(+lat).toFixed(6)+', '+(+lng).toFixed(6)+(hTaslak?' (kaydedilmedi)':''); }
-function hVazgec(){ hTaslak=null; ui._dirty=false; const id=hSel; hSel=null; hPick(id); }
+function hVazgec(){ hTaslak=null; hDuzen=false; ui._dirty=false; const id=hSel; hSel=null; hPick(id); }
 /* Konum yalnız "Konumu kaydet" ile yazılır; panonun TÜM yüzleri tek istekte. */
 async function hSave(){
-  const r=hRows.find(x=>x.id===hSel); if(!r||!hTaslak){ mpAlert('Haritaya tıklayarak konumu işaretleyin.'); return; }
+  const r=hRows.find(x=>x.id===hSel); if(!r||!hTaslak||!hDuzen){ mpAlert('Haritaya tıklayarak konumu işaretleyin.'); return; }
   const b=document.getElementById('hKaydetB'); if(b&&b.disabled) return; if(b){ b.disabled=true; b.textContent='Kaydediliyor…'; }
   const p=hTaslak;
   const sonuc=await guard(()=>api('units_konum',{ids:r.faces.map(u=>u.id),lat:p.lat,lng:p.lng}),'Konum kaydedilemedi');
   if(sonuc===null){ if(b){ b.disabled=false; b.textContent='Konumu kaydet'; } return; }
   r.lat=p.lat; r.lng=p.lng; r.faces.forEach(u=>{ u.lat=p.lat; u.lng=p.lng; });
-  hTaslak=null; ui._dirty=false;
+  hTaslak=null; hDuzen=false; ui._dirty=false;
   toast(r.faces.length>1?`Konum kaydedildi — ${r.faces.length} yüz.`:'Konum kaydedildi.');
-  const id=hSel; hSel=null; hPick(id); hNext();
+  const id=hSel; hSel=null; await hPick(id);
 }
 async function hClear(){
   const r=hRows.find(x=>x.id===hSel); if(!r) return;
   if(!await mpConfirm(`${r.ad} konumu kaldırılsın mı?${r.faces.length>1?' Panonun tüm yüzlerinden kaldırılır.':''}`,'Konumu kaldır',{danger:true,ok:'Kaldır'})) return;
   const sonuc=await guard(()=>api('units_konum',{ids:r.faces.map(u=>u.id),lat:null,lng:null}),'Konum kaldırılamadı'); if(sonuc===null) return;
   r.lat=null; r.lng=null; r.faces.forEach(u=>{ u.lat=null; u.lng=null; });
-  if(hEngine==='google'){ if(hgSel){hgSel.setMap(null);hgSel=null;} }
-  else if(hMarker&&hMap){ hMap.removeLayer(hMarker); hMarker=null; }
   toast('Konum kaldırıldı.');
   const id=hSel; hSel=null; hPick(id);
 }
-function hNext(){
-  const list=hVisible();
-  const i=list.findIndex(r=>r.id===hSel);
-  const nx=list.slice(i+1).find(r=>r.lat==null) || list.find(r=>r.lat==null);
-  if(nx && nx.id!==hSel) hPick(nx.id);
+/* Sonuçları haritaya sığdır: listenin KONUMLU sonuçları. Hiç yoksa açıkça söyler. */
+function hSigdir(sessiz){
+  const l=hVisible().filter(r=>r.lat!=null);
+  if(!l.length){ if(!sessiz) hNot(hRows.some(r=>r.lat!=null)?'Aramaya uyan panoların konumu kayıtlı değil; haritada gösterilecek pin yok.':'Kapsamda konumu kayıtlı pano yok.'); return; }
+  hNot('');
+  if(l.length===1){ hFly(l[0].lat,l[0].lng,16); return; }
+  if(hEngine==='google'&&hgMap){ const b=new google.maps.LatLngBounds(); l.forEach(r=>b.extend({lat:r.lat,lng:r.lng})); hgMap.fitBounds(b,48); return; }
+  if(hMap) hMap.fitBounds(L.latLngBounds(l.map(r=>[r.lat,r.lng])),{padding:[36,36],maxZoom:17});
 }
 async function saveGmKey(){ await api('settings_save',{googleMapsKey:gv('gmKey').trim()}); mpAlert('Kaydedildi. Siteyi Ctrl+F5 ile yenileyin.'); renderSection(); }
 async function logYukle(){
@@ -8734,6 +8871,7 @@ function hParseLL(s){
 }
 function hPasteCoord(){
   if(hSel==null){ mpAlert('Önce listeden bir pano seçin.'); return; }
+  if(!hDuzen) return;                    /* S17: taslak yalnız açık düzenleme modunda */
   const p=hParseLL(gv('hPaste'));
   if(!p){ mpAlert('Koordinat okunamadı.\n\nÖrnek: 37.015902, 35.249627\nveya Google Maps adres çubuğundaki linkin tamamı.\n\nNot: maps.app.goo.gl ile başlayan kısa linkler koordinat içermez; linki tarayıcıda açıp adres çubuğundakini kopyalayın.'); return; }
   hPlace(p.lat,p.lng); hFly(p.lat,p.lng,18);
