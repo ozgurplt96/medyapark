@@ -312,6 +312,9 @@ test.describe('Harita', () => {
       await page.waitForSelector('#mdGovde tr.md-odak');
       const st = await page.evaluate(() => mdDurum());
       expect([st.bas, st.bit, st.site]).toEqual(['2037-03-01', '2037-03-31', F.site]);
+      expect(await page.evaluate(() => wsMecSub())).toBe('doluluk');        // sekme ve adres haritada kalmaz
+      expect(await page.evaluate(() => location.hash)).not.toContain('gorunum=harita');
+      await expect(page.locator('.ws-switch button.on', { hasText: 'Doluluk' })).toHaveCount(1);
       expect(await page.evaluate(() => [...document.querySelectorAll('#mdGovde tr.md-odak')].map(t => +t.dataset.u).sort())).toEqual([F.A, F.B].sort());
     } finally {
       konumYaz(once);
