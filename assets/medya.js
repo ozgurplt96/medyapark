@@ -440,10 +440,13 @@ let _mdLeg={};
    geçiş UYGULANMIŞ aramayı değiştirir; varsa bekleyen form taslağı düşer
    (taslak ile uygulanan sonuç karışmaz). Dönem verilmezse mevcut dönem kalır. */
 function medyaGit(ek){
+  /* Sekme ÖNCE Doluluk'a alınır: mdDurumYaz adresi hemen yazar ve adres
+     sekmeyi (gorunum=harita) okur — sıra ters olursa harita adreste kalırdı. */
+  const ws=!(isAdmin()&&surfaceGet()!=='workspace');
+  if(ws) ui._mecSub='doluluk';
   mdDurumYaz({...mdDurum(),...(ek||{})});
   ui._mdTaslak=null;
-  if(isAdmin()&&surfaceGet()!=='workspace'){ go('listeler'); return; }
-  ui._mecSub='doluluk'; go('ws-mecralar');
+  go(ws?'ws-mecralar':'listeler');
 }
 
 /* ==========================================================
