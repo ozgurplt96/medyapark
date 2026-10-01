@@ -83,6 +83,11 @@ seeds/*
 # montaj). Yalnız tohum işleri, yalnız boşsa. ŞİRKET VERİSİ İÇERMEZ.
 !seeds/99_zzzzzzzzz_ps15_kalem_ornekleri.sql
 
+# PS19: Baskı & Montaj uygulayan seçicisi için doğrulanmış örnekler
+# (demo kurum rolleri + sentetik uygulayıcı kişi). Yalnız "(demo)"
+# kayıtlar; gerçek kurum/kişi oluşturmaz. ŞİRKET VERİSİ İÇERMEZ.
+!seeds/99_zzzzzzzzzz_ps19_uygulayan_ornekleri.sql
+
 # Eski düzen (seeds/ öncesi) — geri gelmesin
 seed.sql
 seed_local_auth.sql

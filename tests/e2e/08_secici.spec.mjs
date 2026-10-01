@@ -97,15 +97,20 @@ test('etiket seçiciye bağlı; mobilde pencere içinde sayfa taşması yok', as
   expect(olc.r).toBeLessThanOrEqual(olc.iw);
 });
 
-test('diğer kurum seçimleri de aynı bileşeni kullanır (belge, baskı/montaj, İşler süzgeci)', async ({ page }) => {
+test('diğer kurum seçimleri de aynı bileşeni kullanır (belge, İşler süzgeci); baskı/montaj uygulayanı yalnız doğrulanmışları listeler', async ({ page }) => {
   const isId = await isOlustur('uye', 'Seçici diğer');
   await girisYap(page, 'uye');
   await page.evaluate(() => belgeForm({}));
   await expect(page.locator('#bfKurum__ara')).toHaveAttribute('role', 'combobox');
   await page.evaluate(() => closeModal());
+  /* S19: uygulayan seçicisi bütün kurumları listelemez — yalnız doğrulanmış baskı
+     merkezi / uygulayıcı kurum ve kişiler (kısa liste; arama bileşeni gerekmez). */
   await page.evaluate(i => opTopluForm(i), isId);
-  await expect(page.locator('#opbSup__ara')).toHaveAttribute('role', 'combobox');
-  expect(await page.locator('#opbSup option').count()).toBeGreaterThan(600);     // 800 kesmesi yok
+  await expect(page.locator('#opbSup__ara')).toHaveCount(0);
+  const uyg = await page.locator('#opbSup option').allTextContents();
+  expect(uyg.length).toBeLessThan(40);
+  expect(uyg[0]).toContain('belirlenmedi');
+  expect(uyg.some(t => /S13T Kurum|S13 Regresyon Kurumu/.test(t))).toBe(false);
   await page.evaluate(() => closeModal());
   await page.evaluate(async () => { await go('is-takibi'); await isTabGit('liste'); });
   await expect(page.locator('#isOrg__ara')).toHaveAttribute('role', 'combobox');

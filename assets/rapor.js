@@ -1054,7 +1054,8 @@ function rpSiteSec(id,on){ const a=rpAyar('mecra'); const s=new Set(a.siteler); 
      · KDV, indirim, kâr varsayılmaz
    ========================================================== */
 const RP_OPTUR={baski:'Baskı',montaj:'Montaj',sokum:'Söküm',diger:'Diğer hizmet'};
-const RP_OPDURUM={planned:'Planlandı',waiting:'Bekliyor',in_progress:'Devam ediyor',done:'Tamamlandı',cancelled:'İptal'};
+/* S19: üç durum — Yapılacak / Tamamlandı / İptal (eski değerler Yapılacak'tır). */
+const RP_OPDURUM={planned:'Yapılacak',waiting:'Yapılacak',in_progress:'Yapılacak',done:'Tamamlandı',cancelled:'İptal'};
 const rpBIs=a=>a.is?+a.is:(Array.isArray(a.isler)&&a.isler.length===1?+a.isler[0]:0);
 function rpBDonemAralik(k){ const d=mdGun(rpBugun()), y=d.getFullYear(), mo=d.getMonth();
   if(k==='ay') return [_cIso(new Date(y,mo,1)),_cIso(new Date(y,mo+1,0))];
@@ -1132,8 +1133,7 @@ function rpKalemDurum(ops,bugun){
   if(a.every(o=>o.status==='done')) return {k:'tamam',t:'Tamamlandı'};
   const gec=a.filter(o=>o.status!=='done'&&o.planned_date&&o.planned_date<bugun).map(o=>o.planned_date).sort()[0];
   if(gec) return {k:'gecikti',t:`Gecikti · ${Math.round(rpDn(bugun)-rpDn(gec))} gün`};
-  if(a.some(o=>o.status==='in_progress')) return {k:'suruyor',t:'Devam ediyor'};
-  return {k:'bekliyor',t:'Bekliyor'};
+  return {k:'bekliyor',t:'Yapılacak'};
 }
 const rpOpMalzeme=o=>[o.material,o.grammage_gsm?o.grammage_gsm+' gr/m²':''].filter(Boolean).join(' · ');
 function rpOpYer(M,o){ const u=o.unit_id?M.unitById[o.unit_id]:null; const p=[];
@@ -1160,13 +1160,14 @@ RPD_BASKI={
   preset(){ return {}; },
   veriAnahtar:()=>'baski',
   async veri(){
-    const [ops,grp,jobs,custs,M]=await Promise.all([
-      rapHepsi(()=>sb.from('work_operations').select('id,job_id,operation_type,status,description,quantity,quantity_unit,dimensions,visible_size,surface_count,material,grammage_gsm,reprint,supplier_org_id,unit_id,location_text,planned_date,completed_at,created_at,unit_cost,cost,currency,price_group_id,kalem_key,note').order('id')),
+    const [ops,grp,jobs,custs,M,kisiler]=await Promise.all([
+      rapHepsi(()=>sb.from('work_operations').select('id,job_id,operation_type,status,description,quantity,quantity_unit,dimensions,visible_size,surface_count,material,grammage_gsm,reprint,supplier_org_id,supplier_contact_id,unit_id,location_text,planned_date,completed_at,created_at,unit_cost,cost,currency,price_group_id,kalem_key,note').order('id')),
       rapHepsi(()=>sb.from('operation_price_groups').select('id,job_id,label,cost_amount,currency,note').order('id')),
       rapHepsi(()=>sb.from('jobs').select('id,title,customer_id,status,lifecycle_status').order('id')),
-      api('customers_min'), mdYukle()]);
+      api('customers_min'), mdYukle(), rapHepsi(()=>sb.from('contacts').select('id,name').order('id'))]);
     const cm={}; (custs||[]).forEach(c=>cm[c.id]=c.firma||'');
-    return {ops,grp,jobs,cm,M};
+    const km={}; (kisiler||[]).forEach(k=>km[k.id]=k.name||'');
+    return {ops,grp,jobs,cm,km,M};
   },
   veriSonra(a,v){ const id=rpBIs(a); if(id){ a.is=id; const j=v.jobs.find(x=>x.id===id); if(j&&!a.kurum&&j.customer_id) a.kurum=j.customer_id; } },
   kontrolVeriyle:true,
@@ -1208,6 +1209,9 @@ RPD_BASKI={
     const tut=rpMaliyet;
     const kurumAd=id=>id?rpKisaAd(cm[id],30):'';
     const firmaKisa=id=>id?rpKisaAd(cm[id],24):'';
+    /* S19: uygulayan kişi ve/veya kurum (kişi yoksa çıktı eskisiyle aynıdır). */
+    const km=v.km||{};
+    const uygAd=o=>[o.supplier_contact_id&&km[o.supplier_contact_id]?km[o.supplier_contact_id]:'',firmaKisa(o.supplier_org_id)].filter(Boolean).join(' · ');
     /* 1. Kapsam — iptal edilen işlem takip tablosuna girmez. */
     const kapsam=v.ops.filter(o=>{ const j=jm[o.job_id]; if(!j||o.status==='cancelled') return false;
       if(isId&&o.job_id!==isId) return false;
@@ -1245,7 +1249,7 @@ RPD_BASKI={
       const dS={}; gk.forEach(k=>{ const d=rpKalemDurum(k.d,bugun).k; dS[d]=(dS[d]||0)+1; });
       out.satirlar.push({tip:'grup',key:'j'+j.id,kurum:cm[j.customer_id]?rpKisaAd(cm[j.customer_id],40):'Kurum bağlantısı yok',is:j.title||'',
         kalemSay:gk.length,bedel:Object.entries(rpToplamKur(gk,gPaket)).filter(([,t])=>t.var).map(([pb,t])=>({pb,v:t.tutar})),
-        durumOzet:[['tamam','tamamlandı'],['suruyor','devam ediyor'],['bekliyor','bekliyor'],['gecikti','gecikti']].filter(([k])=>dS[k]).map(([k,l])=>`${dS[k]} ${l}`).join(' · '),
+        durumOzet:[['tamam','tamamlandı'],['bekliyor','yapılacak'],['gecikti','gecikti']].filter(([k])=>dS[k]).map(([k,l])=>`${dS[k]} ${l}`).join(' · '),
         gecikti:!!dS.gecikti});
       let sonP=null;
       gk.forEach(k=>{
@@ -1256,12 +1260,12 @@ RPD_BASKI={
         const rows=[];
         B.forEach(o=>rows.push({key:'o'+o.id,tarih:o.planned_date||'',musteri,urun:o.description||rpOpUnit(M,o)||'Baskı',
           urunAlt:[o.reprint?'Yeniden baskı':'',rpOpMalzeme(o),o.visible_size?'görünen '+o.visible_size:''].filter(Boolean).join(' · '),
-          adet:o.quantity==null?null:+o.quantity,birim:RP_BIRIM[o.quantity_unit]||o.quantity_unit||'',merkez:firmaKisa(o.supplier_org_id),olcu:o.dimensions||''}));
+          adet:o.quantity==null?null:+o.quantity,birim:RP_BIRIM[o.quantity_unit]||o.quantity_unit||'',merkez:uygAd(o),olcu:o.dimensions||''}));
         const mSpan=B.length&&Mo.length?B.length:0;
-        if(mSpan){ rows[0].mTarih=tarihBir(Mo.map(o=>o.planned_date)); rows[0].mYer=birles(Mo.map(o=>rpOpYer(M,o))); rows[0].mYapan=birles(Mo.map(o=>firmaKisa(o.supplier_org_id))); }
+        if(mSpan){ rows[0].mTarih=tarihBir(Mo.map(o=>o.planned_date)); rows[0].mYer=birles(Mo.map(o=>rpOpYer(M,o))); rows[0].mYapan=birles(Mo.map(o=>uygAd(o))); }
         (B.length?D:[...Mo,...D]).forEach(o=>rows.push({key:'o'+o.id,tarih:o.planned_date||'',musteri,urun:rpHizmetAd(M,o),urunAlt:'',
           adet:o.quantity==null?null:+o.quantity,birim:RP_BIRIM[o.quantity_unit]||o.quantity_unit||'',merkez:'',olcu:o.dimensions||'',
-          mTarih:o.planned_date||'',mYer:rpOpYer(M,o),mYapan:firmaKisa(o.supplier_org_id),kendi:true}));
+          mTarih:o.planned_date||'',mYer:rpOpYer(M,o),mYapan:uygAd(o),kendi:true}));
         const bedelOps=k.d.filter(o=>!pakette(o));
         const eksik=bedelOps.filter(o=>tut(o)==null).map(o=>RP_OPTUR[o.operation_type]);
         const kapsamAd=B.length?(Mo.length?'Baskı + montaj':'Yalnız baskı')+(D.length?' + '+[...new Set(D.map(o=>RP_OPTUR[o.operation_type].toLocaleLowerCase('tr')))].join(', '):'')
@@ -1562,7 +1566,7 @@ RPD_PLAN={
       rapHepsi(()=>sb.from('jobs').select('id,title,customer_id,primary_contact_id,assignee_id,lifecycle_status').order('id')),
       rapHepsi(()=>sb.from('customers').select('id,firma,telefon').order('id')),
       rapHepsi(()=>sb.from('contacts').select('id,name,title,phone').order('id')),
-      rapHepsi(()=>sb.from('work_operations').select('id,job_id,operation_type,status,description,planned_date,location_text,unit_id,supplier_org_id,quantity,quantity_unit')
+      rapHepsi(()=>sb.from('work_operations').select('id,job_id,operation_type,status,description,planned_date,location_text,unit_id,supplier_org_id,supplier_contact_id,quantity,quantity_unit')
         .lte('planned_date',e).in('status',['planned','waiting','in_progress']).order('id')),
       rapHepsi(()=>sb.from('personal_events').select('id,title,event_date,event_time,note').gte('event_date',b).lte('event_date',e).order('id')),
       mdYukle()]);
@@ -1609,7 +1613,7 @@ RPD_PLAN={
       const u=o.unit_id?U[o.unit_id]:null;
       ekle({key:'o'+o.id,tip:'op',gun:o.planned_date,saat:'',baslik:`${RP_OPTUR[o.operation_type]||o.operation_type}${o.description?': '+o.description:''}`,
         ...baglam(o.job_id),yer:[u?mdYuzAdi(v.M,u):'',o.location_text||''].filter(Boolean).join(' — '),
-        uygulayan:o.supplier_org_id&&cm[o.supplier_org_id]?orgKisa(cm[o.supplier_org_id].firma,40):'',
+        uygulayan:[((v.cts||[]).find(k=>k.id===o.supplier_contact_id)||{}).name||'',o.supplier_org_id&&cm[o.supplier_org_id]?orgKisa(cm[o.supplier_org_id].firma,40):''].filter(Boolean).join(' · '),
         miktar:o.quantity!=null?`${rpSayi(o.quantity)} ${RP_BIRIM[o.quantity_unit]||''}`.trim():''}); });
     v.kisisel.forEach(k=>ekle({key:'k'+k.id,tip:'randevu',gun:k.event_date,saat:k.event_time?String(k.event_time).slice(0,5):'',baslik:k.title||'',not:k.note||''}));
     const gunMap={};

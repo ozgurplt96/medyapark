@@ -2805,3 +2805,74 @@ form.md-ara.bekliyor .md-ara-go{box-shadow:0 0 0 3px rgba(241,201,107,.55);}
 .hg-tools>span:first-child{white-space:nowrap;}
 .hmap-main .hselbar{margin:12px 0 0;}
 
+/* ==========================================================
+   S19 — Baskı & Montaj: üretim kalemi akışı, kayıt detayı, sade form
+   Durum üç değerlidir (Yapılacak / Tamamlandı / İptal); "Gecikti" türetilir.
+   Renk daima metin ve işaretle birliktedir (✓ ○ ! ✕). Sıradaki işlem koyu
+   sol şeritle, detayda açık olan kayıt koyu çerçeveyle gösterilir — durum
+   renkleri seçim için kullanılmaz.
+   ========================================================== */
+.op-st{display:inline-flex;align-items:center;gap:4px;font:700 11.5px/1.4 var(--f);border-radius:var(--r-sm);padding:2px 8px;white-space:nowrap;}
+.op-st.planned{background:var(--c-line2);color:var(--c-ink2);}
+.op-st.done{background:var(--c-green-soft);color:#136c3a;}
+.op-st.cancelled{background:transparent;color:var(--c-ink3);box-shadow:inset 0 0 0 1px var(--c-line);text-decoration:line-through;}
+.op-st.gec{background:var(--c-red-soft);color:var(--c-red-t);}
+.op-gec-t{color:var(--c-red-t);}
+.opk{padding:0;overflow:hidden;}
+.opk-h,.opk-r{display:grid;grid-template-columns:minmax(190px,1fr) minmax(0,2.3fr) minmax(170px,.8fr);gap:10px 16px;padding:12px 16px;align-items:start;}
+.opk-h{padding-top:9px;padding-bottom:9px;background:#f6f8fb;border-bottom:1px solid var(--c-line);
+  font:650 11px/1.4 var(--f);letter-spacing:.05em;text-transform:uppercase;color:var(--c-ink2);}
+.opk-r+.opk-r{border-top:1px solid var(--c-row);}
+.opk-is{display:flex;flex-direction:column;gap:2px;min-width:0;align-items:flex-start;}
+.opk-j.btn-link{padding:0;min-height:0;font-weight:650;font-size:var(--fs-body);color:var(--c-ink);text-align:left;white-space:normal;}
+.opk-j.btn-link:hover{color:var(--c-accent-d);}
+.opk-ku{font-size:12px;color:var(--c-ink3);}
+.opk-ad{font-size:var(--fs-sm);color:var(--c-ink2);overflow-wrap:anywhere;}
+.opk-akis{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:6px 0;align-items:stretch;}
+.opk-akis li{display:flex;align-items:center;min-width:0;}
+.opk-akis li+li::before{content:"→";color:var(--c-ink3);margin:0 6px;font-size:13px;}
+.opk-c{display:flex;flex-direction:column;gap:1px;text-align:left;border:1px solid var(--c-line);border-radius:10px;background:#fff;
+  padding:6px 10px;min-width:128px;max-width:236px;cursor:pointer;font:inherit;color:var(--c-ink);}
+.opk-c:hover{border-color:var(--c-ink3);background:var(--c-alt);}
+.opk-ct{font-weight:700;font-size:var(--fs-sm);display:flex;align-items:center;gap:6px;}
+.opk-ct i{font-style:normal;display:inline-grid;place-items:center;flex:none;width:16px;height:16px;border-radius:50%;
+  font-size:10.5px;font-weight:800;background:var(--c-line2);color:var(--c-ink2);}
+.opk-cd{font-size:var(--fs-xs);color:var(--c-ink2);}
+.opk-cu{font-size:var(--fs-xs);color:var(--c-ink3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.opk-c.done{background:#f3faf5;border-color:#cfe8d7;} .opk-c.done .opk-ct i{background:#1a8a4a;color:#fff;}
+.opk-c.cancelled{border-style:dashed;} .opk-c.cancelled .opk-ct,.opk-c.cancelled .opk-cd{color:var(--c-ink3);} .opk-c.cancelled .opk-ct{text-decoration:line-through;}
+.opk-c.gec{border-color:#f1bcbc;background:#fff7f7;} .opk-c.gec .opk-ct i{background:var(--c-red-t);color:#fff;}
+.opk-c.gec .opk-cd{color:var(--c-red-t);font-weight:600;}
+.opk-c.sira{box-shadow:inset 3px 0 0 var(--c-ink);}
+.opk-c.simdi{outline:2px solid var(--c-ink);outline-offset:1px;}
+.opk-sr{display:flex;flex-direction:column;gap:2px;font-size:var(--fs-sm);min-width:0;}
+.opk-sl{display:none;font:650 11px/1.6 var(--f);letter-spacing:.05em;text-transform:uppercase;color:var(--c-ink3);}
+.opk-su{color:var(--c-ink2);} .opk-su em{font-style:normal;color:var(--c-ink3);}
+.opk-st{color:var(--c-ink3);}
+@media(max-width:900px){
+  .opk-h{display:none;}
+  .opk-r{grid-template-columns:1fr;gap:8px;padding:12px;}
+  .opk-sl{display:inline;}
+  .opk-sr{flex-direction:row;flex-wrap:wrap;gap:4px 8px;align-items:baseline;}
+  .opk-akis li{flex:1 1 100%;} .opk-akis li+li::before{content:"↓";margin:0 8px 0 2px;}
+  .opk-c{flex:1 1 auto;max-width:none;min-width:0;}
+}
+/* Kayıt detayı */
+.opd-h{display:flex;align-items:center;gap:8px 10px;flex-wrap:wrap;margin:0 0 12px;}
+.opd-h h3{margin:0;flex:1 1 200px;overflow-wrap:anywhere;}
+.opd-dl{margin:0 0 4px;} .opd-dl>b{font-weight:500;overflow-wrap:anywhere;}
+.opd-not{white-space:pre-line;}
+.opd-b{font-size:var(--fs-sm);font-weight:700;color:var(--c-ink2);margin:14px 0 6px;display:flex;align-items:center;gap:6px;}
+.opd-sira{margin:6px 0 0;}
+.opd-bl{border:1px solid var(--c-row);border-radius:10px;padding:2px 10px;}
+.opd-bt{font-weight:600;}
+.opd-f{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:16px;}
+.opd-sp{flex:1 1 0;}
+/* Form: öneri notu, açılır bölümler, gerçekleşen tarih */
+.op-oneri{background:#f1f5fb;box-shadow:inset 0 0 0 1px #d8e2f1;color:#2f4a73;border-radius:9px;padding:8px 12px;font-size:var(--fs-sm);margin:0 0 12px;}
+.op-det{border:1px solid var(--c-hair);border-radius:10px;padding:0 12px;margin:0 0 12px;}
+.op-det>summary{cursor:pointer;padding:9px 0;font-size:var(--fs-sm);font-weight:700;color:var(--c-ink2);}
+.op-det[open]>summary{margin-bottom:4px;}
+.op-ger{display:flex;gap:4px 8px;align-items:center;flex-wrap:wrap;} .op-ger .inp{flex:1 1 150px;width:auto;}
+/* İşlem türüne göre gizlenen alan: `hidden` niteliği grid/flex kurallarına yenilmesin. */
+.modal [hidden]{display:none!important;}
