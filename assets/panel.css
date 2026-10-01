@@ -122,7 +122,10 @@ textarea.inp{height:auto;padding:9px 12px;resize:vertical;min-height:70px;}
   position:sticky;top:0;height:100vh;padding:0 0 8px;
   background:#ffffff;border-right:1px solid var(--c-line);}
 .brand{padding:18px 16px 16px;border-bottom:1px solid var(--c-line2);margin-bottom:10px;}
-.brand img{max-width:150px;max-height:38px;display:block;}
+.brand img{max-width:100%;max-height:46px;width:auto;height:auto;display:block;object-fit:contain;}
+.brand-yer{display:block;height:36px;}                      /* logo ölçülene dek ayrılan yer */
+/* Yalnız açık renkli (koyu zemin için hazırlanmış) logo varsa koyu plakada gösterilir. */
+.brand-koyu{display:inline-block;background:var(--sd);border-radius:8px;padding:7px 10px;max-width:100%;}
 .brand .wm{font-size:18px;font-weight:800;color:var(--c-ink);letter-spacing:-.02em;}
 .brand .wm b{color:var(--c-accent);font-weight:800;}
 .brand-sub{display:block;margin-top:6px;font-size:10px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:#9aa1af;}
@@ -414,7 +417,8 @@ textarea.inp{height:auto;padding:9px 12px;resize:vertical;min-height:70px;}
   .side{width:100%;flex:none;height:auto;position:sticky;top:0;z-index:60;padding:0;
     flex-direction:row;align-items:center;gap:8px;overflow-x:auto;}
   .brand{padding:8px 12px;border-bottom:0;margin:0;flex:0 0 auto;display:flex;align-items:center;gap:8px;}
-  .brand img{max-height:26px;} .brand .wm{font-size:15px;}
+  .brand img{max-height:28px;max-width:150px;} .brand .wm{font-size:15px;}
+  .brand-yer{height:28px;width:110px;} .brand-koyu{padding:4px 8px;}
   .brand-sub{display:none;}
   .nav-scroll{display:flex;gap:4px;overflow-x:auto;padding:6px 8px;flex:1;}
   .nav-grp{display:none;}

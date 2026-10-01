@@ -135,3 +135,38 @@ test.describe('Mecralar tablosu: Raporlar önizlemesindeki kompakt No / Yüz dü
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
   });
 });
+
+test.describe('Kenar çubuğu logosu (beyaz zemin)', () => {
+  test('beyaz yazılı panel logosu beyaz kenar çubuğunda kullanılmaz; okunur site logosu kırpılarak gösterilir; ayar değişmez', async ({ page }) => {
+    await girisYap(page, 'uye');
+    /* Sentetik görseller sayfada üretilir (veri yazılmaz): saydam zeminde geniş boşluklu iki logo. */
+    const r = await page.evaluate(async () => {
+      const ciz = (yazi) => { const c = document.createElement('canvas'); c.width = 400; c.height = 160; const x = c.getContext('2d');
+        x.fillStyle = '#f5a800'; x.fillRect(60, 60, 120, 40); x.fillStyle = yazi; x.fillRect(190, 60, 150, 40); return c.toDataURL('image/png'); };
+      const acik = ciz('#ffffff'), koyu = ciz('#111111');
+      const once = JSON.stringify(ui._settings.panelTheme || null);
+      const olc = () => { const b = document.querySelector('.side .brand'), i = b.querySelector('img');
+        return { plaka: !!b.querySelector('.brand-koyu'), yazi: !!b.querySelector('.wm'), dogal: i ? [i.naturalWidth, i.naturalHeight] : null, alt: i ? i.alt : null,
+          etiket: !!b.querySelector('.brand-sub'), gen: i ? Math.round(i.getBoundingClientRect().width) : 0, kutu: Math.round(b.getBoundingClientRect().width) }; };
+      const s = { ...ui._settings }, out = {};
+      ui._settings = { ...s, panelTheme: { logo: acik }, logoImage: koyu }; await brandCiz(); out.ikisi = olc();
+      const koyuOlcum = await brandLogoOlc(koyu), acikOlcum = await brandLogoOlc(acik);
+      out.okunur = [koyuOlcum.okunur, acikOlcum.okunur];
+      ui._settings = { ...s, panelTheme: { logo: acik }, logoImage: '' }; await brandCiz(); out.yalnizAcik = olc();
+      ui._settings = { ...s, panelTheme: {}, logoImage: '' }; await brandCiz(); out.hic = olc();
+      ui._settings = { ...s, panelTheme: { logo: koyu }, logoImage: '' }; await brandCiz(); out.panelKoyu = olc();
+      ui._settings = s; await brandCiz();
+      out.ayarAyni = JSON.stringify(ui._settings.panelTheme || null) === once;
+      return out; });
+    expect(r.okunur).toEqual([true, false]);
+    expect(r.ikisi.plaka).toBe(false);                                      // okunur aday (site logosu) seçildi
+    expect(r.ikisi.dogal).toEqual([280, 40]);                               // saydam boşluk kırpıldı (400×160 → içerik kutusu)
+    expect(r.ikisi.alt).toBe('Medyapark');
+    expect(r.ikisi.etiket).toBe(true);                                      // yüzey etiketi korunur
+    expect(r.ikisi.gen).toBeLessThanOrEqual(r.ikisi.kutu);                  // kenar çubuğundan taşmaz
+    expect(r.yalnizAcik.plaka).toBe(true);                                  // yalnız açık logo varsa koyu plakada
+    expect([r.hic.yazi, r.hic.dogal]).toEqual([true, null]);               // logo yoksa yazı
+    expect(r.panelKoyu.plaka).toBe(false);                                  // okunur panel logosu ayarı geçerlidir
+    expect(r.ayarAyni).toBe(true);
+  });
+});
