@@ -1881,17 +1881,75 @@ function userChip(){
   return `<button type="button" class="uchip" title="${esc(ui._email||'')}" onclick="go('ekip')">${av}
     <div class="uc-b"><b>${esc(ad)}</b><span>${esc(rol)}</span></div></button>`;
 }
+/* ---------- Kenar çubuğu logosu (S19) ----------
+   Kenar çubuğu BEYAZDIR. Koyu zemin için hazırlanmış (beyaz yazılı) bir logo
+   burada kısmen görünmez olur: "medya" kalır, "park" ve "ADANA" kaybolur.
+   Bu yüzden aday görseller yüklendikten sonra ÖLÇÜLÜR:
+     · saydam zeminli ve opak piksellerinin kayda değer kısmı beyaza yakınsa
+       logo beyaz zeminde okunmaz sayılır ve sıradaki adaya geçilir
+       (panel logosu → site logosu → yazı);
+     · hiçbir aday okunmuyorsa açık renkli logo koyu bir plakada gösterilir;
+     · saydam / beyaz kenar boşluğu kırpılır ki logo ayrılan alanı doldursun.
+   Yalnız GÖSTERİMDİR: ayar ve dosya değiştirilmez. Görsel ölçülemiyorsa
+   (sunucu CORS vermiyorsa) olduğu gibi gösterilir. */
+const brandSub=()=>`<span class="brand-sub">${surfaceGet()==='workspace'?'Team Workspace':'Yönetim Paneli'}</span>`;
+const BRAND_YAZI='<span class="wm">medya<b>park</b></span>';
+const _brandOlcum={};                              // src -> ölçüm sözü (oturum boyunca)
+function brandLogoOlc(src){
+  if(_brandOlcum[src]) return _brandOlcum[src];
+  return (_brandOlcum[src]=new Promise(res=>{
+    const im=new Image(); im.crossOrigin='anonymous';
+    im.onerror=()=>{ /* CORS yoksa ölçülemez; yine de gösterilebilir mi? */
+      const d=new Image(); d.onload=()=>res({src,yuklendi:true,okunur:true,gorsel:src});
+      d.onerror=()=>res({src,yuklendi:false}); d.src=src; };
+    im.onload=()=>{
+      try{
+        const W=im.naturalWidth, H=im.naturalHeight; if(!W||!H) return res({src,yuklendi:false});
+        const k=Math.min(1,720/W), w=Math.max(1,Math.round(W*k)), h=Math.max(1,Math.round(H*k));
+        const c=document.createElement('canvas'); c.width=w; c.height=h;
+        const x=c.getContext('2d'); x.drawImage(im,0,0,w,h);
+        const d=x.getImageData(0,0,w,h).data;
+        const acikMi=i=>Math.min(d[i],d[i+1],d[i+2])>228;
+        let saydam=0, opak=0, acik=0;
+        for(let i=0;i<d.length;i+=4){ if(d[i+3]<40){ saydam++; continue; } opak++; if(acikMi(i)) acik++; }
+        const saydamZemin=saydam/(w*h)>0.15;
+        const okunur=!(saydamZemin&&opak&&acik/opak>0.12);
+        /* İçerik kutusu: saydam zeminde opak pikseller; beyaz zeminde beyaz olmayanlar. */
+        let x0=w, y0=h, x1=-1, y1=-1;
+        for(let y=0,i=0;y<h;y++) for(let xx=0;xx<w;xx++,i+=4){
+          if(d[i+3]<40||(!saydamZemin&&acikMi(i))) continue;
+          if(xx<x0) x0=xx; if(xx>x1) x1=xx; if(y<y0) y0=y; if(y>y1) y1=y; }
+        let gorsel=src;
+        if(x1>=x0&&y1>=y0&&((x1-x0+1)<w*0.97||(y1-y0+1)<h*0.92)){
+          const cw=x1-x0+1, ch=y1-y0+1, t=document.createElement('canvas'); t.width=cw; t.height=ch;
+          t.getContext('2d').drawImage(c,x0,y0,cw,ch,0,0,cw,ch); gorsel=t.toDataURL('image/png'); }
+        res({src,yuklendi:true,okunur,gorsel});
+      }catch(e){ res({src,yuklendi:true,okunur:true,gorsel:src}); }
+    };
+    im.src=src; }));
+}
+async function brandCiz(tema){
+  const st=ui._settings||{}; tema=tema||st.panelTheme||{};
+  const adaylar=[tema.logo,st.logoImage].filter((v,i,a)=>v&&a.indexOf(v)===i);
+  const sira=(ui._brandSira=(ui._brandSira||0)+1);
+  let sec=null, acik=null;
+  for(const src of adaylar){ const o=await brandLogoOlc(src); if(!o.yuklendi) continue;
+    if(o.okunur){ sec=o; break; } if(!acik) acik=o; }
+  if(sira!==ui._brandSira) return;                 // daha yeni bir çizim var
+  const img=o=>`<img src="${esc(o.gorsel)}" alt="Medyapark">`;
+  ui._brandHtml=sec?img(sec):acik?`<span class="brand-koyu">${img(acik)}</span>`:BRAND_YAZI;
+  const br=document.querySelector('.side .brand'); if(br) br.innerHTML=ui._brandHtml+brandSub();
+}
 function showApp(){
   oturumKorumaKur();
   setTimeout(()=>belirsizKontrol(),1500);        /* S14: önceki oturumdan doğrulanamamış girişim */
   const st=ui._settings||{};
-  const logo = st.logoImage
-    ? `<img src="${esc(st.logoImage)}" alt="logo">`
-    : `<span class="wm">medya<b>park</b></span>`;
   const nav='';
+  /* Logo ölçülüp seçilene dek yer ayrılır (yanlış sürüm bir an bile görünmez);
+     önceki çizimin sonucu varsa doğrudan o kullanılır. */
   root().innerHTML=`<div class="app">
     <nav class="side">
-      <div class="brand">${logo}<span class="brand-sub">${surfaceGet()==='workspace'?'Team Workspace':'Yönetim Paneli'}</span></div>
+      <div class="brand">${ui._brandHtml||'<span class="brand-yer" aria-hidden="true"></span>'}${brandSub()}</div>
       ${surfaceSwitchHtml()}
       <div class="nav-scroll" id="navScroll"></div>
       <button class="navi logout" onclick="logout()">${ic('logout',17)}<span>Çıkış</span></button>
@@ -1927,7 +1985,8 @@ function showApp(){
      girişten dönüş) o açılır; yoksa varsayılan ekran. */
   const hedef=navCoz(location.hash);
   if(hedef) navHedefeGit(hedef); else go(surfaceGet()==='workspace'?'workspace-home':'dashboard');
-  api('settings_get').then(st=>{ ui._settings=st; if(st.panelTheme)applyPanelTheme(st.panelTheme);
+  brandCiz();
+  api('settings_get').then(st=>{ ui._settings=st; applyPanelTheme(st.panelTheme||{});
     if(st.favicon){ let l=document.head.querySelector("link[rel~='icon']");
       if(!l){ l=document.createElement('link'); l.rel='icon'; document.head.appendChild(l); } l.href=st.favicon; } }).catch(()=>{});
   yeniTeklifKontrol(); setInterval(yeniTeklifKontrol,60000);
@@ -11097,10 +11156,9 @@ function applyPanelTheme(t){
   if(t.accent){ r.setProperty('--c-accent',t.accent); r.setProperty('--c-accent-d',_shade(t.accent,.8));
     r.setProperty('--c-brand',t.accent); r.setProperty('--c-brand-d',_shade(t.accent,.72)); r.setProperty('--c-brand-dk',_shade(t.accent,.4)); }
   else ['--c-accent','--c-accent-d','--c-brand','--c-brand-d','--c-brand-dk'].forEach(k=>r.removeProperty(k));
-  const br=document.querySelector('.side .brand');
-  /* Tema logosu uygulanırken yüzey etiketi korunur — aksi halde
-     showApp'ten sonra çalışıp Workspace başlığını eziyordu. */
-  if(br){ if(t.logo) br.innerHTML=`<img src="${esc(t.logo)}" alt="" style="max-height:34px;max-width:160px;object-fit:contain"><span class="brand-sub">${surfaceGet()==='workspace'?'Team Workspace':'Yönetim Paneli'}</span>`; }
+  /* Logo: okunurluk ölçülerek seçilir ve yüzey etiketi korunur (brandCiz). */
+  if(ui._settings) ui._settings.panelTheme=t;
+  brandCiz(t);
 }
 function refAdd(u){ ui._settings.refLogos=Array.isArray(ui._settings.refLogos)?ui._settings.refLogos:[]; ui._settings.refLogos.push(u); refSave(true); }
 function refDel(i){ (ui._settings.refLogos||[]).splice(i,1); refSave(true); }
