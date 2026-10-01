@@ -38,6 +38,13 @@ begin
   select count(*) into v from pg_policies
    where schemaname = 'public' and tablename in ('aboneler','leads') and cmd <> 'INSERT' and roles::text like '%anon%';
   if v > 0 then raise exception 'DENETİM 2 DÜŞTÜ: aboneler/leads anonim okunabiliyor'; end if;
+  -- PS20 (geçiş provası): form tablolarında koşulsuz politika YALNIZ ekleme
+  -- olabilir. Canlıda kalan eski "<tablo>_admin FOR ALL USING (true)" burada
+  -- yakalanır (üstteki denetim bu iki tabloyu muaf tutuyordu).
+  select count(*), string_agg(tablename || '.' || policyname, ', ') into v, t from pg_policies
+   where schemaname = 'public' and tablename in ('aboneler','leads') and cmd <> 'INSERT'
+     and (qual = 'true' or with_check = 'true');
+  if v > 0 then raise exception 'DENETİM 2 DÜŞTÜ: form tablosunda koşulsuz okuma/yazma politikası: %', t; end if;
   raise notice 'DENETİM 2 ✓ anonim erişim yalnız public içerik ve form ekleme';
 
   ---------------------------------------------------------------- 3

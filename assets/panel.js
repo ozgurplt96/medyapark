@@ -494,7 +494,11 @@ async function islemHata(e,yer,tur,k,etiket,baslik){
     }
     if(!belirsizMi(e)){ mpAlert(hataMetni(e),baslik||'Kaydedilemedi'); return {durum:'hata',hata:e}; }
     belirsizEkle(tur,k,etiket);
-    return belirsizCoz(yer,tur,k,baslik);
+    /* Bu girişimin sonucunu AÇIK FORM soruyor. Arka plan sorgusu (belirsizKontrol)
+       aynı girişimi bu sırada ele alırsa kendi penceresini açar, buradaki pencerenin
+       yerine geçer ve form "Kaydediliyor…" durumunda kalırdı (geçiş provasında bulundu). */
+    _belirsizAktif.add(k);
+    try{ return await belirsizCoz(yer,tur,k,baslik); } finally{ _belirsizAktif.delete(k); }
 }
 async function belirsizCoz(yer,tur,k,baslik){
   const kontrol=await mpConfirm('Sunucudan yanıt alınamadı; işlemin sonucu doğrulanamadı. Girdiğiniz bilgiler formda duruyor. “Sonucu kontrol et” ile kaydın oluşup oluşmadığına bakabilirsiniz. Kaydet ile yeniden göndermek de güvenlidir: işlem kaydedildiyse ikinci kez oluşturulmaz.',
@@ -511,11 +515,14 @@ async function belirsizCoz(yer,tur,k,baslik){
 /* Form kapandıktan ya da sayfa yenilendikten sonra: bekleyen girişimlerin
    sonucu sorgulanır, kullanıcıya bildirilir. Ulaşılamayan girişim bekler. */
 let _belirsizSorguda=false;
+const _belirsizAktif=new Set();
 async function belirsizKontrol(){
   if(_belirsizSorguda||!ui._me) return; const l=belirsizOku(); if(!l.length) return;
   _belirsizSorguda=true;
   try{ for(const x of l){
+    if(_belirsizAktif.has(x.anahtar)) continue;      /* açık form kendi sonucunu soruyor */
     let s; try{ s=await islemSonucu(x.tur,x.anahtar); }catch(e){ continue; }
+    if(_belirsizAktif.has(x.anahtar)) continue;
     /* Yeni girişim için "kayıt yok" kesin değildir (istek yolda olabilir). */
     if(!(s&&s.durum==='tamam')&&Date.now()-x.at<60000) continue;
     belirsizSil(x.anahtar);
@@ -719,7 +726,12 @@ const DELMAP={product_delete:'products',mecra_delete:'mecralar',alt_delete:'alt_
      atabiliyordu;
    · Enter artık odaktaki düğmeyi çalıştırır (her zaman "Tamam" değil);
    · kapanınca odak açıldığı yere döner. */
+/* Açık bir pencerenin yerine geçiliyorsa onu bekleyen kod yanıtsız kalmaz:
+   güvenli seçenekle (onayda "hayır / vazgeç", metin sorusunda "vazgeç") sonuçlanır. */
+let _mpDlgBirak=null;
+function mpDlgDevral(){ if(_mpDlgBirak){ const b=_mpDlgBirak; _mpDlgBirak=null; b(); } }
 function mpDlg(o){ return new Promise(res=>{
+  mpDlgDevral();
   const eski=document.getElementById('mpDlgBg'); if(eski)eski.remove();
   const onceki=document.activeElement;
   const bg=document.createElement('div'); bg.id='mpDlgBg'; bg.className='mpdlg-bg';
@@ -736,12 +748,13 @@ function mpDlg(o){ return new Promise(res=>{
     </div></div>`;
   document.body.appendChild(bg);
   requestAnimationFrame(()=>bg.classList.add('on'));
-  const kapat=v=>{ bg.classList.remove('on'); document.removeEventListener('keydown',tus);
+  const kapat=v=>{ _mpDlgBirak=null; bg.classList.remove('on'); document.removeEventListener('keydown',tus);
     setTimeout(()=>bg.remove(),140);
     if(onceki&&document.body.contains(onceki)){ try{ onceki.focus(); }catch(e){} }
     res(v); };
   const tus=e=>{ if(e.key==='Escape'){ e.preventDefault(); kapat(!o.tek?false:true); } };
   document.addEventListener('keydown',tus);
+  _mpDlgBirak=()=>{ document.removeEventListener('keydown',tus); res(!o.tek?false:true); };
   bg.addEventListener('mousedown',e=>{ if(e.target===bg && !o.tek)kapat(false); });
   const no=bg.querySelector('#mpDlgNo'); if(no)no.onclick=()=>kapat(false);
   const okB=bg.querySelector('#mpDlgOk'); okB.onclick=()=>kapat(true);
@@ -752,6 +765,7 @@ function mpAlert(msg,baslik){ return mpDlg({msg,baslik:baslik||'Bilgi',tek:true}
    temasinin disinda kalir ve bazi tarayicilarda engellenir. Ayni
    mpdlg iskeletini kullanir (PS1.1 §24 satir ici kurum/kisi ekleme). */
 function mpPrompt(msg,baslik,varsayilan){ return new Promise(res=>{
+  mpDlgDevral();
   const eski=document.getElementById('mpDlgBg'); if(eski)eski.remove();
   const bg=document.createElement('div'); bg.id='mpDlgBg'; bg.className='mpdlg-bg';
   bg.innerHTML=`<div class="mpdlg" role="dialog" aria-modal="true">
@@ -765,11 +779,12 @@ function mpPrompt(msg,baslik,varsayilan){ return new Promise(res=>{
   document.body.appendChild(bg);
   requestAnimationFrame(()=>bg.classList.add('on'));
   const inp=bg.querySelector('#mpPromptI');
-  const kapat=v=>{ bg.classList.remove('on'); document.removeEventListener('keydown',tus);
+  const kapat=v=>{ _mpDlgBirak=null; bg.classList.remove('on'); document.removeEventListener('keydown',tus);
     setTimeout(()=>bg.remove(),140); res(v); };
   const tus=e=>{ if(e.key==='Escape')kapat(null);
     if(e.key==='Enter'){ e.preventDefault(); kapat(inp.value); } };
   document.addEventListener('keydown',tus);
+  _mpDlgBirak=()=>{ document.removeEventListener('keydown',tus); res(null); };
   bg.addEventListener('mousedown',e=>{ if(e.target===bg)kapat(null); });
   bg.querySelector('#mpDlgNo').onclick=()=>kapat(null);
   bg.querySelector('#mpDlgOk').onclick=()=>kapat(inp.value);
