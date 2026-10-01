@@ -15,7 +15,7 @@ export default defineConfig({
   outputDir: 'test-results',
   use: {
     channel: 'chrome',
-    baseURL: 'http://localhost:5520',
+    baseURL: process.env.MP_HEDEF === 'prova' ? 'http://localhost:5530' : 'http://localhost:5520',
     viewport: { width: 1440, height: 900 },
     locale: 'tr-TR',
     timezoneId: 'Europe/Istanbul',

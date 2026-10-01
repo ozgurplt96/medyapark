@@ -3,9 +3,18 @@
 // Yazan her test ÖNCE `hedefDogrula()` çağırır; hedef bu değilse durur.
 import { execFileSync } from 'node:child_process';
 
-export const API = process.env.MP_TEST_API || 'http://127.0.0.1:56321';
-export const APP = process.env.MP_TEST_APP || 'http://localhost:5520';
-export const DB_KONTEYNER = 'supabase_db_mptest';
+/* İzinli iki hedef vardır; ikisi de atılabilir ve DB işaretiyle doğrulanır:
+     (varsayılan)     test yığını  — scripts/test-env.ps1  (temiz kurulum + sentetik veri)
+     MP_HEDEF=prova   prova yığını — scripts/prova-env.ps1 (canlı kopyası + ileri paket)
+   Başka adres/port verilemez: çalışma DB'si ve canlı hedef OLAMAZ. */
+const HEDEFLER = {
+  test:  { api: 'http://127.0.0.1:56321', app: 'http://localhost:5520', db: 'supabase_db_mptest',  isaret: 'medyapark-test-ortami' },
+  prova: { api: 'http://127.0.0.1:58321', app: 'http://localhost:5530', db: 'supabase_db_mpprova', isaret: 'medyapark-prova-ortami' },
+};
+export const HEDEF = HEDEFLER[process.env.MP_HEDEF === 'prova' ? 'prova' : 'test'];
+export const API = HEDEF.api;
+export const APP = HEDEF.app;
+export const DB_KONTEYNER = HEDEF.db;
 export const ANON = 'sb_publishable_ACJWlzQHlZjBrEguHvfOxg_3BJgxAaH';
 export const PAROLA = 's13-test-parola';
 export const KULLANICI = {
@@ -18,12 +27,8 @@ export const REF = '2027-03-01';
 let _dogrulandi = false;
 export function hedefDogrula() {
   if (_dogrulandi) return;
-  const u = new URL(API);
-  if (!['127.0.0.1', 'localhost'].includes(u.hostname) || u.port !== '56321')
-    throw new Error(`Test hedefi reddedildi: ${API} (yalnız 127.0.0.1:56321)`);
-  if (!/^http:\/\/localhost:5520\/?$/.test(APP)) throw new Error(`Uygulama hedefi reddedildi: ${APP}`);
   const isaret = sql(`select coalesce(shobj_description((select oid from pg_database where datname=current_database()),'pg_database'),'')`);
-  if (isaret !== 'medyapark-test-ortami') throw new Error('Test DB işareti yok — çalışma DB\'si olabilir, durduruldu.');
+  if (isaret !== HEDEF.isaret) throw new Error(`DB işareti "${HEDEF.isaret}" değil — çalışma DB'si olabilir, durduruldu.`);
   _dogrulandi = true;
 }
 
@@ -146,7 +151,7 @@ export async function girisYap(page, kim) {
   await page.goto(`${APP}/admin`);
   await page.waitForFunction(() => typeof sb !== 'undefined' && typeof go === 'function');
   const url = await page.evaluate(() => SUPABASE_URL);
-  if (!String(url).includes('127.0.0.1:56321')) throw new Error(`Uygulama yanlış API'ye bağlı: ${url}`);
+  if (String(url) !== API) throw new Error(`Uygulama yanlış API'ye bağlı: ${url}`);
   await page.evaluate(async ([e, p]) => {
     const r = await sb.auth.signInWithPassword({ email: e, password: p }); if (r.error) throw new Error(r.error.message);
   }, [KULLANICI[kim], PAROLA]);

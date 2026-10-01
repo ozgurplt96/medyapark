@@ -118,7 +118,8 @@ test.describe('Tek dönem: varsayılan, hazır dönemler, taslak', () => {
     await page.evaluate(() => { const b = document.getElementById('mdBas'); b.value = '2037-03-05'; b.dispatchEvent(new Event('input', { bubbles: true })); });
     await expect(page.locator('#mdBekleyen')).toBeVisible();
     await page.locator('#mdSiteG button[data-v=""]').click();
-    expect(await page.evaluate(() => [mdDurum().site, ui._mdSonuc.siteler.length > 1])).toEqual([null, true]);
+    /* Veriden bağımsız: "Tüm mecralar" kapsamdaki bütün lokasyonları getirir (örnek veride 4, canlı kopyasında 1). */
+    expect(await page.evaluate(() => [mdDurum().site, ui._mdSonuc.siteler.length])).toEqual([null, +sql(`select count(*) from mecralar where operational`)]);
     await page.locator(`#mdSiteG button[data-v="${F.site}"]`).click();
     expect(await page.evaluate(() => mdDurum().site)).toBe(F.site);
     await expect(page.locator('#mdSiteG button.on')).toHaveCount(1);
@@ -333,8 +334,11 @@ test.describe('Harita', () => {
       await expect(page.locator('#hSelBar')).toContainText('Dönem: 01.03.2037 – 31.03.2037');
       await expect(page.locator('#hSelBar')).toContainText('Bugün');
       await expect(page.locator('#hSelBar .hk-yuz')).toHaveCount(2);        // A ve B ayrı; tek hükme indirgenmez
-      await expect(page.locator('#hSelBar')).toContainText('Yayında');
-      expect(await page.evaluate(() => !!hMarker)).toBe(true);
+      /* Dönem durumu fikstürden gelir (2037 kaydı → Planlandı); "Bugün" satırı ortamdaki veriye bağlıdır, sınanmaz. */
+      await expect(page.locator('#hSelBar')).toContainText('Planlandı 1 Mar 2037 – 10 Mar 2037');
+      /* Seçili işaret: harita sağlayıcısı değişirse (Google anahtarı reddedilip OSM'e düşülürse) harita
+         yeniden kurulur ve işaret ardından çizilir — anlık değil, gözlenen durum beklenir. */
+      await page.waitForFunction(() => !!hMarker);
       /* Pinden seçim → liste satırı seçili ve odakta. */
       await page.evaluate(c => hPinler[c].fire('click'), cid);
       await expect(page.locator(`#hr${cid}`)).toHaveAttribute('aria-pressed', 'true');

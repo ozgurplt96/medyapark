@@ -183,7 +183,8 @@ test.describe('Doluluk Excel üst alanı ve rapor PDF metni', () => {
     expect(S.find(s => s.r[2][0] === 'Kampanya').alt[0]).toContain('Her satır bir kampanyadır');
     /* Kayıtlar değişmedi: yüzün Mart hücresi kurum ve kesin tarihi taşır (satır 4+). */
     const hucre = await page.evaluate(async () => { const wb = new ExcelJS.Workbook(); await wb.xlsx.load(await ui._mdSonXls.blob.arrayBuffer());
-      const out = []; wb.worksheets[0].eachRow((row, i) => { if (i >= 4) out.push(row.values.slice(1).map(v => v && v.richText ? v.richText.map(x => x.text).join('') : v).join('|')); }); return out.join('\n'); });
+      /* Yüz hangi ürün sayfasındaysa orada aranır: kimlik sırası = sayfa sırası varsayılmaz (canlı kopyasında değil). */
+      const out = []; wb.worksheets.forEach(ws => ws.eachRow((row, i) => { if (i >= 4) out.push(row.values.slice(1).map(v => v && v.richText ? v.richText.map(x => x.text).join('') : v).join('|')); })); return out.join('\n'); });
     expect(hucre).toContain('05.03–20.03.2037');
   });
 

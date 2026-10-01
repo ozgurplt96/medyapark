@@ -17,7 +17,7 @@ declare
 begin
   -- Hedef doğrulaması: yalnız işaretli test DB'sinde çalışır.
   if coalesce(shobj_description((select oid from pg_database where datname = current_database()), 'pg_database'), '')
-     <> 'medyapark-test-ortami' then
+     not in ('medyapark-test-ortami', 'medyapark-prova-ortami') then
     raise exception 'Bu dosya yalnız test ortamında çalışır.';
   end if;
 

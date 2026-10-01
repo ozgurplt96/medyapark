@@ -3,7 +3,7 @@
 // dosyayı Storage API ile (uygulamanın kullandığı yol) silmeye çalışır.
 import { test, expect } from '@playwright/test';
 import { spawn } from 'node:child_process';
-import { girisYap, sql, rpc, depo, dlg, temizle, KULLANICI } from '../lib/ortam.mjs';
+import { girisYap, sql, rpc, depo, dlg, temizle, KULLANICI, DB_KONTEYNER } from '../lib/ortam.mjs';
 
 test.beforeEach(() => temizle());
 const PDF = Buffer.from('%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n');
@@ -24,7 +24,7 @@ test('kayıt sürerken aynı kullanıcının dosya silme isteği bekler ve redde
   const yol = await yukle('uye', 's13t-yaris.pdf');
   const docs = JSON.stringify(govde(yol, 'S13T yarış')).replace(/'/g, "''");
   const A = new Promise(r => {
-    const p = spawn('docker', ['exec', '-i', 'supabase_db_mptest', 'psql', '-U', 'postgres', '-qtA', '-v', 'ON_ERROR_STOP=1']);
+    const p = spawn('docker', ['exec', '-i', DB_KONTEYNER, 'psql', '-U', 'postgres', '-qtA', '-v', 'ON_ERROR_STOP=1']);
     let o = ''; p.stdout.on('data', d => o += d); p.stderr.on('data', d => o += d); p.on('close', c => r({ c, o }));
     p.stdin.end(`begin; set local role authenticated;
       set local request.jwt.claims = '{"sub":"${UID.uye}","role":"authenticated"}';
