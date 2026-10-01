@@ -1911,18 +1911,8 @@ i.tk-p.tk-ozel{border-radius:3px;}
      LED "Yayında" → mor (statik doluluktan ayrı aile)
    Mevcut tokenlar kullanılır; yeni palet yok.
    ========================================================== */
-.md-head{align-items:flex-start;gap:12px;flex-wrap:wrap;}
-.md-head-r{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
-.md-site{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 12px;}
-.md-sp{border:1px solid var(--c-line);background:#fff;color:var(--c-ink2);border-radius:999px;
-  padding:6px 13px;font:600 13px/1.3 var(--f);transition:.12s;}
-.md-sp:hover{border-color:var(--c-ink3);color:var(--c-ink);}
-.md-sp.on{background:var(--c-ink);border-color:var(--c-ink);color:#fff;}
-.md-sp:focus-visible,.md-gt:focus-visible{outline:2px solid var(--c-accent);outline-offset:2px;}
-.md-sp-all{border-style:dashed;}
-/* Alan/tür seçici KALDIRILDI (S8.1 §10): aynı kavram hem soyut filtre
-   hem görünür grup olarak iki kez sorulmaz. Kalan üç kontrol. */
-.md-fbar .fbar-row{display:grid;grid-template-columns:minmax(200px,1.4fr) repeat(3,minmax(150px,1fr));gap:8px;}
+.md-gt:focus-visible{outline:2px solid var(--c-accent);outline-offset:2px;}
+/* Dönem araç çubuğu, mecra sekmeleri ve süzgeç satırı: aşağıda, S19 bloğunda. */
 
 /* ---------- Mecra seçici (site-first, S8.1 §9) ---------- */
 
@@ -2046,11 +2036,7 @@ button.rcell{border:0;padding:0;font-family:inherit;position:relative;}
 .md-adm{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:14px;padding-top:12px;border-top:1px solid var(--c-line2);font-size:12.5px;}
 .md-adm>span:first-child{font-weight:700;color:var(--c-ink2);}
 
-@media (max-width:1100px){
-  .md-fbar .fbar-row{grid-template-columns:1fr 1fr;}
-}
 @media (max-width:640px){
-  .md-fbar .fbar-row{grid-template-columns:1fr;}
   .md-kmp-s{justify-content:flex-start;}
   .md-okunma{flex-direction:column;gap:2px;}
   .md-hl{grid-template-columns:1fr auto;}
@@ -2060,15 +2046,7 @@ button.rcell{border:0;padding:0;font-family:inherit;position:relative;}
   /* Dar ekranda grup başlığı tek sütuna iner; özet satırı başlığın
      altında kalır ve bağlamsal eylem erişilebilir olmayı sürdürür. */
 
-  /* Kontrol duvarı yok (S8.1 §19): mecra çipleri tek satırda yatay
-     kayar, açıklama satırı gizlenir, arama tam genişlik, üç seçici iki
-     sütuna sığar. Grup özetleri ilk ekranda görünür kalır. */
-  .md-site{flex-wrap:nowrap;overflow-x:auto;margin-bottom:8px;padding-bottom:4px;scrollbar-width:none;}
-  .md-site::-webkit-scrollbar{display:none;}
-  .md-sp{flex:0 0 auto;white-space:nowrap;}
   .md-head .sub{display:none;}
-  .md-fbar .fbar-row{grid-template-columns:1fr 1fr;}
-  .md-fbar #mdQ{grid-column:1/-1;}
   .md-gt{flex-direction:column;align-items:flex-start;gap:2px;width:100%;}
   .md-gcv{align-self:flex-start;}
   .rg-legend .lg-not{margin-left:0;flex:0 0 100%;}
@@ -2178,7 +2156,7 @@ button.rcell{border:0;padding:0;font-family:inherit;position:relative;}
 /* Müsaitlik: tek kompakt grup — Başlangıç | Bitiş | Müsaitlik ara | Temizle */
 
 .md-ms-f{display:flex;flex-direction:column;gap:3px;font-size:11.5px;font-weight:600;color:var(--c-ink3,#86868b);}
-.md-ms-f .inp-sm{width:160px;max-width:none;}
+.md-ms-f input.inp{flex:0 0 auto;width:160px;max-width:none;height:34px;min-width:0;margin:0;}
 .md-ms-hata{flex-basis:100%;margin:2px 0 0;font-size:12.5px;font-weight:600;color:#b3272b;}
 .md-ms-hata[hidden]{display:none;}
 .md-ms-ozet{display:flex;flex-direction:column;gap:4px;}
@@ -2252,7 +2230,7 @@ button.rcell{border:0;padding:0;font-family:inherit;position:relative;}
 
 @media (max-width:760px){
   .md-ms-f{flex:1 1 140px;}
-  .md-ms-f .inp-sm{width:100%;}
+  .md-ms-f input.inp{width:100%;}
   .bl-fbar select.inp{flex:1 1 100%;}
   .bl-f2 .bl-not{margin:0;max-width:none;}
   .bx-main{flex-wrap:wrap;gap:8px 10px;}
@@ -2261,9 +2239,6 @@ button.rcell{border:0;padding:0;font-family:inherit;position:relative;}
   .bd-bt{flex-basis:80px;}
   .bd-onz iframe{height:360px;}
 }
-/* Etiketli tarih alanı sütun flex'tir: genel `.fbar-row .inp{flex:1}` onu
-   DİKEY büyütmesin. */
-.md-ms-f input.inp{flex:0 0 auto;height:34px;min-width:0;}
 .bl-f2{align-items:flex-end;}
 /* `.qc-who{display:flex}` HTML `hidden` niteliğini ezmesin. */
 #bfOrgSar[hidden]{display:none;}
@@ -2283,8 +2258,6 @@ button.rcell{border:0;padding:0;font-family:inherit;position:relative;}
 .md-st-bos{background:rgba(52,168,83,.12);color:#1f7a3a;}
 
 /* Durum süzgeci: segmentli seçim — belirgin dolgu, okunaklı metin, ✓ */
-.md-durum-row{display:flex;align-items:flex-end;gap:10px 14px;flex-wrap:wrap;margin:10px 0 0;
-  padding-top:10px;border-top:1px solid var(--c-hair,#eceef1);}
 .md-seg{display:inline-flex;flex-wrap:wrap;gap:4px;padding:3px;border-radius:10px;background:var(--c-bg2,#f4f5f7);
   box-shadow:inset 0 0 0 1px var(--c-line,#e6e8eb);}
 .md-seg button{border:0;background:transparent;font:600 13px/1 var(--f);color:var(--c-ink2,#4b5563);
@@ -2292,12 +2265,9 @@ button.rcell{border:0;padding:0;font-family:inherit;position:relative;}
 .md-seg button:hover{background:#fff;color:var(--c-ink,#1d1d1f);}
 .md-seg button.on{background:var(--c-ink,#1d1d1f);color:#fff;box-shadow:0 1px 2px rgba(16,24,40,.18);}
 .md-seg button:focus-visible{outline:2px solid var(--c-accent);outline-offset:2px;}
-.md-durum-row .md-ms-hata{flex-basis:100%;}
 /* Aynı seçim dili: değeri olan süzgeç kutusu ve seçili ölçek */
 .md-fbar select.inp.inp-on,.bl-fbar select.inp.inp-on{background:#f1f3f7;border-color:var(--c-ink,#1d1d1f)!important;
   box-shadow:inset 0 0 0 1px var(--c-ink,#1d1d1f);font-weight:700;color:var(--c-ink,#1d1d1f);}
-.md-head .ws-switch button.on{background:var(--c-ink,#1d1d1f);color:#fff;}
-.md-dz-opsiyon{background:rgba(217,131,36,.09);box-shadow:inset 0 0 0 1px rgba(217,131,36,.35);}
 
 /* Şeritler: eşleşen yüz / eşleşmeyen yüz / boşalma günü / durum tarihi */
 
@@ -2547,108 +2517,142 @@ body.mdl-acik{overflow:hidden;}
 .rp3-dol td.rp3-karma{text-align:left;padding-top:9px;}
 .rp3-dp{display:flex;gap:6px;align-items:flex-start;} .rp3-dp i{flex:none;width:8px;height:8px;border-radius:2px;margin-top:4px;}
 .rp3-dp span{display:block;}
+/* S19 — LED yayın alanı önizlemesi: Excel sayfasıyla aynı okunuş (satır = kampanya, aylar sütunda) */
+.rp3-led td{vertical-align:middle;}
+.rp3-led .rp3-kmp{min-width:210px;background:#fafafb;position:sticky;left:0;z-index:1;}
+.rp3-led .rp3-kmp label{display:flex;align-items:flex-start;gap:6px;cursor:pointer;}
+.rp3-led .rp3-kmp small{margin:1px 0 0 22px;}
+.rp3-led .rp3-ld,.rp3-led .rp3-ldn{white-space:nowrap;}
+.rp3-led .rp3-ldn{font-size:12px;color:var(--c-ink2);}
+.rp3-led .rp3-lay{min-width:104px;text-align:center;}
+.rp3-lnot{margin:-4px 0 14px;}
 
-/* ============ S16 — Mecralar aylık yönetim tablosu (.mtb-*) ============
-   S15 doluluk Excel'inin düzeni: pano/yüz solda yapışkan, aylar sütunda,
-   başlık yapışkan; tablo kendi içinde kayar. Durum renkleri S15 pastel
-   tonlarıdır ve DAİMA metinle birlikte kullanılır. Üç işaret birbirinden
-   ayrıdır: bugün = mavi dikey çizgi, seçili yüz = mavi sol şerit,
-   odak (Takvimde göster) = koyu amber çerçeve. */
-.mtb-wrap{overflow:auto;max-height:calc(100vh - 170px);border:1px solid var(--c-hair);border-radius:10px;background:#fff;
+/* ============ Mecralar aylık yönetim tablosu (.mtb-*) — S16 hesap, S19 görünüm ============
+   Görünüş Raporlar › Mecra doluluk tablosu önizlemesiyle (.rp3-dol) aynı
+   dildir: kompakt No / Yüz sütunları solda yapışkan, aylar sütunda, başlık
+   yapışkan; tablo kendi içinde kayar.
+     · tek durumlu ay    → hücre durum rengiyle dolu, metin ortada
+     · ay içinde değişen → hücre beyaz; üstte günlere oranlı şerit, altında
+       her dilim renk işareti + kalın ad + küçük tarih satırıyla
+   Durum renkleri S15 şablon tonlarıdır (Excel/PDF/önizleme ile aynı) ve
+   DAİMA metinle birlikte kullanılır. İşaretler birbirinden ayrıdır:
+   bugün = mavi dikey çizgi · seçili yüz = mavi sol şerit · süzgeç eşleşmesi
+   = koyu çerçeve · odak (Takvimde göster) = amber çerçeve · klavye odağı = mor.
+   `--ng` (No) ve `--yg` (Yüz) sütun genişlikleridir; `--yg` çizimden sonra
+   içerikten ölçülür (mdYuzGenOlc). <col>, tablo min-width'i ve yapışkan
+   `left` AYNI değişkenleri kullanır. */
+.mtb-wrap{overflow:auto;max-height:calc(100vh - 150px);border:1px solid var(--c-hair);border-radius:10px;background:#fff;
   position:relative;overscroll-behavior-x:contain;}
-.mtb{border-collapse:separate;border-spacing:0;table-layout:fixed;width:100%;font-size:12.5px;line-height:1.25;}
-.mtb th,.mtb td{border-right:1px solid #e3e3e8;border-bottom:1px solid #e3e3e8;}
-.mtb thead th{position:sticky;top:0;z-index:3;background:#fff4d2;color:var(--c-ink);font-weight:700;
-  padding:7px 8px;border-bottom:1px solid #cfc6a5;text-align:center;white-space:nowrap;}
-.mtb thead th.mtb-pano,.mtb thead th.mtb-yz,.mtb thead th.mtb-kmp{z-index:5;text-align:left;font-size:11.5px;letter-spacing:.02em;}
+.mtb{--ng:34px;--yg:92px;border-collapse:separate;border-spacing:0;table-layout:fixed;width:100%;font-size:12.5px;line-height:1.25;}
+.mtb col.c-no{width:var(--ng);} .mtb col.c-yuz{width:var(--yg);}
+.mtb th,.mtb td{border-right:1px solid #ececef;border-bottom:1px solid var(--c-hair);}
+.mtb thead th{position:sticky;top:0;z-index:3;background:#fff2c7;color:var(--c-ink);font-weight:700;
+  padding:7px 8px;border-bottom:1px solid #b8b8bf;text-align:left;white-space:nowrap;}
+.mtb thead th.mtb-no,.mtb thead th.mtb-yz,.mtb thead th.mtb-kmp{z-index:5;}
+.mtb thead th.mtb-no{left:0;text-align:center;padding-left:4px;padding-right:4px;}
+.mtb thead th.mtb-yz{left:var(--ng);}
+.mtb thead th.mtb-kmp{left:0;}
+/* Ay başlığı */
 .mtb-ay{position:relative;}
-.mtb-ay-t em{font-style:normal;font-weight:600;color:var(--c-ink3);font-size:11.5px;}
 .mtb-ay.bu{background:#ffe9a8;box-shadow:inset 0 -3px 0 #1f6feb;}
 .mtb-ay.bu .mtb-ay-t{color:#1f4fa8;}
+.mtb-ay.kismi{background:#f4f4f6;}
+.mtb-ay.kismi.bu{background:#ffe9a8;}
 .mtb-ay.vurgu{animation:mtbVurgu 1.4s ease-out 1;}
 @keyframes mtbVurgu{0%{background:#cfe0ff;}100%{background:#ffe9a8;}}
-.mtb tbody th.mtb-pano{position:sticky;left:0;z-index:2;background:#fafafb;text-align:left;vertical-align:middle;
-  padding:6px 8px;font-weight:600;border-right:1px solid #d6d6db;}
-.mtb thead th.mtb-pano{left:0;}
-.mtb .mtb-yz{position:sticky;left:var(--pg,118px);z-index:2;background:#fafafb;text-align:center;vertical-align:middle;padding:0;
-  border-right:1px solid #cfcfd6;}
-.mtb thead th.mtb-yz{left:var(--pg,118px);text-align:center;}
-.mtb-yz b{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:6px;
-  background:#eceef2;font-size:12px;color:var(--c-ink2);}
-.mtb-no{display:inline-block;min-width:16px;font-size:11px;color:var(--c-ink3);font-weight:600;margin-right:2px;}
-.mtb-pano .mtl-cb{margin:0 4px 0 0;vertical-align:middle;}
-.mtb-ad.btn-link{font-weight:700;font-size:13px;padding:0;text-align:left;vertical-align:middle;}
-.mtb tr.son>td,.mtb tr.son>th{border-bottom:1px solid #a9a9b0;}
-.mtb tr.sec th.mtb-pano{background:#eaf1ff;box-shadow:inset 3px 0 0 #2563eb;}
-.mtb tr.sec td.mtb-yz{background:#eaf1ff;}
-.mtb tr.eslesmez>td.mtb-c{opacity:.45;}
+.mtb-bu-e,.mtb-kismi{display:inline-block;font:700 10.5px/1 var(--f);font-style:normal;border-radius:4px;padding:2px 5px;margin-left:6px;vertical-align:1px;}
+.mtb-bu-e{color:#fff;background:#1f6feb;}
+.mtb-kismi{color:#5e5e64;background:#e4e4e8;}
+/* dar kısmi ay sütununda çip alt satıra iner, kırpılmaz */
+.mtb-ay.dar .mtb-kismi{display:block;width:max-content;margin:3px 0 0;}
+/* Sol sütunlar: No (pano sırası) + Yüz (seçim kutusu ve yüz kodu) */
+.mtb tbody th.mtb-no{position:sticky;left:0;z-index:2;background:#fafafb;text-align:center;vertical-align:middle;
+  padding:5px 4px;font-weight:700;border-bottom:1px solid #9c9ca3;}
+.mtb tbody th.mtb-yz{position:sticky;left:var(--ng);z-index:2;background:#fafafb;text-align:left;vertical-align:middle;
+  padding:5px 8px;font-weight:400;border-right:1px solid #cfcfd6;}
+.mtb-yi{display:inline-flex;align-items:center;gap:6px;white-space:nowrap;}
+.mtb-yi .mtl-cb{width:15px;height:15px;margin:0;}
+.mtb-ad.btn-link{font-weight:700;font-size:12.5px;padding:0;text-align:left;white-space:nowrap;color:var(--c-ink);}
+.mtb-ad.btn-link:hover{color:var(--c-accent-d);}
+.mtb-bos{display:block;margin-top:2px;font:700 10.5px/1.25 var(--f);color:#155a2a;}
+.mtb tr.son>td,.mtb tr.son>th{border-bottom:1px solid #9c9ca3;}
+.mtb tr.sec>th.mtb-yz{background:#eaf1ff;box-shadow:inset 3px 0 0 #2563eb;}
 .mtb tr.md-odak>th{background:#fff1cf;}
-/* Hücre: yükseklik satırın içeriğine göre; buton hücreyi doldurur. */
-.mtb-c{position:relative;padding:0;vertical-align:top;height:1px;background:#fff;}
-.mtb-c.tek>.mtb-b{width:100%;height:100%;min-height:44px;border-radius:0;justify-content:center;align-items:center;text-align:center;}
-.mtb-c.karma{padding:8px 3px 3px;}
+/* Hücre: yükseklik satırın içeriğine göre; tek durumlu ayda düğme hücreyi doldurur. */
+.mtb-c{position:relative;padding:0;vertical-align:middle;height:1px;background:#fff;}
+.mtb-c.karma{padding:9px 0 3px;vertical-align:top;}
 .mtb-serit{position:absolute;top:0;left:0;right:0;height:5px;}
-.mtb-bl{display:flex;flex-direction:column;gap:2px;}
-.mtb-bl .mtb-b{border-radius:4px;padding:3px 6px;text-align:left;align-items:flex-start;}
-.mtb-b b .mtb-t{display:inline;font-weight:500;font-size:11.5px;}
-.mtb-b{display:flex;flex-direction:column;gap:1px;width:100%;border:0;font:inherit;cursor:pointer;padding:6px 6px;
-  line-height:1.22;position:relative;}
-.mtb-b b{display:block;font-size:12.5px;font-weight:700;overflow-wrap:anywhere;}
-.mtb-b span{display:block;font-size:11.5px;overflow-wrap:anywhere;}
-.mtb-b i{font-style:normal;font-weight:650;}
-.mtb-b i.yalniz{font-weight:700;}
-.mtb-b.t-yayin,.mtb-sw.t-yayin{background:#F4C4BE;color:#7F1A10;}
-.mtb-b.t-opsiyon,.mtb-sw.t-opsiyon{background:#FAD6A0;color:#6E3D00;}
-.mtb-b.t-musait,.mtb-sw.t-musait{background:#CBEAD2;color:#155A2A;}
-.mtb-b.t-musait b{font-weight:650;}
-/* Geçmiş: aynı türün AÇIK tonu; metin koyu kalır (okunur). */
-.mtb-b.gecmis.t-yayin,.mtb-sw.t-yayin.gecmis{background:#FBE6E3;}
-.mtb-b.gecmis.t-opsiyon{background:#FDEED6;}
+.mtb-bl{display:flex;flex-direction:column;gap:1px;}
+.mtb-b{display:flex;gap:6px;align-items:flex-start;width:100%;border:0;border-radius:4px;background:transparent;font:inherit;
+  line-height:1.25;color:inherit;text-align:left;cursor:pointer;padding:2px 8px;position:relative;}
+.mtb-m{display:block;min-width:0;}
+.mtb-m b{display:block;font-size:12.5px;font-weight:700;overflow-wrap:anywhere;}
+.mtb-m small{display:block;font-size:11px;overflow-wrap:anywhere;}
+.mtb-m small i{font-style:normal;font-weight:650;}
+.mtb-nk{flex:none;width:8px;height:8px;border-radius:2px;margin-top:4px;}
+.mtb-c.tek>.mtb-b{height:100%;min-height:34px;border-radius:0;padding:5px 8px;justify-content:center;align-items:center;text-align:center;}
+/* Durum: mürekkep + işaret (ay içinde değişen) ya da dolgu (tek durumlu ay / gösterge) */
+.mtb-b.t-yayin,.mtb-sw.t-yayin{color:#7F1A10;}
+.mtb-b.t-opsiyon,.mtb-sw.t-opsiyon{color:#6E3D00;}
+.mtb-b.t-musait,.mtb-sw.t-musait{color:#155A2A;}
+.mtb-b.t-yayin .mtb-nk{background:#D24A3C;}
+.mtb-b.t-opsiyon .mtb-nk{background:#E38B12;}
+.mtb-b.t-musait .mtb-nk{background:#3AA35A;}
+.mtb-c.tek>.mtb-b.t-yayin,.mtb-sw.t-yayin{background:#F4C4BE;}
+.mtb-c.tek>.mtb-b.t-opsiyon,.mtb-sw.t-opsiyon{background:#FAD6A0;}
+.mtb-c.tek>.mtb-b.t-musait,.mtb-sw.t-musait{background:#CBEAD2;}
+/* Geçmiş (Bitti): aynı türün AÇIK tonu; metin koyu kalır (okunur). */
+.mtb-c.tek>.mtb-b.gecmis.t-yayin,.mtb-sw.t-yayin.gecmis{background:#FBE6E3;}
+.mtb-c.tek>.mtb-b.gecmis.t-opsiyon{background:#FDEED6;}
+.mtb-bl .mtb-b.gecmis .mtb-nk{opacity:.45;}
 /* Planlandı: kesin yayın ama dönemi başlamadı — "Yayında" gibi görünmez. */
-.mtb-b.plan,.mtb-sw.plan{outline:1.5px dashed rgba(127,26,16,.55);outline-offset:-4px;}
+.mtb-c.tek>.mtb-b.plan,.mtb-sw.plan{outline:1.5px dashed rgba(127,26,16,.55);outline-offset:-4px;}
+.mtb-bl .mtb-b.plan .mtb-nk{background:transparent;box-shadow:inset 0 0 0 1.5px #D24A3C;}
+/* Uyarı, süzgeç ve odak işaretleri */
 .mtb-b.sur{box-shadow:inset 3px 0 0 #b3261e;}
 .mtb-uy{display:block;font-style:normal;font-size:11px;font-weight:700;color:#b3261e;}
 .mtb-b.soluk,.mtb-sw.soluk{opacity:.5;filter:saturate(.45);}
 .mtb-b.vurgu{box-shadow:inset 0 0 0 2px #1d1d1f;}
 .mtb-b.sur.vurgu{box-shadow:inset 3px 0 0 #b3261e,inset 0 0 0 2px #1d1d1f;}
-.mtb-b:hover{filter:brightness(.96);}
+.mtb-b.bosalma{box-shadow:inset 0 0 0 2px #1f7a3a;}
+.mtb-bl .mtb-b:hover{background:#f1f2f5;}
+.mtb-c.tek>.mtb-b:hover{filter:brightness(.96);}
 .mtb-b:focus-visible{outline:2.5px solid #7c4dff;outline-offset:-3px;z-index:2;}
 .mtb-b.md-odak{box-shadow:inset 0 0 0 3px #b45309;animation:mtbOdak 1.6s ease-out 1;}
 @keyframes mtbOdak{0%{box-shadow:inset 0 0 0 6px #f59e0b;}100%{box-shadow:inset 0 0 0 3px #b45309;}}
-.mtb-c.pasif{background:repeating-linear-gradient(45deg,#f6f7f9,#f6f7f9 5px,#eef0f3 5px,#eef0f3 10px);vertical-align:middle;
-  text-align:center;color:var(--c-ink3);font-size:11px;}
-/* İşaretler (tıklamayı engellemez) */
+.mtb-c.pasif{background:repeating-linear-gradient(45deg,#f6f7f9,#f6f7f9 5px,#eef0f3 5px,#eef0f3 10px);
+  text-align:center;color:var(--c-ink3);font-size:11px;padding:5px 8px;}
+/* Bugün çizgisi (tıklamayı engellemez) */
 .mtb-bugun{position:absolute;top:0;bottom:0;width:2px;margin-left:-1px;background:#1f6feb;opacity:.75;z-index:1;pointer-events:none;}
 .mtb-bugun.b{top:auto;height:6px;bottom:0;opacity:1;}
-.mtb-bugun.b i{position:absolute;bottom:6px;left:50%;transform:translateX(-50%);font:800 9.5px/1 var(--f);font-style:normal;
-  color:#fff;background:#1f6feb;border-radius:3px;padding:2px 4px;}
 .mtb-bugun.vurgu{animation:mtbBugun 1.4s ease-out 1;opacity:1;width:3px;}
 @keyframes mtbBugun{0%{box-shadow:0 0 0 4px rgba(31,111,235,.35);}100%{box-shadow:none;}}
 @media (prefers-reduced-motion: reduce){.mtb-ay.vurgu,.mtb-b.md-odak,.mtb-bugun.vurgu{animation:none;}}
-/* LED: satır = kampanya */
+/* LED: satır = kampanya; kampanya adı sütunu geniş kalır */
 .mtb tbody th.mtb-kmp{position:sticky;left:0;z-index:2;background:#fafafb;text-align:left;vertical-align:middle;
   padding:6px 8px;font-weight:400;border-right:1px solid #cfcfd6;}
-.mtb thead th.mtb-kmp{left:0;}
 .mtb-kmp .mtb-ad{display:block;white-space:normal;}
 .mtb-kmp-is,.mtb-kmp-d{display:block;font-size:11.5px;color:var(--c-ink3);line-height:1.25;}
 .mtb-kmp-d{font-family:var(--fm);font-size:11px;letter-spacing:-.02em;}
 .mtb-c.led-bos{background:#fff;}
-.mtb-led .mtb-c.tek>.mtb-b{min-height:44px;}
-.mtb tr.md-odak>th.mtb-kmp{background:#fff1cf;box-shadow:inset 3px 0 0 #b45309;}
+.mtb tr.md-odak>th.mtb-kmp{box-shadow:inset 3px 0 0 #b45309;}
 .mtb-led-not{margin:0 0 8px;}
 /* Gösterge */
 .rg-legend .mtb-sw{width:18px;height:13px;border-radius:3px;border:1px solid rgba(0,0,0,.12);}
 .rg-legend .mtb-sw-bugun{width:3px;height:14px;border-radius:0;background:#1f6feb;}
 .rg-legend .mtb-uy{display:inline;}
-.mtb col.c-pano{width:var(--pg,118px);} .mtb col.c-yuz{width:40px;}
 @media (max-width:760px){
   .mtb-wrap{max-height:70vh;}
-  .mtb{font-size:12px;}
-  /* sıra no gizli: pano sütunu ondan kazanılan 18 px kadar dar */
-  .mtb col.c-pano{width:calc(var(--pg,96px) - 18px);} .mtb .mtb-yz,.mtb thead th.mtb-yz{left:calc(var(--pg,96px) - 18px);}
-  .mtb-no{display:none;}
+  /* Dar ekranda yalnız Yüz sütunu yapışkandır; sıra no tabloyla birlikte kayar. */
+  .mtb tbody th.mtb-no{position:static;}
+  .mtb thead th.mtb-no{left:auto;z-index:3;}
+  .mtb thead th.mtb-yz,.mtb tbody th.mtb-yz{left:0;}
 }
-.mtb-bu-e{font-style:normal;font:800 10px/1 var(--f);color:#fff;background:#1f6feb;border-radius:4px;padding:2px 5px;margin-left:6px;vertical-align:1px;}
+@media (pointer:coarse){
+  .mtb-c.tek>.mtb-b{min-height:44px;}
+  .mtb-bl .mtb-b{padding-top:6px;padding-bottom:6px;}
+  .mtb-yi .mtl-cb{width:18px;height:18px;}
+}
 /* S16 — rapor önizlemesi: kurum/iş grup bandı, kalem durumu, plan açıklaması */
 .rp3-bm tr.rp3-grp td{background:#eaecf1;border-top:1.5px solid #6e6e75;border-bottom:1px solid #c9ccd4;padding-top:7px;padding-bottom:7px;}
 .rp3-bm tr.rp3-grp td span{color:var(--c-ink2);font-weight:600;}
@@ -2661,50 +2665,68 @@ body.mdl-acik{overflow:hidden;}
 .rp2-chk em{font-style:normal;color:var(--c-ink3);font-size:12px;margin-left:4px;}
 
 /* ==========================================================
-   S17 — Mecralar: tek dönem araması, doğrudan Excel, harita
-   Mevcut dil yeniden kullanılır (md-seg, ws-switch, md-fchip, mtb-*,
-   hselbar); yeni renk sistemi yok.
+   Mecralar: dönem araç çubuğu, mecra sekmeleri, süzgeçler (S17, S19 yerleşim)
+     · dönem araçları (hazır dönem, ileri/geri, Bugüne git, geçmiş ayları
+       gizle, Excel) üst sağda tek kompakt araç çubuğu
+     · mecra sekmeleri ayrı satırda, hep görünür
+     · süzgeçler tek sıkı satır; özel dönem ayrı (yalnız Ara / Enter)
+     · büyük "uygulanan arama" kutusu yerine tek satırlık özet
+   SEÇİM dili tektir: koyu dolgu + ✓. Durum renkleri seçim için kullanılmaz.
    ========================================================== */
-.md-ara .md-donem-row{display:flex;align-items:flex-end;gap:10px 14px;flex-wrap:wrap;margin:0 0 10px;}
-.md-hazir{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;}
-.md-hazir .ws-switch button.on{background:var(--c-ink,#1d1d1f);color:#fff;}
-.md-nav{width:34px;height:34px;border-radius:9px;border:1px solid var(--c-line);background:#fff;font:700 16px/1 var(--f);
+.md-head{align-items:center;gap:10px 14px;flex-wrap:wrap;margin-bottom:10px;}
+.md-arac{display:flex;align-items:center;justify-content:flex-end;gap:6px 8px;flex-wrap:wrap;}
+.md-hazir{display:inline-flex;align-items:center;gap:4px;}
+.md-nav{width:32px;height:32px;border-radius:9px;border:1px solid var(--c-line);background:#fff;font:700 16px/1 var(--f);
   color:var(--c-ink2);cursor:pointer;}
 .md-nav:hover{border-color:var(--c-ink3);color:var(--c-ink);}
-.md-nav:focus-visible,.md-bekleyen:focus-visible,.md-xls:focus-visible{outline:2px solid var(--c-accent);outline-offset:2px;}
-.md-ara .md-ms-f .inp-sm{width:160px;height:34px;}
-.md-ara .mtl-gk{align-self:center;font-size:13px;display:inline-flex;gap:6px;align-items:center;}
-.md-ara .md-site{margin:0 0 10px;}
-.md-ara-b{display:inline-flex;align-items:center;gap:10px;flex-wrap:wrap;margin-left:auto;}
-.md-ara-go{min-width:84px;height:34px;}
-.md-bekleyen{border:0;cursor:pointer;font:700 12.5px/1 var(--f);color:#7a4a00;background:#fff3d6;
-  box-shadow:inset 0 0 0 1px #f1c96b;border-radius:999px;padding:8px 12px;}
+.md-nav:focus-visible,.md-xls:focus-visible,.md-sp:focus-visible{outline:2px solid var(--c-accent);outline-offset:2px;}
+.md-arac .md-seg button{padding:7px 11px;}
+.mtl-gk{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--c-ink2);white-space:nowrap;cursor:pointer;}
+.md-xls[disabled]{opacity:.5;cursor:not-allowed;}
+/* Mecra sekmeleri */
+.md-site{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 10px;}
+.md-sp{border:1px solid var(--c-line);background:#fff;color:var(--c-ink2);border-radius:999px;cursor:pointer;
+  padding:6px 13px;font:600 13px/1.3 var(--f);transition:.12s;white-space:nowrap;}
+.md-sp:hover{border-color:var(--c-ink3);color:var(--c-ink);}
+.md-sp.on{background:var(--c-ink);border-color:var(--c-ink);color:#fff;}
+.md-sp-all{border-style:dashed;}
+.md-sp.on::before,.md-arac .md-seg button.on::before,.md-ara .md-seg button.on::before{content:'✓ ';}
+/* Süzgeç kartı */
+.md-ara{display:flex;flex-direction:column;gap:8px;padding:10px 12px;margin-bottom:10px;}
+.md-f1,.md-f2{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+.md-f1 .inp{margin:0;}
+.md-f1 #mdQ{flex:1 1 150px;min-width:140px;max-width:none;}
+.md-f1 select.inp{flex:1 1 128px;width:auto;min-width:128px;max-width:210px;}
+.md-f2{padding-top:8px;border-top:1px solid var(--c-hair);}
+.md-f2-e{font:700 11px/1 var(--f);text-transform:uppercase;letter-spacing:.04em;color:var(--c-ink3);}
+.md-ara .md-ms-f{flex-direction:row;align-items:center;gap:6px;font-size:12px;}
+.md-ara .md-ms-f input.inp{width:150px;height:32px;}
+.md-ara-go{min-width:64px;height:32px;}
+.md-bekleyen{font:700 12px/1.2 var(--f);color:#7a4a00;background:#fff3d6;box-shadow:inset 0 0 0 1px #f1c96b;border-radius:999px;padding:6px 10px;}
 .md-bekleyen[hidden]{display:none;}
 form.md-ara.bekliyor .md-ara-go{box-shadow:0 0 0 3px rgba(241,201,107,.55);}
-.md-sonuc{margin:0 0 12px;padding:10px 14px;border-radius:12px;background:var(--c-card,#fff);
-  box-shadow:inset 0 0 0 1px var(--c-line,#e6e8eb);display:flex;flex-direction:column;gap:5px;font-size:13px;}
-.md-sonuc-h{display:flex;align-items:baseline;gap:6px 12px;flex-wrap:wrap;}
-.md-sonuc-e{font:800 11px/1 var(--f);text-transform:uppercase;letter-spacing:.04em;color:var(--c-ink3);}
+.md-sifirla{margin-left:auto;font-size:12.5px;}
+.md-ara .md-ms-hata{margin:0;}
+/* Uygulanan aramanın tek satırlık özeti */
+.md-sonuc{margin:0 2px 10px;font-size:13px;}
+.md-sonuc-h{display:flex;align-items:baseline;gap:4px 12px;flex-wrap:wrap;margin:0;color:var(--c-ink2);}
+.md-sonuc-h>b{color:var(--c-ink);}
 .md-sonuc-c{font-size:12px;color:var(--c-ink2);background:var(--c-line2);border-radius:999px;padding:2px 8px;}
-.md-sonuc-s{font-size:13.5px;}
-.md-sonuc-k{font-size:12.5px;}
-.md-dz-musait{box-shadow:inset 0 0 0 1px rgba(52,168,83,.4);background:rgba(52,168,83,.06);}
-.md-dz-bosalacak{box-shadow:inset 0 0 0 1px rgba(52,168,83,.4);}
-.md-dz-yayin{box-shadow:inset 0 0 0 1px rgba(59,111,212,.32);background:rgba(59,111,212,.05);}
-.md-yil-h{display:flex;align-items:center;gap:10px;justify-content:space-between;margin:14px 2px 8px;}
+.md-sonuc-s{color:var(--c-ink);}
+.md-sonuc-n{margin:3px 0 0;font-size:12px;color:var(--c-ink3);}
+.md-yil-h{display:flex;align-items:center;gap:10px;justify-content:space-between;margin:12px 2px 8px;}
 .md-yil-h .md-yil-t{margin:0;}
-.md-xls[disabled]{opacity:.5;cursor:not-allowed;}
-.mtb-ay.kismi{background:#f4f4f6;}
-.mtb-ay.kismi.bu{background:#ffe9a8;}
-.mtb-kismi{display:inline-block;font-style:normal;font:700 10.5px/1 var(--f);color:#5e5e64;background:#e4e4e8;
-  border-radius:4px;padding:2px 5px;margin-left:6px;vertical-align:1px;}
-.mtb-bos{display:block;margin-top:3px;font:700 11px/1.25 var(--f);color:#155a2a;}
-.mtb-b.bosalma{box-shadow:inset 0 0 0 2px #1f7a3a;}
 .md-bos{display:flex;align-items:center;gap:12px;flex-wrap:wrap;}
 @media (max-width:760px){
-  .md-ara-b{margin-left:0;width:100%;}
-  .md-ara-go{flex:1 1 auto;}
-  .md-ara .md-ms-f{flex:1 1 140px;} .md-ara .md-ms-f .inp-sm{width:100%;}
+  .md-arac{justify-content:flex-start;width:100%;}
+  /* Mecra sekmeleri tek satırda yatay kayar (kontrol duvarı yok, S8.1 §19). */
+  .md-site{flex-wrap:nowrap;overflow-x:auto;margin-bottom:8px;padding-bottom:4px;scrollbar-width:none;}
+  .md-site::-webkit-scrollbar{display:none;}
+  .md-sp{flex:0 0 auto;}
+  .md-f1 #mdQ{flex:1 1 100%;}
+  .md-f1 select.inp{flex:1 1 46%;max-width:none;}
+  .md-ara .md-ms-f{flex:1 1 140px;} .md-ara .md-ms-f input.inp{flex:1 1 auto;width:100%;}
+  .md-sifirla{margin-left:0;}
   .md-yil-h{margin-top:10px;}
 }
 
@@ -2755,10 +2777,3 @@ form.md-ara.bekliyor .md-ara-go{box-shadow:0 0 0 3px rgba(241,201,107,.55);}
 .hg-tools>span:first-child{white-space:nowrap;}
 .hmap-main .hselbar{margin:12px 0 0;}
 
-/* S18 — pano sütunu içeriğe göre (mdPanoGen): no, kutu ve kod tek satırda */
-.mtb tbody th.mtb-pano{padding:6px 6px;}
-.mtb-pano .mtl-cb{margin:0 3px 0 0;}
-.mtb-ad.btn-link{white-space:nowrap;}
-.mtb-bos{white-space:normal;font-size:10.5px;}
-/* S18: dar kısmi ay sütununda (ör. "Haziran · yalnız 30") çip alt satıra iner, kırpılmaz */
-.mtb-ay.dar .mtb-kismi{display:block;width:max-content;margin:3px auto 0;}

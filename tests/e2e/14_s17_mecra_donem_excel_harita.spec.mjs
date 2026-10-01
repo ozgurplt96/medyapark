@@ -46,88 +46,148 @@ const sonuc = page => page.evaluate(() => ({ set: [...ui._mdSonuc.set], bosalma:
   satir: [...document.querySelectorAll('#mdGovde tr[data-u]')].map(t => +t.dataset.u), ozet: document.querySelector('.md-sonuc').innerText }));
 
 test.describe('Tek dönem: varsayılan, hazır dönemler, taslak', () => {
-  test('normal ilk giriş: bugün ±3 takvim ayı (Europe/Istanbul), 6 ay seçili, geçmiş aylar açık, arama uygulanmış', async ({ page }) => {
+  /* Test tarafı: İstanbul günü + elle takvim hesabı (uygulamanın hesabından üretilmez). */
+  const bugunIst = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Istanbul' }).format(new Date());
+  const ayBasi = (iso, n) => { const [y, m] = iso.split('-').map(Number); const t = m - 1 + n; return `${y + Math.floor(t / 12)}-${String(((t % 12) + 12) % 12 + 1).padStart(2, '0')}-01`; };
+  const aySonu = (iso, n) => { const b = ayBasi(iso, n), [y, m] = b.split('-').map(Number); return `${b.slice(0, 8)}${String(new Date(Date.UTC(y, m, 0)).getUTCDate()).padStart(2, '0')}`; };
+
+  test('normal ilk giriş: 3 ay seçili (önceki ay + bu ay dahil üç ay), geçmiş aylar açık, tarihler dolu ve sonuç hazır', async ({ page }) => {
     await girisYap(page, 'uye');
     await page.evaluate(() => { sessionStorage.removeItem('mp_medya'); go('ws-mecralar'); });
     await page.waitForSelector('#mdGovde .md-sonuc');
-    /* Test tarafı: İstanbul günü + elle ay ekleme (ay sonu sınırı). */
-    const g = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Istanbul' }).format(new Date());
-    const ay = (iso, n) => { const [y, m, d] = iso.split('-').map(Number); const t = m - 1 + n, yy = y + Math.floor(t / 12), mm = ((t % 12) + 12) % 12;
-      const son = new Date(Date.UTC(yy, mm + 1, 0)).getUTCDate(); return `${yy}-${String(mm + 1).padStart(2, '0')}-${String(Math.min(d, son)).padStart(2, '0')}`; };
+    const g = bugunIst();
     const st = await page.evaluate(() => mdDurum());
-    expect([st.hazir, st.bas, st.bit, st.gecmisGizle, st.durum]).toEqual(['6', ay(g, -3), ay(g, 3), false, '']);
-    await expect(page.locator('#mdBas')).toHaveValue(ay(g, -3));
-    await expect(page.locator('#mdBit')).toHaveValue(ay(g, 3));
-    await expect(page.locator('.md-hazir .ws-switch button.on')).toHaveText(/6 ay/);
+    expect([st.hazir, st.bas, st.bit, st.gecmisGizle, st.durum]).toEqual(['3', ayBasi(g, -1), aySonu(g, 2), false, '']);
+    await expect(page.locator('#mdBas')).toHaveValue(ayBasi(g, -1));
+    await expect(page.locator('#mdBit')).toHaveValue(aySonu(g, 2));
+    await expect(page.locator('#mdHazirG button.on')).toHaveText(/3 ay/);
     await expect(page.locator('#mdGecmis')).not.toBeChecked();
-    await expect(page.locator('.md-sonuc')).toContainText('Uygulanan arama');
-    /* Eski sürümün saklanmış yıl görünümü yeni varsayılanı etkisiz bırakmaz. */
-    await page.evaluate(() => { sessionStorage.setItem('mp_medya', JSON.stringify({ olcek: 12, ank: '2031-01', yil: 2031, durumGun: '2031-05-05' })); go('ws-mecralar'); });
+    expect(await page.evaluate(() => mdEksen(mdDurum()).aylar.map(a => a.tam))).toEqual([true, true, true, true]);   // dört tam ay, tek günlük sütun yok
+    await expect(page.locator('.md-sonuc')).toContainText('3 ay');
+    await expect(page.locator('#mdGovde')).not.toContainText('Uygulanan arama');   // büyük kutu yerine kısa özet
+    await expect(page.locator('#mdAraForm')).not.toContainText(/Durum tarihi|Müsaitlik ara/);
+    /* Eski sürümün saklanmış görünümü (S17 6 ay / S16 yıl) yeni varsayılanı etkisiz bırakmaz. */
+    await page.evaluate(() => { sessionStorage.setItem('mp_medya', JSON.stringify({ v: 17, hazir: '6', merkez: '2031-05-05', bas: '2031-02-05', bit: '2031-08-05', olcek: 12, durumGun: '2031-05-05' })); go('ws-mecralar'); });
     await page.waitForSelector('#mdGovde .md-sonuc');
-    expect(await page.evaluate(() => [mdDurum().bas, mdDurum().bit])).toEqual([ay(g, -3), ay(g, 3)]);
+    expect(await page.evaluate(() => [mdDurum().hazir, mdDurum().bas, mdDurum().bit])).toEqual(['3', ayBasi(g, -1), aySonu(g, 2)]);
   });
 
-  test('ay sonu, şubat ve yıl geçişi; hazır dönemler ve elle aralık', async ({ page }) => {
+  test('hazır dönemler tam takvim aylarıdır: önceki ay dahil, ay sonu, şubat, yıl geçişi; Yıl Ocak\'ta önceki Aralık\'ı alır', async ({ page }) => {
     await girisYap(page, 'uye');
     const r = await page.evaluate(() => {
       const o = {};
-      for (const g of ['2026-09-30', '2026-08-31', '2027-05-31', '2028-05-31', '2026-11-15', '2026-12-31']) { const eski = mdBugun; mdBugun = () => g;
-        o[g] = { v6: mdVarsayilanDonem(), h3: mdHazirAralik('3', g), y: mdHazirAralik('yil', g) }; mdBugun = eski; }
-      o.bul = [mdHazirBul('2026-06-30', '2026-12-30'), mdHazirBul('2027-02-28', '2027-08-31'), mdHazirBul('2026-09-30', '2026-12-30'),
-        mdHazirBul('2026-01-01', '2026-12-31'), mdHazirBul('2026-10-01', '2026-10-31')];
+      for (const g of ['2026-10-01', '2026-12-31', '2027-01-15', '2027-12-10', '2026-08-31']) { const eski = mdBugun; mdBugun = () => g;
+        o[g] = { v: mdVarsayilanDonem(), h3: mdHazirAralik('3', g), h6: mdHazirAralik('6', g), y: mdHazirAralik('yil', g) }; mdBugun = eski; }
+      o.bul = [mdHazirBul('2026-09-01', '2026-12-31'), mdHazirBul('2026-09-01', '2027-03-31'), mdHazirBul('2026-01-01', '2026-12-31'),
+        mdHazirBul('2026-12-01', '2027-12-31'), mdHazirBul('2026-10-01', '2026-10-31'), mdHazirBul('2026-07-01', '2027-01-01'), mdHazirBul('2026-06-30', '2026-12-30')];
       return o; });
-    expect(r['2026-09-30'].v6).toMatchObject({ bas: '2026-06-30', bit: '2026-12-30' });   // brief örneği
-    expect(r['2026-08-31'].v6).toMatchObject({ bas: '2026-05-31', bit: '2026-11-30' });   // 31 → 30 Kasım, Aralık'a taşmaz
-    expect(r['2027-05-31'].v6).toMatchObject({ bas: '2027-02-28', bit: '2027-08-31' });   // şubat
-    expect(r['2028-05-31'].v6).toMatchObject({ bas: '2028-02-29', bit: '2028-08-31' });   // artık yıl
-    expect(r['2026-11-15'].v6).toMatchObject({ bas: '2026-08-15', bit: '2027-02-15' });   // yıl geçişi
-    expect(r['2026-12-31'].h3).toEqual(['2026-12-31', '2027-03-31']);
-    expect(r['2026-12-31'].y).toEqual(['2026-01-01', '2026-12-31']);
-    expect(r.bul.map(x => x.hazir)).toEqual(['6', '6', '3', 'yil', '']);                   // elle aralık hazır döneme denk değil
-    expect(r.bul[1].merkez).toBe('2027-05-31');
+    /* Brief örneği: 01.10.2026 */
+    expect(r['2026-10-01'].v).toMatchObject({ hazir: '3', merkez: '2026-10-01', bas: '2026-09-01', bit: '2026-12-31' });
+    expect(r['2026-10-01'].h6).toEqual(['2026-09-01', '2027-03-31']);
+    expect(r['2026-10-01'].y).toEqual(['2026-01-01', '2026-12-31']);
+    expect(r['2026-12-31'].h3).toEqual(['2026-11-01', '2027-02-28']);        // yıl geçişi + şubat sonu
+    expect(r['2026-12-31'].h6).toEqual(['2026-11-01', '2027-05-31']);
+    expect(r['2027-12-10'].h3).toEqual(['2027-11-01', '2028-02-29']);        // artık yıl
+    expect(r['2026-08-31'].h3).toEqual(['2026-07-01', '2026-10-31']);        // ayın 31'i sonraki aya taşmaz
+    expect(r['2027-01-15'].h3).toEqual(['2026-12-01', '2027-03-31']);
+    expect(r['2027-01-15'].y).toEqual(['2026-12-01', '2027-12-31']);         // Ocak: önceki Aralık dahil
+    expect(r.bul.map(x => x.hazir)).toEqual(['3', '6', 'yil', 'yil', '', '', '']);   // elle aralık hazır döneme denk değilse seçili görünmez
+    expect([r.bul[0].merkez, r.bul[1].merkez, r.bul[3].merkez]).toEqual(['2026-10-01', '2026-10-01', '2027-01-01']);
   });
 
-  test('yazarken erken arama yok; Ara/Enter uygular; hazır dönem, ileri/geri ve Bugüne git dönemle birlikte sonucu günceller', async ({ page }) => {
+  test('süzgeçler tek tıkla uygulanır; tarih yalnız Ara/Enter ile; tarih taslağı başka süzgece tıklanınca uygulanmaz', async ({ page }) => {
     const F = fikstur();
     await girisYap(page, 'uye');
     await ara(page, F);
     const form = await page.locator('#mdAraForm').elementHandle();
+    const tablo = () => page.evaluate(() => [mdDurum().bas, mdDurum().bit, ui._mdSonuc.B, ui._mdSonuc.E]);
+    /* Tarihin ilk hanesi: hiçbir şey uygulanmaz, ekran yeniden çizilmez. */
+    const govde = await page.locator('#mdGovde .md-sonuc').elementHandle();
     await page.locator('#mdBas').click();
-    await page.keyboard.type('2');                                         // yarım yıl
-    expect(await page.evaluate(() => mdDurum().bas)).toBe('2037-03-01');
-    expect(await form.evaluate(f => f.isConnected)).toBe(true);           // form yeniden çizilmedi
+    await page.keyboard.type('2');
+    expect(await tablo()).toEqual(['2037-03-01', '2037-03-31', '2037-03-01', '2037-03-31']);
+    expect(await govde.evaluate(e => e.isConnected)).toBe(true);
+    await expect(page.locator('#mdBekleyen')).toBeVisible();
+    /* Durum: TEK tık — Ara istemez; yarım tarih taslağı uygulanmaz, uygulanmış dönem kullanılır. */
     await page.locator('#mdDurumG button[data-v="musait"]').click();
-    await expect(page.locator('#mdBekleyen')).toBeVisible();              // taslak ≠ uygulanan
-    expect(await page.evaluate(() => [mdDurum().durum, ui._mdSonuc.durum])).toEqual(['', '']);
+    expect(await page.evaluate(() => [mdDurum().durum, ui._mdSonuc.durum])).toEqual(['musait', 'musait']);
+    expect(await tablo()).toEqual(['2037-03-01', '2037-03-31', '2037-03-01', '2037-03-31']);
+    expect(await form.evaluate(f => f.isConnected)).toBe(true);           // form yeniden çizilmedi (odak ve taslak yerinde)
+    await expect(page.locator('#mdDurumG button.on')).toHaveText('Müsait');
+    /* Tam ama uygulanmamış tarih + mecra sekmesi / kurum / ürün: yine yalnız süzgeç uygulanır. */
     await page.evaluate(() => { const b = document.getElementById('mdBas'); b.value = '2037-03-05'; b.dispatchEvent(new Event('input', { bubbles: true })); });
+    await expect(page.locator('#mdBekleyen')).toBeVisible();
+    await page.locator('#mdSiteG button[data-v=""]').click();
+    expect(await page.evaluate(() => [mdDurum().site, ui._mdSonuc.siteler.length > 1])).toEqual([null, true]);
+    await page.locator(`#mdSiteG button[data-v="${F.site}"]`).click();
+    expect(await page.evaluate(() => mdDurum().site)).toBe(F.site);
+    await expect(page.locator('#mdSiteG button.on')).toHaveCount(1);
+    await page.locator('#mdDurumG button[data-v=""]').click();
+    await page.locator('#mdKurum').selectOption(String(kurumId()));
+    expect(await page.evaluate(() => mdDurum().kurum)).toBe(String(kurumId()));
+    const urun = await page.locator('#mdUrun option').nth(1).getAttribute('value');
+    await page.locator('#mdUrun').selectOption(urun);
+    expect(await page.evaluate(() => [mdDurum().urun, mdDurum().kurum])).toEqual([urun, String(kurumId())]);
+    await page.locator('#mdUrun').selectOption('');
+    await page.locator('#mdKurum').selectOption('');
+    await page.locator('#mdQ').fill('zzz-yok-böyle');                       // metin: yazma durunca uygulanır
+    await page.waitForFunction(() => mdDurum().q === 'zzz-yok-böyle');
+    await expect(page.locator('#mdQ')).toBeFocused();                       // gövde yenilendi, odak kaybolmadı
+    await page.locator('#mdQ').fill('');
+    await page.waitForFunction(() => mdDurum().q === '');
+    expect(await tablo()).toEqual(['2037-03-01', '2037-03-31', '2037-03-01', '2037-03-31']);   // taslak hâlâ uygulanmadı
+    await expect(page.locator('#mdBas')).toHaveValue('2037-03-05');        // ve silinmedi
+    await expect(page.locator('#mdBekleyen')).toBeVisible();
+    /* Enter: özel dönem uygulanır; hazır dönem seçili görünmez. */
+    await page.locator('#mdDurumG button[data-v="musait"]').click();
     await page.locator('#mdBit').press('Enter');
-    await page.waitForFunction(() => mdDurum().durum === 'musait');
+    await page.waitForFunction(() => mdDurum().bas === '2037-03-05');
     let st = await page.evaluate(() => mdDurum());
-    expect([st.bas, st.bit, st.hazir]).toEqual(['2037-03-05', '2037-03-31', '']);
-    await expect(page.locator('.md-hazir .ws-switch button.on')).toHaveCount(0);   // yanlış hazır dönem seçili görünmez
+    expect([st.bas, st.bit, st.hazir, st.durum]).toEqual(['2037-03-05', '2037-03-31', '', 'musait']);
+    await expect(page.locator('#mdHazirG button.on')).toHaveCount(0);
     await expect(page.locator('#mdBekleyen')).toBeHidden();
-    /* Özel aralıkta ileri: kendi uzunluğu (27 gün) kadar. */
-    await page.locator('.md-nav').last().click();
+    await expect(page.locator('.md-sonuc')).toContainText('Özel dönem');
+    /* Özel aralıkta ileri: kendi uzunluğu (27 gün) kadar; önceki ay eklenmez. */
+    await page.locator('#mdSonra').click();
     await page.waitForFunction(() => mdDurum().bas === '2037-04-01');
     expect(await page.evaluate(() => mdDurum().bit)).toBe('2037-04-27');
-    /* Bugüne git (özel aralık): uzunluk korunur, başlangıç bugün; süzgeçler korunur. */
+    /* Bugüne git: güncel döneme döner (özel aralıktan: 3 ay); süzgeçler korunur. */
+    const g = bugunIst();
     await page.getByRole('button', { name: 'Bugüne git' }).click();
-    await page.waitForFunction(() => mdDurum().bas === mdBugun());
-    st = await page.evaluate(() => mdDurum());
-    expect(await page.evaluate(s => mdDn(s.bit) - mdDn(s.bas), st)).toBe(26);
-    expect([st.durum, st.site]).toEqual(['musait', F.site]);
-    /* 3 ay: merkezden (bugün) başlayıp 3 ay; ileri 3 ay adım. */
-    await page.locator('.md-hazir .ws-switch button', { hasText: '3 ay' }).click();
     await page.waitForFunction(() => mdDurum().hazir === '3');
     st = await page.evaluate(() => mdDurum());
-    expect(st.bas).toBe(await page.evaluate(() => mdBugun()));
+    expect([st.bas, st.bit, st.durum, st.site]).toEqual([ayBasi(g, -1), aySonu(g, 2), 'musait', F.site]);
+    /* 6 ay: önceki ay + bu ay dahil altı ay; ileri 6 ay adım; Bugüne git yine güncel 6 ay. */
+    await page.locator('#mdHazirG button', { hasText: '6 ay' }).click();
+    st = await page.evaluate(() => mdDurum());
+    expect([st.hazir, st.bas, st.bit]).toEqual(['6', ayBasi(g, -1), aySonu(g, 5)]);
     await expect(page.locator('#mdBas')).toHaveValue(st.bas);
-    await page.locator('.md-nav').last().click();
-    await page.waitForFunction(b => mdDurum().bas !== b, st.bas);
-    expect(await page.evaluate(s => mdDurum().bas === mdAyKaydir(s.bas, 3), st)).toBe(true);
-    /* Aramayı sıfırla → normal ilk açılış kapsamı. */
-    await page.getByRole('button', { name: 'Aramayı sıfırla' }).click();
-    await page.waitForFunction(() => mdDurum().durum === '' && mdDurum().site == null && mdDurum().hazir === '6');
+    await page.locator('#mdSonra').click();
+    expect(await page.evaluate(() => [mdDurum().bas, mdDurum().bit])).toEqual([ayBasi(g, 5), aySonu(g, 11)]);
+    await page.getByRole('button', { name: 'Bugüne git' }).click();
+    expect(await page.evaluate(() => [mdDurum().hazir, mdDurum().bas, mdDurum().bit])).toEqual(['6', ayBasi(g, -1), aySonu(g, 5)]);
+    /* Yıl */
+    await page.locator('#mdHazirG button', { hasText: 'Yıl' }).click();
+    st = await page.evaluate(() => mdDurum());
+    expect(st.bit).toBe(`${g.slice(0, 4)}-12-31`);
+    expect(st.bas).toBe(g.slice(5, 7) === '01' ? `${+g.slice(0, 4) - 1}-12-01` : `${g.slice(0, 4)}-01-01`);
+    /* Sıfırla → normal ilk açılış kapsamı. */
+    await page.getByRole('button', { name: 'Sıfırla' }).click();
+    await page.waitForFunction(() => mdDurum().durum === '' && mdDurum().site == null && mdDurum().hazir === '3');
+    await expect(page.locator('#mdBas')).toHaveValue(ayBasi(g, -1));
+  });
+
+  test('geçmiş ayları gizle hazır dönemde ve özel dönemde bu aydan önceki ayları gizler; kapatılınca asıl dönem geri gelir', async ({ page }) => {
+    await girisYap(page, 'uye');
+    await page.evaluate(() => { sessionStorage.removeItem('mp_medya'); go('ws-mecralar'); });
+    await page.waitForSelector('#mdGovde .md-sonuc');
+    const g = bugunIst();
+    await page.locator('#mdGecmis').check();
+    expect(await page.evaluate(() => { const E = mdEtkin(mdDurum()); return [E.bas, E.bit, mdEksen(mdDurum()).aylar.length]; })).toEqual([ayBasi(g, 0), aySonu(g, 2), 3]);
+    expect(await page.evaluate(() => [mdDurum().bas, ui._mdSonuc.B])).toEqual([ayBasi(g, -1), ayBasi(g, 0)]);   // asıl dönem saklı, sonuç etkin dönemle
+    await expect(page.locator('#mdBas')).toHaveValue(ayBasi(g, -1));
+    await page.locator('#mdGecmis').uncheck();
+    expect(await page.evaluate(() => mdEksen(mdDurum()).aylar.length)).toBe(4);
   });
 
   test('geçmiş ayları gizle: etkin dönem ekranda; tamamen geçmiş aralıkta boş durum ve “Geçmiş ayları göster”', async ({ page }) => {
@@ -150,7 +210,7 @@ test.describe('Tek dönem: varsayılan, hazır dönemler, taslak', () => {
 });
 
 test.describe('Dönemsel durumlar: sayaç = tablo = Excel', () => {
-  test('Opsiyonlu / Yayın / Müsait / Dönem içinde boşalacak; kesintisiz yenileme ve bitişsiz kayıt; LED sahte müsaitlik yok', async ({ page }) => {
+  test('Opsiyonlu / Yayında / Müsait / Yakında boşalacak; kesintisiz yenileme ve bitişsiz kayıt; LED sahte müsaitlik yok', async ({ page }) => {
     const F = fikstur();
     await girisYap(page, 'uye');
     const has = (s, u) => s.set.includes(u);
@@ -201,8 +261,8 @@ test.describe('Dönemsel durumlar: sayaç = tablo = Excel', () => {
     await girisYap(page, 'uye');
     await ara(page, F, { durum: 'musait', acik: { ['g' + F.alan]: false, ['g' + F.led]: false } });   // grup kullanıcı kararıyla KAPALI
     await expect(page.locator(`#mdGovde section.md-alan.md-kapali[data-a="${F.alan}"]`)).toHaveCount(1);
-    /* Taslak değişiklik (uygulanmamış) ve toplu seçim kutusu indirmeyi etkilemez. */
-    await page.locator('#mdDurumG button[data-v=""]').click();
+    /* Uygulanmamış tarih taslağı ve toplu seçim kutusu indirmeyi etkilemez. */
+    await page.evaluate(() => { const b = document.getElementById('mdBas'); b.value = '2037-03-10'; b.dispatchEvent(new Event('input', { bubbles: true })); });
     await expect(page.locator('#mdBekleyen')).toBeVisible();
     await page.evaluate(() => ui._mSec.add(-1));
     const oku = async () => page.evaluate(async () => { const wb = new ExcelJS.Workbook(); await wb.xlsx.load(await ui._mdSonXls.blob.arrayBuffer());
@@ -216,7 +276,7 @@ test.describe('Dönemsel durumlar: sayaç = tablo = Excel', () => {
     const beklenen = await page.evaluate(a => ui._mdSonuc.siteler.flatMap(s => s.gruplar).find(g => String(g.a.id) === String(a)).yuzler.map(u => u.name), F.alan);
     expect(x.length).toBe(1);
     expect(x[0].r2).toContain('Dönem: 01.03.2037 – 31.03.2037');
-    expect(x[0].r2).toContain('Durum: Müsait');                            // taslaktaki “Tümü” değil
+    expect(x[0].r2).toContain('Durum: Müsait');                            // taslaktaki 10.03 değil, uygulanan dönem
     expect(x[0].yz).toEqual(beklenen);                                     // sayaç/tablo ile aynı yüzler
     expect(x[0].yz).toContain(await page.evaluate(b => ui._M.unitById[b].name, F.B));
     expect(x[0].yz).not.toContain(await page.evaluate(a => ui._M.unitById[a].name, F.A));

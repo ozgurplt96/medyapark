@@ -315,35 +315,44 @@ function mdSure(a){ return a&&a.creative_seconds?`${a.creative_seconds} sn`:''; 
      gecmisGizle      yalnız görünüm: bugünün ayından önceki kısmı gizler
    Eski "durum tarihi", ayrı "müsaitlik araması" ve yıl/ölçek/çapa
    durumu KALDIRILDI; ikinci gizli bir tarih aralığı tutulmaz.
-   Formdaki değiştirilmiş ama uygulanmamış değerler TASLAKTIR
-   (`ui._mdTaslak`, bellek) ve hiçbir hesaba girmez.
+   S19: süzgeçler (mecra, durum, kurum, iş, ürün, metin) TEK TIKLA uygulanır.
+   Taslak yalnız elle yazılan özel başlangıç/bitiş tarihidir
+   (`ui._mdTaslak`, bellek): Ara / Enter ile uygulanır, o ana dek hiçbir
+   hesaba girmez — başka bir süzgece tıklamak onu sessizce uygulamaz.
    ========================================================== */
-const MD_SURUM=17;
-const MD_HAZIR=[['6','6 ay'],['3','3 ay'],['yil','Yıl']];
+const MD_SURUM=19;
+const MD_HAZIR=[['3','3 ay'],['6','6 ay'],['yil','Yıl']];
 const MD_MAX_GUN=1096;                         // en çok üç yıl: tablo okunur kalır
 const MD_DEF={v:MD_SURUM,site:null,alan:'',kurum:'',is:'',q:'',urun:'',durum:'',
-              hazir:'6',merkez:'',bas:'',bit:'',gecmisGizle:false};
-/* Hazır dönemin aralığı (merkez tarihe göre):
-     6 ay → merkezden 3 ay önce … 3 ay sonra
-     3 ay → merkezden başlayıp 3 ay ileri
-     Yıl  → merkezin takvim yılı */
+              hazir:'3',merkez:'',bas:'',bit:'',gecmisGizle:false};
+/* S19 — hazır dönemler TAM TAKVİM AYLARIDIR ve bir ÇAPA AYA (`merkez`,
+   YYYY-MM-01; normalde bulunduğumuz ay) göre kurulur. Geriye dönük bağlam
+   için çapadan ÖNCEKİ ayın tamamı hep dahildir:
+     3 ay → önceki ay + çapa ay dahil üç ay    (dört ay sütunu)
+     6 ay → önceki ay + çapa ay dahil altı ay  (yedi ay sütunu)
+     Yıl  → çapanın takvim yılının tamamı; önceki ay yıl dışında kalıyorsa
+            (çapa Ocak) önceki Aralık da dahil
+   Örnek, 01.10.2026: 3 ay → 01.09.2026–31.12.2026 · 6 ay → 01.09.2026–31.03.2027.
+   Bitiş daima AY SONUDUR; sonraki aya tek günlük sütun taşmaz. Özel dönem
+   kullanıcının girdiği kesin tarihlerdir, önceki ay eklenmez. */
 function mdHazirAralik(h,m){
-  if(h==='yil') return [`${m.slice(0,4)}-01-01`,`${m.slice(0,4)}-12-31`];
-  if(h==='3') return [m,mdAyKaydir(m,3)];
-  return [mdAyKaydir(m,-3),mdAyKaydir(m,3)];
+  const c=mdAyBasi(m), y=c.slice(0,4);
+  if(h==='yil') return [c.slice(5,7)==='01'?`${+y-1}-12-01`:`${y}-01-01`,`${y}-12-31`];
+  return [mdAyKaydir(c,-1),mdAySonu(mdAyKaydir(c,(h==='6'?6:3)-1))];
 }
-/* Normal ilk açılış: 6 ay, bugün merkez (ör. 30.09.2026 → 30.06–30.12.2026).
-   Bu gün aralığı yedi ay sütununa değebilir; altıya zorlamak için tarihler
-   DEĞİŞTİRİLMEZ, ilk/son kısmi ay açıkça işaretlenir. */
-function mdVarsayilanDonem(){ const g=mdBugun(); const [b,e]=mdHazirAralik('6',g); return {hazir:'6',merkez:g,bas:b,bit:e}; }
-/* Elle girilen aralık bir hazır döneme denk mi? Değilse üstte hiçbir
-   hazır dönem seçili GÖRÜNMEZ (yanlış bir "6 ay" göstermek yanıltır). */
+/* Normal ilk açılış: 3 ay, çapa bulunduğumuz ay. */
+function mdVarsayilanDonem(){ const m=mdAyBasi(mdBugun()); const [b,e]=mdHazirAralik('3',m); return {hazir:'3',merkez:m,bas:b,bit:e}; }
+/* Verilen aralık bir hazır döneme denk mi? Değilse üstte hiçbir hazır
+   dönem seçili GÖRÜNMEZ (yanlış bir "3 ay" göstermek yanıltır). */
 function mdHazirBul(b,e){
-  if(/-01-01$/.test(b)&&e===`${b.slice(0,4)}-12-31`){ const g=mdBugun();
-    return {hazir:'yil',merkez:g.slice(0,4)===b.slice(0,4)?g:mdAyKaydir(b.slice(0,4)+g.slice(4),0)}; }
-  if(mdAyKaydir(b,3)===e) return {hazir:'3',merkez:b};
-  for(const c of [mdAyKaydir(b,3),mdAyKaydir(e,-3)])
-    if(mdAyKaydir(c,-3)===b&&mdAyKaydir(c,3)===e) return {hazir:'6',merkez:c};
+  if(!/-01$/.test(String(b))) return {hazir:'',merkez:''};
+  const c=mdAyKaydir(b,1);                      // çapa = başlangıcı izleyen ay
+  for(const h of ['3','6']){ const [x,y]=mdHazirAralik(h,c); if(x===b&&y===e) return {hazir:h,merkez:c}; }
+  const y=e.slice(0,4);
+  if(e===`${y}-12-31`){
+    if(b===`${+y-1}-12-01`) return {hazir:'yil',merkez:`${y}-01-01`};
+    if(b===`${y}-01-01`){ const a=mdBugun().slice(5,7); return {hazir:'yil',merkez:`${y}-${a==='01'?'02':a}-01`}; }
+  }
   return {hazir:'',merkez:''};
 }
 function mdDurum(){ let d={}; try{ d=JSON.parse(sessionStorage.getItem('mp_medya')||'{}')||{}; }catch(e){}
@@ -358,20 +367,19 @@ function mdDurum(){ let d={}; try{ d=JSON.parse(sessionStorage.getItem('mp_medya
   ['gor','olcek','ank','yil','durumGun','msBas','msBit','tur'].forEach(k=>{ delete o[k]; });
   if(!MD_DURUM.some(x=>x[0]===o.durum)) o.durum='';
   if(!['6','3','yil',''].includes(o.hazir)) o.hazir='';
-  const g=mdBugun();
   const gecerli=!mdTarihDogrula(o.bas).hata&&!mdTarihDogrula(o.bit).hata&&o.bas<=o.bit;
-  /* Gün dönünce: dokunulmamış varsayılan dönem (6 ay, merkez = o günün
-     bugünü) yeni bugüne göre kurulur. Kullanıcının seçtiği dönem EZİLMEZ. */
-  if(!gecerli||(o.oto&&o.merkez!==g)) Object.assign(o,mdVarsayilanDonem());
-  else if(o.hazir){ const [b,e]=mdHazirAralik(o.hazir,o.merkez||'');
-    if(!o.merkez||b!==o.bas||e!==o.bit) Object.assign(o,mdHazirBul(o.bas,o.bit)); }
+  /* Ay dönünce: dokunulmamış varsayılan dönem (3 ay, çapa = o günün ayı)
+     yeni aya göre kurulur. Kullanıcının seçtiği dönem EZİLMEZ. */
+  if(!gecerli||(o.oto&&o.merkez!==mdAyBasi(mdBugun()))) Object.assign(o,mdVarsayilanDonem());
+  else if(o.hazir){ const r=o.merkez&&!mdTarihDogrula(o.merkez).hata?mdHazirAralik(o.hazir,o.merkez):null;
+    if(!r||r[0]!==o.bas||r[1]!==o.bit) Object.assign(o,mdHazirBul(o.bas,o.bit)); }
   delete o.oto;
   return o; }
 function mdDurumYaz(d){ const o={...d,v:MD_SURUM};
   ['gor','olcek','ank','yil','durumGun','msBas','msBit','tur'].forEach(k=>{ delete o[k]; });
   /* `oto`: dönem hâlâ normal ilk açılışın dönemi mi (gün dönümünde yeniden kurulur). */
   const v=mdVarsayilanDonem();
-  o.oto=o.hazir==='6'&&o.merkez===v.merkez&&o.bas===v.bas&&o.bit===v.bit;
+  o.oto=o.hazir==='3'&&o.merkez===v.merkez&&o.bas===v.bas&&o.bit===v.bit;
   try{ sessionStorage.setItem('mp_medya',JSON.stringify(o)); }catch(e){}
   if(typeof navUrlTazele==='function') navUrlTazele(); }   /* S14: lokasyon/grup/dönem adreste */
 /* Aramanın alanları — taslak ile uygulanan bu anahtarlar üzerinden karşılaştırılır. */
@@ -394,7 +402,7 @@ function mdEtkin(st){
 function mdEksen(st){ const E=mdEtkin(st); const aylar=mdDonemAylari(E.bas,E.bit);
   return {bas:E.bas,bit:E.bit,aylar,n:aylar.length,etkin:E}; }
 function mdEksenAdi(ek){ return `${mdNokta(ek.bas)} – ${mdNokta(ek.bit)}`; }
-function mdHazirAd(st){ const h=MD_HAZIR.find(x=>x[0]===st.hazir); return h?h[1]:'Özel aralık'; }
+function mdHazirAd(st){ const h=MD_HAZIR.find(x=>x[0]===st.hazir); return h?h[1]:'Özel dönem'; }
 
 /* Hedef tarihi uygulanan döneme al (kayıt bağlantısı). Tarih zaten
    dönemdeyse dönem DEĞİŞMEZ. Değilse hazır dönem korunur, merkez hedefe
@@ -404,7 +412,7 @@ function mdPencereyeAl(st,iso){
   const E=mdEtkin(st);
   if(iso>=E.bas&&iso<=E.bit&&!E.bos) return st;
   if(iso>=st.bas&&iso<=st.bit){ st.gecmisGizle=false; return st; }   // yalnız gizlenen kısımda
-  if(st.hazir){ const m=st.hazir==='3'?mdAyBasi(iso):iso; const [b,e]=mdHazirAralik(st.hazir,m);
+  if(st.hazir){ const m=mdAyBasi(iso); const [b,e]=mdHazirAralik(st.hazir,m);
     Object.assign(st,{merkez:m,bas:b,bit:e}); }
   else { const n=mdDn(st.bit)-mdDn(st.bas); const b=mdAyBasi(iso); Object.assign(st,{bas:b,bit:mdDnIso(mdDn(b)+n)}); }
   if(st.gecmisGizle&&iso<mdAyBasi(mdBugun())) st.gecmisGizle=false;
@@ -476,8 +484,8 @@ async function listeler(c,o){
   if(st.site!=null&&!siteler.some(m=>String(m.id)===String(st.site))) st.site=null;
   mdDurumYaz(st);
   ui._mSec=ui._mSec||new Set();
-  /* Form TASLAĞI gösterir (yoksa uygulanan aramayı); tablo yalnız uygulananı. */
-  const T=ui._mdTaslak||mdAramaAlan(st);
+  /* Tarih kutuları TASLAĞI gösterir (yoksa uygulanan dönemi); tablo yalnız uygulananı. */
+  const T=ui._mdTaslak||{bas:st.bas,bit:st.bit};
 
   /* Süzgeç seçenekleri YALNIZ medya kaydı olan kurum / işlerden gelir:
      soru "hangi mecraları kullanıyor", 531 kurumluk bir liste değil. */
@@ -501,59 +509,60 @@ async function listeler(c,o){
     .sort((a,b)=>a.ad.localeCompare(b.ad,'tr'));
   const sel=(v,k)=>String(v??'')===String(k)?'selected':'';
 
+  /* S19 yerleşim: dönem araçları üst sağda tek kompakt araç çubuğu; mecra
+     sekmeleri ayrı ve görünür; süzgeçler tek sıkı satır; özel dönem ayrı
+     ve yalnız Ara / Enter ile uygulanır. */
   c.innerHTML=`<div class="sec-head md-head"><div><h3>Doluluk</h3>
       <p class="sub">Statik yüzeyler kesin dönemle, LED yayınları eşzamanlı kampanya olarak yönetilir.</p></div>
-    <div class="md-head-r">
+    <div class="md-arac" role="toolbar" aria-label="Dönem ve dışa aktarım">
+      <div class="md-hazir">
+        <button type="button" class="md-nav" id="mdOnce" onclick="mdKaydir(-1)" aria-label="Önceki dönem (${esc(mdHazirAd(st))})" title="Önceki dönem">‹</button>
+        <div class="md-seg md-hz" role="group" aria-label="Hazır dönem" id="mdHazirG">
+          ${MD_HAZIR.map(([v,l])=>`<button type="button" data-v="${v}" class="${st.hazir===v?'on':''}" aria-pressed="${st.hazir===v}"
+            onclick="mdHazirSec('${v}')">${l}</button>`).join('')}</div>
+        <button type="button" class="md-nav" id="mdSonra" onclick="mdKaydir(1)" aria-label="Sonraki dönem (${esc(mdHazirAd(st))})" title="Sonraki dönem">›</button>
+      </div>
+      <button type="button" class="btn btn-ghost btn-sm" onclick="mdBuguneGit()" title="Güncel döneme dön; süzgeçler korunur">Bugüne git</button>
+      <label class="mtl-gk"><input type="checkbox" id="mdGecmis" ${st.gecmisGizle?'checked':''}
+        onchange="mdGecmisGizle(this.checked)"> Geçmiş ayları gizle</label>
       <button class="btn btn-outline btn-sm md-xls" id="mdXlsGenel" data-xls onclick="mdExcel({})"
         title="Uygulanan aramanın tamamı: tüm mecralar ve ürünler, kapalı gruplar dahil">${ic('download',15)} Excel indir</button>
       ${isAdmin()?`<button class="btn btn-ghost btn-sm" onclick="bookImport()" title="Eski tablolardan ay bazlı kayıt aktarımı — kesin dönemli yerleşim oluşturmaz">${ic('upload',15)} Eski ay kaydı al</button>`:''}
     </div></div>
-    <form class="sec-card fbar md-fbar md-ara" id="mdAraForm" role="search" aria-label="Mecralar araması" novalidate
-        onsubmit="event.preventDefault();mdAraUygula()" oninput="mdTaslakOku()" onchange="mdTaslakOku()">
-      <div class="md-donem-row">
-        <div class="md-hazir">
-          <button type="button" class="md-nav" onclick="mdKaydir(-1)" aria-label="Önceki dönem (${esc(mdHazirAd(st))})" title="Önceki dönem">‹</button>
-          <div class="ws-switch inline" role="group" aria-label="Hazır dönem">
-            ${MD_HAZIR.map(([v,l])=>`<button type="button" class="${st.hazir===v?'on':''}" aria-pressed="${st.hazir===v}"
-              onclick="mdHazirSec('${v}')">${st.hazir===v?'<span aria-hidden="true">✓ </span>':''}${l}</button>`).join('')}</div>
-          <button type="button" class="md-nav" onclick="mdKaydir(1)" aria-label="Sonraki dönem (${esc(mdHazirAd(st))})" title="Sonraki dönem">›</button>
-          <button type="button" class="btn btn-ghost btn-sm" onclick="mdBuguneGit()" title="Seçili dönemi bugüne göre kur; süzgeçler korunur">Bugüne git</button>
+    <div class="md-site" role="radiogroup" aria-label="Mecra" id="mdSiteG">
+      ${[{id:'',name:'Tüm mecralar'},...siteler].map(m=>{ const on=String(st.site??'')===String(m.id);
+        return `<button type="button" role="radio" class="md-sp${m.id===''?' md-sp-all':''} ${on?'on':''}" aria-checked="${on}" data-v="${m.id}"
+          onclick="mdSecim('site',this)">${esc(m.name)}</button>`; }).join('')}
+    </div>
+    <form class="sec-card md-fbar md-ara" id="mdAraForm" role="search" aria-label="Mecralar süzgeçleri" novalidate
+        onsubmit="event.preventDefault();mdAraUygula()" oninput="mdTarihTaslak()" onchange="mdTarihTaslak()">
+      <div class="md-f1">
+        <div class="md-seg" role="radiogroup" aria-label="Durum" id="mdDurumG">
+          ${MD_DURUM.map(([k,l])=>{ const on=(st.durum||'')===k;
+            return `<button type="button" role="radio" aria-checked="${on}" class="${on?'on':''}" data-v="${k}" title="${esc(MD_DURUM_IPUCU[k]||'')}"
+              onclick="mdSecim('durum',this)">${esc(l)}</button>`; }).join('')}
         </div>
+        <input class="inp inp-sm" type="search" id="mdQ" placeholder="Ara: pozisyon, kurum veya iş…" value="${esc(st.q)}" aria-label="Metin araması"
+          oninput="mdQTaslak()" onkeydown="if(event.key==='Enter'){event.preventDefault();mdQUygula();}">
+        <select class="inp inp-sm ${st.kurum?'inp-on':''}" id="mdKurum" aria-label="Kurum" onchange="mdSecUygula()">
+          <option value="">Tüm kurumlar</option>
+          ${kurumOpt.map(k=>`<option value="${k.id}" ${sel(st.kurum,k.id)}>${esc(orgKisa(k.ad,40))}</option>`).join('')}</select>
+        <select class="inp inp-sm ${st.is?'inp-on':''}" id="mdIs" aria-label="İş" onchange="mdSecUygula()">
+          <option value="">Tüm işler</option>
+          ${isOpt.map(k=>`<option value="${k.id}" ${sel(st.is,k.id)}>${esc(k.ad)}</option>`).join('')}</select>
+        <select class="inp inp-sm ${st.urun?'inp-on':''}" id="mdUrun" aria-label="Ürün (mecra türü)" onchange="mdSecUygula()">
+          <option value="">Tüm ürünler</option>
+          ${urunOpt.map(p=>`<option value="${p.id}" ${sel(st.urun,p.id)}>${esc(p.ad)} (${p.n})</option>`).join('')}</select>
+      </div>
+      <div class="md-f2">
+        <span class="md-f2-e" id="mdOzelE">Özel dönem</span>
         <label class="md-ms-f"><span>Başlangıç</span>
           <input class="inp inp-sm" type="date" id="mdBas" value="${esc(T.bas)}" min="${MD_TARIH_MIN}" max="${MD_TARIH_MAX}" required></label>
         <label class="md-ms-f"><span>Bitiş</span>
           <input class="inp inp-sm" type="date" id="mdBit" value="${esc(T.bit)}" min="${MD_TARIH_MIN}" max="${MD_TARIH_MAX}" required></label>
-        <label class="mtl-gk"><input type="checkbox" id="mdGecmis" ${st.gecmisGizle?'checked':''}
-          onchange="event.stopPropagation();mdGecmisGizle(this.checked)"> Geçmiş ayları gizle</label>
-      </div>
-      <div class="md-site" role="radiogroup" aria-label="Mecra" id="mdSiteG">
-        ${[{id:'',name:'Tüm mecralar'},...siteler].map(m=>{ const on=String(T.site??'')===String(m.id);
-          return `<button type="button" role="radio" class="md-sp${m.id===''?' md-sp-all':''} ${on?'on':''}" aria-checked="${on}" data-v="${m.id}"
-            onclick="mdTaslakSec('site',this)">${on?'<span aria-hidden="true">✓ </span>':''}${esc(m.name)}</button>`; }).join('')}
-      </div>
-      <div class="fbar-row">
-        <input class="inp" id="mdQ" placeholder="Ara: pozisyon, kurum veya iş…" value="${esc(T.q)}" aria-label="Metin araması">
-        <select class="inp ${T.kurum?'inp-on':''}" id="mdKurum" aria-label="Kurum">
-          <option value="">Tüm kurumlar</option>
-          ${kurumOpt.map(k=>`<option value="${k.id}" ${sel(T.kurum,k.id)}>${esc(orgKisa(k.ad,40))}</option>`).join('')}</select>
-        <select class="inp ${T.is?'inp-on':''}" id="mdIs" aria-label="İş">
-          <option value="">Tüm işler</option>
-          ${isOpt.map(k=>`<option value="${k.id}" ${sel(T.is,k.id)}>${esc(k.ad)}</option>`).join('')}</select>
-        <select class="inp ${T.urun?'inp-on':''}" id="mdUrun" aria-label="Ürün (mecra türü)">
-          <option value="">Tüm ürünler</option>
-          ${urunOpt.map(p=>`<option value="${p.id}" ${sel(T.urun,p.id)}>${esc(p.ad)} (${p.n})</option>`).join('')}</select>
-      </div>
-      <div class="md-durum-row">
-        <div class="md-seg" role="radiogroup" aria-label="Durum" id="mdDurumG">
-          ${MD_DURUM.map(([k,l])=>{ const on=(T.durum||'')===k;
-            return `<button type="button" role="radio" aria-checked="${on}" class="${on?'on':''}" data-v="${k}" title="${esc(MD_DURUM_IPUCU[k]||'')}"
-              onclick="mdTaslakSec('durum',this)">${on?'<span aria-hidden="true">✓ </span>':''}${esc(l)}</button>`; }).join('')}
-        </div>
-        <span class="md-ara-b">
-          <button type="button" class="md-bekleyen" id="mdBekleyen" hidden onclick="mdAraUygula()">Bekleyen değişiklik · Aramayı uygula</button>
-          <button type="submit" class="btn btn-primary btn-sm md-ara-go">Ara</button>
-          <button type="button" class="btn-link" onclick="mdSifirla()" title="Normal ilk açılışa dön: 6 ay, bugün merkez, tüm durumlar">Aramayı sıfırla</button>
-        </span>
+        <button type="submit" class="btn btn-primary btn-sm md-ara-go" title="Girilen tarihleri uygula (Enter)">Ara</button>
+        <span class="md-bekleyen" id="mdBekleyen" hidden>Tarih uygulanmadı — Ara ya da Enter</span>
+        <button type="button" class="btn-link md-sifirla" onclick="mdSifirla()" title="Normal ilk açılışa dön: 3 ay, bulunduğumuz ay, tüm mecralar ve durumlar">Sıfırla</button>
       </div>
       <p class="md-ms-hata" id="mdAraHata" role="alert" hidden></p>
     </form>
@@ -565,33 +574,55 @@ async function listeler(c,o){
   mdCiz();
 }
 
-/* ---------- TASLAK (form) ----------
-   Yazarken hiçbir şey uygulanmaz ve ekran yeniden çizilmez (yarım yazılan
-   yıl — "0002-…" — arama sayılmaz, S10 kök nedeni). Değişiklik yalnız Ara /
-   Enter ile uygulanır; bekleyen değişiklik kısa bir göstergeyle söylenir. */
-function mdTaslakOku(){
-  if(!document.getElementById('mdAraForm')) return;
-  const v=id=>{ const el=document.getElementById(id); return el?el.value:''; };
-  const T={...(ui._mdTaslak||mdAramaAlan(mdDurum()))};
-  T.bas=v('mdBas'); T.bit=v('mdBit'); T.q=v('mdQ'); T.kurum=v('mdKurum'); T.is=v('mdIs'); T.urun=v('mdUrun');
-  T._eksik=['mdBas','mdBit'].some(id=>{ const el=document.getElementById(id); return el&&!el.value&&el.validity&&el.validity.badInput; });
-  ['mdKurum','mdIs','mdUrun'].forEach(id=>{ const el=document.getElementById(id); if(el) el.classList.toggle('inp-on',!!el.value); });
-  ui._mdTaslak=T; mdAraHataGizle(); mdBekleyenCiz();
-}
-function mdTaslakSec(k,btn){
-  if(!ui._mdTaslak) mdTaslakOku();
-  const T=ui._mdTaslak; const v=btn.dataset.v;
-  T[k]=v;
-  btn.parentElement.querySelectorAll('button[role=radio]').forEach(b=>{ const on=b===btn;
-    b.classList.toggle('on',on); b.setAttribute('aria-checked',on);
-    const i=b.querySelector('span[aria-hidden]'); if(on&&!i) b.insertAdjacentHTML('afterbegin','<span aria-hidden="true">✓ </span>'); if(!on&&i) i.remove(); });
+/* ---------- SÜZGEÇLER: tek tıkla uygulanır (S19) ----------
+   Form yeniden ÇİZİLMEZ: uygulanan durum yazılır, kontrollerin görünümü
+   yerinde eşitlenir ve yalnız gövde (özet + tablolar) yenilenir. Böylece
+   yarım yazılmış tarih kutuda TASLAK olarak kalır ve hiçbir hesaba girmez;
+   klavye odağı da kaybolmaz. */
+function mdRadyoIsaretle(grup,v){ if(!grup) return;
+  grup.querySelectorAll('button').forEach(b=>{ const on=String(b.dataset.v??'')===String(v??'');
+    b.classList.toggle('on',on); b.setAttribute(b.getAttribute('role')==='radio'?'aria-checked':'aria-pressed',on); }); }
+function mdKontrolEsitle(st,o){
+  o=o||{};
+  const el=id=>document.getElementById(id);
+  if(!el('mdAraForm')) return;
+  mdRadyoIsaretle(el('mdHazirG'),st.hazir); mdRadyoIsaretle(el('mdSiteG'),st.site??''); mdRadyoIsaretle(el('mdDurumG'),st.durum||'');
+  const g=el('mdGecmis'); if(g) g.checked=!!st.gecmisGizle;
+  [['mdKurum',st.kurum],['mdIs',st.is],['mdUrun',st.urun]].forEach(([id,v])=>{ const x=el(id); if(!x) return;
+    x.value=v==null?'':String(v); x.classList.toggle('inp-on',!!x.value); });
+  const q=el('mdQ'); if(q&&(o.metin||document.activeElement!==q)) q.value=st.q||'';
+  /* Dönem değiştiyse tarih kutuları yeni dönemi gösterir ve taslak düşer;
+     yalnız süzgeç değiştiyse kutulardaki taslağa DOKUNULMAZ. */
+  if(o.tarih){ ui._mdTaslak=null; if(el('mdBas')) el('mdBas').value=st.bas; if(el('mdBit')) el('mdBit').value=st.bit; mdAraHataGizle(); }
+  const ad=mdHazirAd(st);
+  [['mdOnce','Önceki'],['mdSonra','Sonraki']].forEach(([id,t])=>{ const b=el(id); if(b) b.setAttribute('aria-label',`${t} dönem (${ad})`); });
   mdBekleyenCiz();
 }
-function mdBekleyenMi(){
-  const T=ui._mdTaslak; if(!T) return false; if(T._eksik) return true;
-  const A=mdAramaAlan(mdDurum());
-  return MD_ARAMA_ALAN.some(k=>{ const t=String(T[k]??''); return String(A[k]??'')!==(k==='q'?t.trim():t); });
+/* Uygulanan aramayı değiştirmenin TEK yolu. */
+function mdUygula(ek,o){ const st={...mdDurum(),...(ek||{})}; mdDurumYaz(st); mdKontrolEsitle(st,o); mdCiz(); }
+/* Mecra sekmesi / durum seçeneği. */
+function mdSecim(k,btn){ const v=btn.dataset.v;
+  if(k==='site') mdUygula({site:v===''?null:+v,alan:''}); else mdUygula({[k]:v}); }
+/* Kurum / iş / ürün seçimi. */
+function mdSecUygula(){ const v=id=>{ const el=document.getElementById(id); return el?el.value:''; };
+  mdUygula({kurum:v('mdKurum'),is:v('mdIs'),urun:v('mdUrun')}); }
+/* Metin araması: yazma durunca (ya da Enter) uygulanır; yalnız gövde yenilenir. */
+let _mdQT=null;
+function mdQTaslak(){ clearTimeout(_mdQT); _mdQT=setTimeout(mdQUygula,320); }
+function mdQUygula(){ clearTimeout(_mdQT); const el=document.getElementById('mdQ'); if(!el) return;
+  const q=el.value.trim(); if(q!==(mdDurum().q||'')) mdUygula({q}); }
+
+/* ---------- ÖZEL DÖNEM TASLAĞI ----------
+   Yazarken hiçbir şey uygulanmaz ve ekran yeniden çizilmez (yarım yazılan
+   yıl — "0002-…" — arama sayılmaz, S10 kök nedeni). Tarih yalnız Ara /
+   Enter ile uygulanır; bekleyen tarih kısa bir göstergeyle söylenir. */
+function mdTarihTaslak(){
+  const b=document.getElementById('mdBas'), e=document.getElementById('mdBit'); if(!b||!e) return;
+  const st=mdDurum(), eksik=[b,e].some(x=>!x.value&&x.validity&&x.validity.badInput);
+  ui._mdTaslak=(eksik||b.value!==st.bas||e.value!==st.bit)?{bas:b.value,bit:e.value,_eksik:eksik}:null;
+  mdAraHataGizle(); mdBekleyenCiz();
 }
+function mdBekleyenMi(){ return !!ui._mdTaslak; }
 function mdBekleyenCiz(){
   const p=mdBekleyenMi(); const b=document.getElementById('mdBekleyen'); if(b) b.hidden=!p;
   const f=document.getElementById('mdAraForm'); if(f) f.classList.toggle('bekliyor',p);
@@ -599,43 +630,33 @@ function mdBekleyenCiz(){
 function mdAraHataGizle(){ const h=document.getElementById('mdAraHata'); if(h){ h.hidden=true; h.textContent=''; } }
 function mdAraHata(msg,alan){
   const h=document.getElementById('mdAraHata');
-  if(h){ h.textContent=msg+' Arama uygulanmadı.'; h.hidden=false; }
+  if(h){ h.textContent=msg+' Dönem uygulanmadı.'; h.hidden=false; }
   const el=alan&&document.getElementById(alan); if(el) el.focus();
 }
-/* ARA: formdaki tüm alanlar TEK seferde uygulanır. Tarihler tam ve
+/* ARA / Enter: elle girilen özel dönemi uygular. Tarihler tam ve
    desteklenen aralıkta olmalı; yarım/ters tarih uygulanmaz. */
 function mdAraUygula(){
-  mdTaslakOku();
-  const T=ui._mdTaslak||mdAramaAlan(mdDurum());
   const b=mdMsOku('mdBas','Başlangıç'); if(b.hata) return mdAraHata(b.hata,'mdBas');
   const e=mdMsOku('mdBit','Bitiş');     if(e.hata) return mdAraHata(e.hata,'mdBit');
   if(b.v>e.v) return mdAraHata('Başlangıç bitişten sonra olamaz.','mdBit');
   if(mdDn(e.v)-mdDn(b.v)+1>MD_MAX_GUN) return mdAraHata('Dönem en çok üç yıl olabilir.','mdBit');
-  const st=mdDurum();
-  const site=T.site===''||T.site==null?null:+T.site;
-  const donemDegisti=b.v!==st.bas||e.v!==st.bit;
-  if(String(site??'')!==String(st.site??'')) st.alan='';
-  Object.assign(st,{site,urun:T.urun||'',kurum:T.kurum||'',is:T.is||'',q:String(T.q||'').trim(),durum:T.durum||'',bas:b.v,bit:e.v});
+  const st=mdDurum(), ek={bas:b.v,bit:e.v};
+  clearTimeout(_mdQT); const q=document.getElementById('mdQ'); if(q) ek.q=q.value.trim();
   /* Elle verilen aralık hazır döneme denk değilse hazır dönem SEÇİLİ GÖRÜNMEZ. */
-  if(donemDegisti) Object.assign(st,mdHazirBul(b.v,e.v));
-  ui._mdTaslak=null;
-  mdDurumYaz(st); mdYenidenCiz();
+  if(b.v!==st.bas||e.v!==st.bit) Object.assign(ek,mdHazirBul(b.v,e.v));
+  mdUygula(ek,{tarih:true});
 }
-/* ---------- Dönem düğmeleri: tarihler VE sonuç birlikte güncellenir ----
-   Hazır dönem, ‹ ›, Bugüne git yalnız DÖNEMİ uygular. Formda bekleyen başka
-   bir değişiklik (durum, kurum…) taslak olarak bekler, sessizce uygulanmaz. */
+/* ---------- Dönem düğmeleri: tarihler VE sonuç birlikte güncellenir ---- */
 function mdDonemUygula(st,y,bugun){
   Object.assign(st,y);
-  if(ui._mdTaslak){ ui._mdTaslak.bas=st.bas; ui._mdTaslak.bit=st.bit; ui._mdTaslak._eksik=false; }
-  mdDurumYaz(st);
-  Promise.resolve(mdYenidenCiz()).then(()=>{ if(bugun) mdBugunGoster(); });
+  mdDurumYaz(st); mdKontrolEsitle(st,{tarih:true}); mdCiz();
+  if(bugun) mdBugunGoster();
 }
 function mdHazirSec(h){
   const st=mdDurum(), g=mdBugun();
-  /* Hazır dönemden hazır döneme geçişte merkez korunur (6 ay → 3 ay:
-     30.09–30.12). Özel aralıktan geçişte merkez bugün (dönemdeyse) ya da
-     aralığın başıdır. */
-  const m=st.hazir?st.merkez:((g>=st.bas&&g<=st.bit)?g:st.bas);
+  /* Hazır dönemden hazır döneme geçişte çapa ay korunur. Özel aralıktan
+     geçişte çapa bugünün ayıdır (bugün dönemdeyse), değilse aralığın başı. */
+  const m=st.hazir?st.merkez:mdAyBasi((g>=st.bas&&g<=st.bit)?g:st.bas);
   const [b,e]=mdHazirAralik(h,m);
   mdDonemUygula(st,{hazir:h,merkez:m,bas:b,bit:e});
 }
@@ -650,26 +671,26 @@ function mdKaydir(d){
   if(mdTarihDogrula(b).hata||mdTarihDogrula(e).hata) return;
   mdDonemUygula(st,{bas:b,bit:e});
 }
-/* "Bugüne git": merkez bugüne gelir; seçili hazır dönem ve diğer süzgeçler
-   KORUNUR. Özel aralıkta uygulanan dönemin uzunluğu korunur, başlangıç
-   bugün olur. Tablo bugünün sütununu görünür alana alır. */
+/* "Bugüne git": GÜNCEL döneme döner — seçili hazır dönem bulunduğumuz aya
+   göre yeniden kurulur; özel aralıktaysa normal dönem (3 ay) seçilir.
+   Süzgeçler KORUNUR. Tablo bugünün sütununu görünür alana alır. */
 function mdBuguneGit(){
-  const st=mdDurum(), g=mdBugun();
-  if(st.hazir){ const [b,e]=mdHazirAralik(st.hazir,g); mdDonemUygula(st,{merkez:g,bas:b,bit:e},true); return; }
-  const n=mdDn(st.bit)-mdDn(st.bas);
-  mdDonemUygula(st,{bas:g,bit:mdDnIso(mdDn(g)+n)},true);
+  const st=mdDurum(), h=st.hazir||'3', m=mdAyBasi(mdBugun());
+  const [b,e]=mdHazirAralik(h,m);
+  mdDonemUygula(st,{hazir:h,merkez:m,bas:b,bit:e},true);
 }
-function mdGecmisGizle(v){ const st=mdDurum(); st.gecmisGizle=!!v; mdDurumYaz(st); mdYenidenCiz(); }
-/* Aramayı sıfırla: normal ilk açılış kapsamı (açık/kapalı gruplar korunur). */
+function mdGecmisGizle(v){ mdUygula({gecmisGizle:!!v}); }
+/* Sıfırla: normal ilk açılış kapsamı (açık/kapalı gruplar korunur). */
 function mdSifirla(){
   const st=mdDurum();
-  ui._mdTaslak=null;
+  clearTimeout(_mdQT);
   mdDurumYaz({...MD_DEF,...mdVarsayilanDonem(),acik:st.acik});
-  mdYenidenCiz();
+  mdKontrolEsitle(mdDurum(),{tarih:true,metin:true}); mdCiz();
 }
 /* Tablonun yapışkan sol sütunlarının genişliği: yatay kaydırmada hedef
    bunların ARKASINDA kalmamalı. */
-function mdSabitGen(w){ return [...w.querySelectorAll('thead th.mtb-pano, thead th.mtb-yz, thead th.mtb-kmp')].reduce((t,x)=>t+x.offsetWidth,0); }
+function mdSabitGen(w){ return [...w.querySelectorAll('thead th.mtb-no, thead th.mtb-yz, thead th.mtb-kmp')]
+  .filter(x=>getComputedStyle(x).position==='sticky'&&getComputedStyle(x).left!=='auto').reduce((t,x)=>t+x.offsetWidth,0); }
 /* Hedef öğeyi (ay başlığı ya da kayıt bloğu) kendi tablosunda yatayda
    görünür alana alır; sayfayı yalnız gerekirse dikeyde kaydırır. */
 function mdYataydaGoster(el,ortala){
@@ -693,16 +714,12 @@ function mdBugunGoster(){
 }
 function mdHareketAz(){ try{ return matchMedia('(prefers-reduced-motion: reduce)').matches; }catch(e){ return false; } }
 /* Doğrudan (programatik) kapsam değişimi — ör. aktif filtre etiketi
-   kaldırma, grup aç/kapa. Uygulanan aramayı değiştirir, taslağı da eşitler. */
-function mdSet(ek){
-  const st={...mdDurum(),...ek}; mdDurumYaz(st);
-  if(ui._mdTaslak) MD_ARAMA_ALAN.forEach(k=>{ if(k in ek) ui._mdTaslak[k]=ek[k]==null?'':String(ek[k]); });
-  mdYenidenCiz(); }
-/* Kapsam değişince üst şerit de değişir; veri yeniden OKUNMAZ, yalnız
-   aynı modelle yeniden çizilir. */
+   kaldırma. Uygulanan aramayı değiştirir, kontrolleri yerinde eşitler. */
+function mdSet(ek){ mdUygula(ek,{metin:true}); }
+/* Veri yeniden OKUNMAZ; kontroller eşitlenir ve gövde aynı modelle çizilir. */
 function mdYenidenCiz(){
-  const box=document.getElementById('mdGovde'); if(!box) return;
-  return listeler(box.parentElement,{onbellek:true});
+  if(!document.getElementById('mdGovde')) return;
+  mdKontrolEsitle(mdDurum()); mdCiz();
 }
 function mdTemizle(){ mdSet({kurum:'',is:'',q:'',alan:'',urun:'',durum:''}); }
 
@@ -735,6 +752,7 @@ function mdCiz(){
   const S=mdSonuc(M,st);
   ui._mdSonuc=S;
   box.innerHTML=mdYilCiz(M,st,S);
+  mdYuzGenOlc();
   /* Lejant ekran başına TEKTİR (§4). Gövde çizildikten sonra eklenir:
      hangi görsel anlamların gerçekten kullanıldığı ancak o zaman bilinir. */
   const lej=mdLegend();
@@ -836,21 +854,23 @@ function mdMsOku(id,ad){
    Tüm seçenekler seçili ETKİN dönem [B, E] içindir; "durum tarihi" yok.
      Tümü                  kapsamdaki bütün yüzeyler (süzgeçlere göre)
      Opsiyonlu             dönemle kesişen, iptal edilmemiş opsiyonu olan yüzeyler
-     Yayın                 dönemle kesişen kesin yayın kaydı olan yüzeyler
+     Yayında               dönemle kesişen kesin yayın kaydı olan yüzeyler
                            (geçmiş ve planlanan dahil — kayıtlar üzerinde
                            Yayında / Planlandı / Bitti ayrımı korunur)
      Müsait                dönemin TAMAMINDA engelleyici kaydı olmayan yüzeyler
-     Dönem içinde boşalacak engelleyici zincirden sonra GERÇEK boşluğun
+     Yakında boşalacak     engelleyici zincirden sonra GERÇEK boşluğun
                            başladığı gün dönem içinde olan yüzeyler
-   A/B yüzleri ayrı hesaplanır. Müsait ve Dönem içinde boşalacak yalnız
+   Etiketler S19'da sadeleşti (Yayın → Yayında, Dönem içinde boşalacak →
+   Yakında boşalacak); anlam dönemseldir, saklanan anahtarlar değişmedi.
+   A/B yüzleri ayrı hesaplanır. Müsait ve Yakında boşalacak yalnız
    statik yüzeyler içindir; LED'e kapasite / boş slot hesabı UYGULANMAZ.
    ========================================================== */
-const MD_DURUM=[['','Tümü'],['opsiyon','Opsiyonlu'],['yayin','Yayın'],['musait','Müsait'],['bosalacak','Dönem içinde boşalacak']];
+const MD_DURUM=[['','Tümü'],['opsiyon','Opsiyonlu'],['yayin','Yayında'],['musait','Müsait'],['bosalacak','Yakında boşalacak']];
 const MD_DURUM_IPUCU={'':'Seçili kapsamdaki bütün yüzeyler',
   opsiyon:'Dönemle kesişen, iptal edilmemiş opsiyonu olan yüzeyler',
   yayin:'Dönemle kesişen kesin yayın kaydı olan yüzeyler (geçmiş ve planlanan dahil)',
   musait:'Dönemin tamamında engelleyici kaydı olmayan statik yüzeyler',
-  bosalacak:'Doluluk zincirinden sonra gerçek boşluğun dönem içinde başladığı statik yüzeyler'};
+  bosalacak:'Seçili dönem içinde gerçekten boşalan statik yüzeyler (kesintisiz yenileme boşalma sayılmaz)'};
 const MD_YAKINDA_GUN=30;                 // yalnız yüzey ayrıntısındaki "bugün" satırı (mdYuzeyDurum)
 const mdDurumAd=k=>(MD_DURUM.find(x=>x[0]===k)||[0,''])[1];
 function mdKayitKey(r){ return r.placement_id?'p'+r.placement_id:'b'+r.booking_id; }
@@ -981,14 +1001,16 @@ function mdYilCiz(M,st,S){
   if(!html){
     /* Gerçekten boş sonuç gösterilir; ilgisiz satırlar GERİ GETİRİLMEZ. */
     const bos=({opsiyon:'Bu dönemde opsiyonlu kayıt yok.',yayin:'Bu dönemde yayın kaydı yok.',
-      musait:'Dönemin tamamında müsait statik yüzey yok.',bosalacak:'Dönem içinde boşalacak statik yüzey yok.'})[S.durum]
+      musait:'Dönemin tamamında müsait statik yüzey yok.',bosalacak:'Bu dönemde boşalacak statik yüzey yok.'})[S.durum]
       ||'Bu kapsamda gösterilecek yüzey ya da kampanya yok.';
     return ozet+`<div class="sec-card"><p class="empty">${esc(bos)}</p></div>`;
   }
   return ozet+html;
 }
-/* Uygulanan aramanın başlığı: dönem, kısmi aylar, durum, kapsam ve sayaç.
-   Taslakta bekleyen değişiklik burada GÖRÜNMEZ — burası uygulanandır. */
+/* Uygulanan aramanın KISA özeti (S19): dönem · hazır dönem · kapsam · sayaç
+   tek satırda; yalnız gerektiğinde altında kısa notlar. Büyük "uygulanan
+   arama" kutusu yoktur. Bekleyen tarih taslağı burada GÖRÜNMEZ — burası
+   uygulanandır; sayaç, tablo ve Excel aynı sonuçtan (mdSonuc) beslenir. */
 function mdSonucOzet(M,st,S,ek){
   const E=S.etkin;
   const kapsam=[st.site!=null?(M.mecById[st.site]||{}).name:'Tüm mecralar',st.urun?M.pm[st.urun]:''].filter(Boolean).join(' · ');
@@ -1000,22 +1022,21 @@ function mdSonucOzet(M,st,S,ek){
     musait:`<b>${S.toplam}</b> yüzeyden <b>${S.set.size}</b> tanesi dönemin tamamında müsait`,
     bosalacak:`<b>${S.set.size}</b> yüzey dönem içinde boşalıyor`})[S.durum];
   const not=[];
+  if(E.gizli||E.bos) not.push(E.bos?'Geçmiş aylar gizli — dönemin tamamı geçmişte.'
+    :`Geçmiş aylar gizli: etkin dönem ${mdNokta(E.bas)} – ${mdNokta(E.bit)}. Tablo, sayaç ve Excel etkin dönemi kullanır.`);
+  if(!S.bos&&kismi.length) not.push(`Kısmi ay: ${kismi.join(' · ')} — dönem dışındaki günler gri gösterilir ve müsait sayılmaz.`);
   if(S.durum==='musait'&&(st.kurum||st.is)) not.push('Kurum / iş süzgeci müsaitliği daraltmaz — başka müşterilerin kayıtları da yüzeyi bloklar.');
   if(S.durum==='bosalacak'&&(st.kurum||st.is)) not.push('Yalnız boşalan doluluk zincirinde seçili kurumun / işin kaydı bulunan yüzeyler.');
   if(S.durum==='bosalacak') not.push('Kesintisiz yenileme ya da ertesi gün başlayan kayıt boşalma sayılmaz; bitişi bilinmeyen kayıttan tarih üretilmez.');
   if(S.ledGizli) not.push(`LED alanları eşzamanlıdır; “${mdDurumAd(S.durum)}” statik yüzeylere aittir ve LED için hesaplanmaz.`);
   if(S.durum==='opsiyon'&&S.opsSure) not.push(`${S.opsSure} opsiyonun geçerlilik süresi dolmuş — yüzeyi bloklamaya devam ediyor, karar bekliyor.`);
   if(S.pasif) not.push(`${S.pasif} pasif (satışa kapalı) yüz sonuçta yer almaz.`);
-  return `<div class="md-sonuc md-dz-${S.durum||'tumu'}" role="status" aria-live="polite">
-    <div class="md-sonuc-h"><span class="md-sonuc-e">Uygulanan arama</span>
-      <b class="mono">${esc(mdNokta(E.esas.bas))} – ${esc(mdNokta(E.esas.bit))}</b>
-      <span class="md-sonuc-c">${esc(mdHazirAd(st))}</span>
-      <span>Durum: <b>${esc(mdDurumAd(S.durum))}</b></span>
-      <span>${esc(kapsam)}</span></div>
-    ${E.gizli||E.bos?`<div class="md-ms-uyari">Geçmiş aylar gizli${E.bos?' — dönemin tamamı geçmişte.':`: etkin dönem <b class="mono">${esc(mdNokta(E.bas))} – ${esc(mdNokta(E.bit))}</b>. Tablo, sayaç ve Excel etkin dönemi kullanır.`}</div>`:''}
-    ${!S.bos&&kismi.length?`<div class="muted md-sonuc-k">Kısmi ay: ${esc(kismi.join(' · '))} — dönem dışındaki günler gri gösterilir ve müsait sayılmaz.</div>`:''}
-    ${!S.bos?`<div class="md-sonuc-s">${say}</div>`:''}
-    ${not.map(x=>`<div class="muted">${esc(x)}</div>`).join('')}</div>`;
+  return `<div class="md-sonuc" role="status" aria-live="polite">
+    <p class="md-sonuc-h"><b class="mono">${esc(mdNokta(E.esas.bas))} – ${esc(mdNokta(E.esas.bit))}</b>
+      <span class="md-sonuc-c">${esc(mdHazirAd(st))}</span><span>${esc(kapsam)}</span>
+      ${S.durum?`<span>Durum: <b>${esc(mdDurumAd(S.durum))}</b></span>`:''}
+      ${!S.bos?`<span class="md-sonuc-s">${say}</span>`:''}</p>
+    ${not.map(x=>`<p class="md-sonuc-n">${esc(x)}</p>`).join('')}</div>`;
 }
 
 /* Tek paylaşılan bilgi kartı düğümü: her şerit için ayrı düğüm
@@ -1032,7 +1053,7 @@ function mdTipGizle(){ if(_mdTipEl) _mdTipEl.style.display='none'; }
 function mdLegend(){
   const L=_mdLeg, p=[];
   const sw=(t,ek)=>`<i class="sw mtb-sw t-${t}${ek?' '+ek:''}"></i>`;
-  if(L.ab) p.push('<span class="lg-surf"><b>A</b> Ön yüz</span><span class="lg-surf"><b>B</b> Arka yüz</span><span class="lg-sep"></span>');
+  if(L.ab) p.push('<span class="lg-surf"><b>-A</b> Ön yüz</span><span class="lg-surf"><b>-B</b> Arka yüz</span><span class="lg-sep"></span>');
   if(L.yayin) p.push(`<span>${sw('yayin')}Yayında</span>`);
   if(L.plan) p.push(`<span>${sw('yayin','plan')}Planlandı · yayın henüz başlamadı</span>`);
   if(L.ops) p.push(`<span>${sw('opsiyon')}Opsiyon</span>`);
@@ -1042,7 +1063,7 @@ function mdLegend(){
   if(L.soluk) p.push(`<span>${sw('yayin','soluk')}Süzgeç dışı kayıt — yüzeyi yine bloklar</span>`);
   if(L.bugun) p.push('<span><i class="sw mtb-sw-bugun"></i>Bugün</span>');
   if(!p.length) return '';
-  return `<div class="rg-legend">${p.join('')}<span class="lg-not">Ay içinde değişen hücrede her kayıt kendi bloğu ve tarihiyle alt alta; üstteki şerit günlere göre bölünür.</span></div>`;
+  return `<div class="rg-legend">${p.join('')}<span class="lg-not">Ay içinde durum değişiyorsa hücre beyaz kalır; her dilim kendi rengi ve tarihiyle alt alta yazılır, üstteki şerit günlere göre bölünür.</span></div>`;
 }
 
 /* Operasyonel kapsam (PS9 §2). Kapsam dışı lokasyon aktif doluluk
@@ -1089,10 +1110,13 @@ const MD_RENK={
   opsiyon:{fill:'#FAD6A0', ink:'#6E3D00', bar:'#E38B12'},
   musait: {fill:'#CBEAD2', ink:'#155A2A', bar:'#3AA35A'},
   disi:   {fill:'#E4E4E8', ink:'#5E5E64', bar:'#BDBDC3'}};
-/* Ay sütunu genişliği ay SAYISINA göre: kısa dönem geniş, yıl dar ama
-   okunur; yazı küçültülmez, tablo kendi içinde kayar. */
-function mdAyGen(n){ return n<=4?250:n<=7?200:170; }
-const MD_YUZ_GEN=40, MD_KMP_GEN=230;
+/* Ay sütunu EN AZ genişliği ay sayısına göre; tablo sığıyorsa sütunlar
+   kalan alanı eşit paylaşır, sığmıyorsa tablo kendi içinde kayar. */
+function mdAyGen(n){ return n<=4?190:n<=7?158:146; }
+/* Sabit sol sütunlar (Raporlar önizlemesindeki No / Yüz düzeni). Yüz
+   sütununun gerçek genişliği çizimden SONRA içerikten ölçülür (mdYuzGenOlc);
+   MD_YUZ_GEN yalnız ölçüm öncesi tahmindir. LED kampanya sütunu sabittir. */
+const MD_NO_GEN=34, MD_YUZ_GEN=92, MD_KMP_GEN=230;
 function mdCssSerit(dilim){ const top=dilim.reduce((t,d)=>t+d.gun,0)||1; let x=0;
   return `linear-gradient(90deg,${dilim.map(d=>{ const a=x/top*100; x+=d.gun; const b=x/top*100;
     return `${MD_RENK[d.tip].bar} ${a.toFixed(2)}% ${b.toFixed(2)}%`; }).join(',')})`; }
@@ -1113,25 +1137,30 @@ function mdTabloBas(ek,aylar,ilk){
   return `<thead><tr>${ilk}
     ${aylar.map(ay=>`<th scope="col" class="mtb-ay${ay.ym===buYm?' bu':''}${ay.tam?'':' kismi'}${mdKisaAy(ay)?' dar':''}" data-ym="${ay.ym}"
         ${ay.tam?'':`title="${esc(`Seçili dönem bu ayın yalnız ${mdNokta(ay.s)} – ${mdNokta(ay.e)} günlerini kapsar`)}"`}>
-      <span class="mtb-ay-t">${esc(AY_UZUN[+ay.ym.slice(5,7)-1])} <em>${esc(ay.ym.slice(0,4))}</em></span>${ay.tam?'':`<i class="mtb-kismi">${esc(mdAyKismi(ay))}</i>`}${ay.ym===buYm?`<i class="mtb-bu-e">Bugün ${+mdBugun().slice(8)}</i>`:''}${mdAyIsaret(ay,true)}</th>`).join('')}
+      <span class="mtb-ay-t">${esc(AY_KISA[+ay.ym.slice(5,7)-1])} ${esc(ay.ym.slice(0,4))}</span>${ay.tam?'':`<i class="mtb-kismi">${esc(mdAyKismi(ay))}</i>`}${ay.ym===buYm?`<i class="mtb-bu-e">Bugün ${+mdBugun().slice(8)}</i>`:''}${mdAyIsaret(ay,true)}</th>`).join('')}
   </tr></thead>`;
 }
-/* Bir haftadan kısa kısmi ay (ör. varsayılan dönemin "Haziran · yalnız 30"
-   sütunu) dar sütundur — Excel üreticisiyle aynı kural. */
-const MD_KISA_GEN=120;
+/* Bir haftadan kısa kısmi ay (özel dönemde ör. "Haz · yalnız 30") dar
+   sütundur — Excel üreticisiyle aynı kural. */
+const MD_KISA_GEN=112;
 function mdKisaAy(a){ return !a.tam&&mdDn(a.e)-mdDn(a.s)+1<=7; }
 function mdAyKol(aylar){ return aylar.map(a=>mdKisaAy(a)?`<col style="width:${MD_KISA_GEN}px">`:'<col>').join(''); }
-/* S18: Pano sütunu içeriğine göre: sıra no + seçim kutusu + en uzun pano
-   kodu + iç boşluk. Kod kırpılmaz (uzun kodda sütun genişler); artan alan
-   ay sütunlarına kalır. Genişlik `--pg` ile hem <col>'a hem yapışkan Yüz
-   sütununun `left` konumuna verilir (ikisi aynı sayıdan beslenmeli). */
-function mdPanoGen(gr){
-  const uz=Math.max(4,...gr.map(g=>String(g.base||'').length));
-  return Math.min(220,Math.max(80,Math.ceil(56+uz*8.4)));
+/* Tablo kabı. `sabit` sol sütunların CSS genişlik ifadesidir; en az genişlik
+   aynı ifadeden hesaplanır (col, min-width ve yapışkan konum birlikte). */
+function mdTabloAc(ek,sabit,sinif,ayGen){
+  const g=ayGen||mdAyGen(ek.aylar.length), ay=ek.aylar.reduce((t,a)=>t+(mdKisaAy(a)?MD_KISA_GEN:g),0);
+  return `<div class="mtb-wrap"><table class="mtb ${sinif||''}" style="min-width:calc(${sabit} + ${ay}px)">`;
 }
-function mdTabloAc(ek,sabitGen,sinif,stil){
-  const g=mdAyGen(ek.aylar.length);
-  return `<div class="mtb-wrap"><table class="mtb ${sinif||''}" style="min-width:${sabitGen+ek.aylar.reduce((t,a)=>t+(mdKisaAy(a)?MD_KISA_GEN:g),0)}px;${stil||''}">`;
+/* Yüz sütunu: seçim kutusu + yüz kodu kadar. Gerçek içerik genişliği
+   ölçülür ve `--yg` olarak tabloya yazılır; <col>, min-width ve yapışkan
+   sütun aynı değişkeni kullanır (yalnız CSS'e sayı yazmak yetmez). */
+function mdYuzGenOlc(){
+  document.querySelectorAll('#mdGovde table.mtb:not(.mtb-led)').forEach(t=>{
+    let w=0; t.querySelectorAll('.mtb-yi').forEach(e=>{ if(e.offsetWidth>w) w=e.offsetWidth; });
+    const th=t.querySelector('tbody th.mtb-yz'); if(!w||!th) return;
+    const cs=getComputedStyle(th);
+    t.style.setProperty('--yg',Math.ceil(w+parseFloat(cs.paddingLeft)+parseFloat(cs.paddingRight)+1)+'px');
+  });
 }
 /* Kaydın hücre metni: kurum (yoksa iş), durum ve KESİN dönem. Dönem
    kaydın tamamıdır (Excel'deki gibi); kesinliği bilinmeyen gün yazılmaz. */
@@ -1144,9 +1173,15 @@ function mdKayitMetin(r,gun){
   return {zm,kim,durum:mdKayitDurumAd(r,zm),donem,
     sur:r.commitment==='reserved'&&!!r.option_expires_at&&r.option_expires_at<gun};
 }
-/* Bir kayıt ya da müsait dilim bloğu. */
+/* Bir kayıt ya da müsait dilim. Görünüş Raporlar › Mecra doluluk tablosu
+   önizlemesiyle aynıdır (S19):
+     · TEK durumlu ay   → hücre durum rengiyle dolu, metin ortada
+     · ay içinde DEĞİŞEN → hücre beyaz; her dilim renk işareti + kalın ad +
+       küçük tarih satırıyla alt alta
+   Ekran rapordan farklı olarak her dilimi tıklanabilir tutar ve kaydın
+   durumunu (Yayında / Planlandı / Bitti / Opsiyon) tarihle birlikte yazar. */
 function mdBlok(M,u,p,ay,o,tek){
-  const gun=o.gun;
+  const gun=o.gun, nk=tek?'':'<i class="mtb-nk" aria-hidden="true"></i>';
   if(p.tip==='musait'){
     const tamAy=p.s===ay.ayB&&p.e===ay.ayE;
     const kisa=p.s===p.e?mdTrKisa(p.s):`${mdTrKisa(p.s)}–${mdTrKisa(p.e)}`;
@@ -1156,7 +1191,7 @@ function mdBlok(M,u,p,ay,o,tek){
     const vurgu=(o.musait||bos)?' vurgu':'';
     return `<button type="button" class="mtb-b t-musait${tek?' tek':''}${vurgu}${bos?' bosalma':''}" data-s="${p.s}" data-e="${p.e}"
       aria-label="${esc(`${u.name} · ${bos?'Boşalıyor · ':''}Müsait · ${aralik} — kayıt eklemek için açın`)}" title="${esc(`${u.name} · ${bos?'bu günden itibaren boşalıyor · ':''}müsait ${aralik} · kayıt ekle`)}"
-      onclick="mdBosAc(${u.id},'${p.s}','${p.e}')"><b>${bos?'Boşalıyor':'Müsait'}${tamAy?'':` <span class="mtb-t">${esc(kisa)}</span>`}</b></button>`;
+      onclick="mdBosAc(${u.id},'${p.s}','${p.e}')">${nk}<span class="mtb-m"><b>${bos?'Boşalıyor':'Müsait'}${tamAy?'':` · ${esc(kisa)}`}</b></span></button>`;
   }
   const r=p.seg.r, k=mdKayitMetin(r,gun);
   const gecmis=k.zm==='bitti', plan=k.zm==='yaklasan'&&r.commitment!=='reserved';
@@ -1169,9 +1204,9 @@ function mdBlok(M,u,p,ay,o,tek){
   return `<button type="button" class="mtb-b t-${p.tip}${tek?' tek':''}${gecmis?' gecmis':''}${plan?' plan':''}${k.sur?' sur':''}${ikincil?' soluk':''}${vurgu?' vurgu':''}"
     ${r.placement_id?`data-p="${r.placement_id}"`:`data-b="${r.booking_id}"`} title="${esc(baslik)}"
     aria-label="${esc(`${u.name} · ${baslik}${ikincil?' · süzgeç dışı kayıt, yüzeyi yine de bloklar':''}`)}"
-    onclick="${r.placement_id?`mKayitAc(${r.placement_id})`:`mEskiAc(${r.booking_id})`}">
-    ${k.kim?`<b>${esc(k.kim)}</b>`:''}<span>${k.kim?`<i>${esc(k.durum)}</i> · `:`<i class="yalniz">${esc(k.durum)}</i> · `}${esc(k.donem)}</span>
-    ${k.sur?`<em class="mtb-uy">⚠ Opsiyon süresi doldu</em>`:''}</button>`;
+    onclick="${r.placement_id?`mKayitAc(${r.placement_id})`:`mEskiAc(${r.booking_id})`}">${nk}<span class="mtb-m">
+    ${k.kim?`<b>${esc(k.kim)}</b><small><i>${esc(k.durum)}</i> · ${esc(k.donem)}</small>`:`<b>${esc(k.durum)}</b><small>${esc(k.donem)}</small>`}
+    ${k.sur?`<em class="mtb-uy">⚠ Opsiyon süresi doldu</em>`:''}</span></button>`;
 }
 function mdYuzHucre(M,u,hc,ay,o){
   const isaret=mdAyIsaret(ay,false);
@@ -1219,7 +1254,6 @@ function mdStatikZaman(M,a,yuzler,ek,acik,S,st){
   const gun=mdBugun();
   const aylar=ek.aylar;
   const gr=groupUnits(yuzler);
-  const pg=mdPanoGen(gr);
   /* Kurum/iş süzgeci bir KAYIT sorusudur: eşleşmeyen kayıt soluklaşır ama
      yüzeyi bloklamaya devam eder — gizlenen kayıt yüzeyi müsait GÖSTEREMEZ.
      Dilimler daima yüzeyin TÜM engelleyici kayıtlarıyla hesaplanır. */
@@ -1234,29 +1268,26 @@ function mdStatikZaman(M,a,yuzler,ek,acik,S,st){
     const yz=[g.A,g.B].filter(Boolean);
     if(yz.some(u=>mdYuzHarf(u.name))) _mdLeg.ab=true;
     yz.forEach(u=>_mdGoruntu.add(u.id));
-    const secBtn=yz.map(u=>u.id);
-    const secSay=secBtn.filter(id=>ui._mSec.has(id)).length;
     no++;
-    const bosNot=yz.filter(u=>S.bosalma[u.id]).map(u=>`<span class="mtb-bos" title="${esc(`${u.name}: ${mdNokta(S.bosalma[u.id])} tarihinden itibaren boş`)}">${esc(mdYuzHarf(u.name)||u.name)} boşalır ${esc(mdTrKisa(S.bosalma[u.id]))}</span>`).join('');
     return yz.map((u,i)=>{
       const seg=mdGunDilim(M,u,ek.bas,ek.bit,gun);
-      const oc={...ctx,bosalma:S.bosalma[u.id]||null};
-      const harf=mdYuzHarf(u.name);
-      return `<tr class="mtb-r${i===0?' ilk':''}${i===yz.length-1?' son':''}${ui._mSec.has(u.id)?' sec':''}" data-u="${u.id}">
-        ${i===0?`<th scope="rowgroup" rowspan="${yz.length}" class="mtb-pano">
-          <span class="mtb-no" aria-hidden="true">${no}</span>
-          <input type="checkbox" class="mtl-cb" ${secSay===secBtn.length?'checked':''}
-             aria-label="${esc(g.base)} seç (toplu opsiyon/yayın için; indirmeyi etkilemez)" onchange="mdTumunuSec([${secBtn.join(',')}],this.checked)">
-          <button type="button" class="mtb-ad btn-link" title="${esc(g.base)} — yüzey detayı" onclick="mYuzeyAc(${yz[0].id})">${esc(g.base)}</button>${bosNot}</th>`:''}
-        <td class="mtb-yz">${harf?`<b title="${harf==='A'?'Ön yüz':'Arka yüz'}">${harf}</b>`:''}</td>
+      const bos=S.bosalma[u.id]||null;
+      const oc={...ctx,bosalma:bos};
+      const sec=ui._mSec.has(u.id);
+      return `<tr class="mtb-r${i===0?' ilk':''}${i===yz.length-1?' son':''}${sec?' sec':''}" data-u="${u.id}">
+        ${i===0?`<th scope="rowgroup" rowspan="${yz.length}" class="mtb-no">${no}</th>`:''}
+        <th scope="row" class="mtb-yz"><span class="mtb-yi"><input type="checkbox" class="mtl-cb" ${sec?'checked':''}
+            aria-label="${esc(u.name)} seç (toplu opsiyon/yayın için; indirmeyi etkilemez)" onchange="mdTumunuSec([${u.id}],this.checked)">
+          <button type="button" class="mtb-ad btn-link" title="${esc(u.name)} — yüzey detayı" onclick="mYuzeyAc(${u.id})">${esc(u.name)}</button></span>${bos?`
+          <span class="mtb-bos" title="${esc(`${u.name}: ${mdNokta(bos)} tarihinden itibaren boş`)}">boşalır ${esc(mdTrKisa(bos))}</span>`:''}</th>
         ${aylar.map(ay=>mdYuzHucre(M,u,mdAyHucre(seg,ay),ay,oc)).join('')}</tr>`;
     }).join('');
   }).join('');
 
   return `<section class="sec-card md-alan" data-a="${a.id}">${baslik}
-    ${mdTabloAc(ek,pg+MD_YUZ_GEN,'',`--pg:${pg}px`)}
-      <colgroup><col class="c-pano"><col class="c-yuz">${mdAyKol(aylar)}</colgroup>
-      ${mdTabloBas(ek,aylar,'<th scope="col" class="mtb-pano">Pano</th><th scope="col" class="mtb-yz">Yüz</th>')}
+    ${mdTabloAc(ek,`var(--ng,${MD_NO_GEN}px) + var(--yg,${MD_YUZ_GEN}px)`,'')}
+      <colgroup><col class="c-no"><col class="c-yuz">${mdAyKol(aylar)}</colgroup>
+      ${mdTabloBas(ek,aylar,'<th scope="col" class="mtb-no">No</th><th scope="col" class="mtb-yz">Yüz</th>')}
       <tbody>${rows}</tbody></table></div></section>`;
 }
 
@@ -1294,7 +1325,7 @@ function mdLedZaman(M,a,l,ek,acik,S){
         title="${esc([r.customer_name,k.durum,k.donem].filter(Boolean).join(' · '))}"
         aria-label="${esc(`${r.customer_name||'kurum belirtilmemiş'} · ${k.durum} · ${AY_UZUN[+ay.ym.slice(5,7)-1]}: ${aralik}`)}"
         onclick="${r.placement_id?`mKayitAc(${r.placement_id})`:`mEskiAc(${r.booking_id})`}">
-        <b>${esc(k.durum)}</b><span>${esc(aralik)}</span></button>${isaret}</td>`;
+        <span class="mtb-m"><b>${esc(k.durum)}</b><small>${esc(aralik)}</small></span></button>${isaret}</td>`;
     };
     return `<tr class="mtb-r ilk son" ${r.placement_id?`data-p="${r.placement_id}"`:`data-b="${r.booking_id}"`}>
       <th scope="row" class="mtb-kmp">
@@ -1321,7 +1352,7 @@ function mdLedZaman(M,a,l,ek,acik,S){
   return `<section class="sec-card md-alan md-led" data-a="${a.id}">${baslik}
     ${ekranlar.length?`<p class="md-ekran">${ekranlar.map(u=>`<span class="chip" title="${esc([u.konum,u.olcu,u.yayin_format].filter(Boolean).join(' · ')||'teknik bilgi kayıtlı değil')}">${esc(u.name)}${u.yayin_format?` <em>${esc(u.yayin_format)}</em>`:''}</span>`).join('')}</p>`:''}
     <p class="md-not mtb-led-not">Her satır bir kampanyadır; aynı ayda birden çok kampanya yayında olabilir. Boş ay satılabilir boş slot anlamına gelmez.</p>
-    ${sirali.length?`${mdTabloAc(ek,MD_KMP_GEN,'mtb-led')}
+    ${sirali.length?`${mdTabloAc(ek,MD_KMP_GEN+'px','mtb-led',aylar.length<=4?170:140)}
       <colgroup><col style="width:${MD_KMP_GEN}px">${mdAyKol(aylar)}</colgroup>
       ${mdTabloBas(ek,aylar,'<th scope="col" class="mtb-kmp">Kampanya</th>')}
       <tbody>${sirali.map(satir).join('')}</tbody></table></div>`
@@ -2048,11 +2079,7 @@ function mdXlsModel(M,st,S,k){
   sl.forEach(({m:mc,gruplar})=>gruplar.forEach(g=>{
     const a=g.a;
     if(g.esz){
-      const L={ad:rpSayfaAdi(String(a.name).toLocaleLowerCase("tr").startsWith(rpMecraKisa(mc.name).toLocaleLowerCase("tr"))?a.name:`${rpMecraKisa(mc.name)} ${a.name}`,kull),baslik:`${mc.name} · ${a.name}`,sure:mdSure(a),
-        kayitlar:g.kayitlar.map(r=>{ const km=mdKayitMetin(r,gun);
-          return {kurum:r.customer_name?mdKisaAd(r.customer_name,30):'Kurum belirtilmemiş',is:r.work_title||(r.record_kind==='legacy'?'eski kayıt':''),
-            durum:km.durum,donem:km.donem,tip:r.commitment==='reserved'?'opsiyon':'yayin',
-            aylar:aylar.map(ay=>{ const p=mdLedAyParca(r,ay); return p?(p.tamAy?'Tüm ay':p.s===p.e?rpTrKisa(p.s):`${rpTrKisa(p.s)}–${rpTrKisa(p.e)}`):''; })}; })};
+      const L=rpLedAlanModel(M,mc,a,g.kayitlar,aylar,gun,true,kull);
       m.led.push(L);
       sayfalar.push({ad:L.ad,yon:'landscape',ozel:ws=>rpXlsLedAylik(ws,m,L)});
       return;
