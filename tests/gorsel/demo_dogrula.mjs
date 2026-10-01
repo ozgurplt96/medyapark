@@ -17,7 +17,7 @@ const page = await ctx.newPage();
 const hatalar = [], yazma = [];
 page.on('pageerror', e => hatalar.push(e.message));
 page.on('request', r => { const m = r.method(), u = r.url();
-  if (!['GET', 'HEAD', 'OPTIONS'].includes(m) && !/\/auth\/v1\/token/.test(u) && !/\/rest\/v1\/rpc\/(dashboard_stats|media_scope)/.test(u)) yazma.push(`${m} ${u.replace(/\?.*/, '')}`); });
+  if (!['GET', 'HEAD', 'OPTIONS'].includes(m) && !/\/auth\/v1\/token/.test(u) && !/\/rest\/v1\/rpc\/(dashboard_stats|media_scope)/.test(u) && !/\/storage\/v1\/object\/sign\//.test(u)) yazma.push(`${m} ${u.replace(/\?.*/, '')}`); });
 await page.goto(DEMO + '?t=' + Date.now());
 await page.waitForFunction(() => typeof sb !== 'undefined' && typeof go === 'function');
 const api = await page.evaluate(() => SUPABASE_URL);
@@ -49,6 +49,21 @@ const [d] = await Promise.all([page.waitForEvent('download'), page.locator('#rpX
 await d.saveAs(path.join(cikti, 'demo_rapor_tum_mecralar.xlsx'));
 sonuc.excel = await page.evaluate(async () => { const wb = new ExcelJS.Workbook(); await wb.xlsx.load(await ui._rpSon.blob.arrayBuffer());
   return wb.worksheets.map(ws => ({ ad: ws.name, ilk: String(ws.getCell(3, 1).value), aylar: ws.getRow(3).values.slice(4, 7).map(String) })); });
+/* Baskı & Montaj: üretim kalemi akışı, üç durum, detay (salt okunur) */
+await page.evaluate(() => { opFiltreYaz({ donem: 'tum', from: '', to: '', type: '', kapsam: 'tum', q: '' }); go('operasyon'); });
+await page.waitForSelector('.opk-r');
+sonuc.operasyon = await page.evaluate(() => ({ ozet: document.querySelector('.sec-head .sub').innerText, kalem: document.querySelectorAll('.opk-r').length,
+  cokAdimli: [...document.querySelectorAll('.opk-r')].filter(r => r.querySelectorAll('.opk-c').length > 1).length,
+  eskiDurumSozcugu: /Devam ediyor|Bekliyor|Planlandı/.test(document.getElementById('content').innerText) }));
+await page.locator('.opk-c').first().click();
+await page.waitForSelector('#modalBg.open #opdDuzenle');
+sonuc.operasyon.detay = await page.evaluate(() => ({ duzenle: !!document.getElementById('opdDuzenle'), formAlani: document.querySelectorAll('#modal input, #modal select, #modal textarea').length }));
+await page.screenshot({ path: path.join(cikti, 'demo_operasyon.png') });
+await page.locator('#opdDuzenle').click();
+await page.waitForSelector('#modalBg.open #opSt');
+sonuc.operasyon.durumlar = await page.locator('#opSt option').allTextContents();
+sonuc.operasyon.uygulayan = await page.locator('#opSup option').allTextContents();
+await page.evaluate(() => closeModal());
 sonuc.hatalar = hatalar; sonuc.yazmaIstekleri = yazma;
 await tarayici.close();
 fs.writeFileSync(path.join(cikti, 'demo_dogrulama.json'), JSON.stringify(sonuc, null, 1));
