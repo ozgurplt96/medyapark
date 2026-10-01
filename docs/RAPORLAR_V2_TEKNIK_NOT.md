@@ -418,3 +418,82 @@ kayıt seçim kutuları ve form taslağı kapsamı değiştirmez.
   mecra 8/8. S16 ve adres testleri yeni durum modeline uyarlandı.
 - Excel dosyaları indirilen baytlardan (ExcelJS) okunarak doğrulandı: yüzler =
   sonuç, durum başlıkta, taslak dosyaya girmiyor, LED boş ay "Müsait" yazmıyor.
+
+# S19 hazırlık — toplu Excel'de LED, tek tıkla süzgeç, tam ay dönemler, ortak tasarım değişkenleri
+
+Geçiş hazırlığından önceki düzeltme turu (01.10.2026). Migration yok; kayıt
+akışları, hesap kuralları (`mdGunDilim`, `mdSonuc`) ve sayfa şablonları aynı.
+
+## LED: tek model, tek sayfa üreticisi
+
+- Sorun: Mecralar'ın doğrudan Excel'i LED alanını aylık şablonla
+  (`rpXlsLedAylik`) yazarken, Raporlar › Mecra doluluk tablosu bütün LED
+  alanlarını tek düz "LED yayınları" listesine döküyordu.
+- `rpLedAlanModel(M, mecra, alan, kayitlar, aylar, gun, ic, kull)` LED yayın
+  alanının TEK modelidir. `mdXlsModel` (Mecralar) ve `RPD_MECRA.model`
+  (Raporlar) aynı fonksiyonu çağırır; önizleme, PDF ve Excel bu modelden çizilir.
+  Toplu indirme için ayrı bir LED düzeni tutulmaz.
+- Her yayın alanı kendi sayfasıdır (M1 LED, Çukurova LED ayrı). Sayfalar
+  mecra → alan sırasındadır (`rpMecraBolumler`): LED sayfası kendi mecrasının
+  statik sayfalarının yanında durur.
+- Kampanyasız ay boş bırakılır; "Müsait" yazılmaz, kapasite hesaplanmaz.
+- Dış paylaşımda kurum ve iş adı modele girmez; satır etiketi `rpLedDisAd(i)`
+  ("Kampanya 1", …) ile üretilir. 2. satırdaki İç kullanım / Dış paylaşım ve
+  "Hazırlanan" bilgisi modelden okunur.
+- S18'in üç satırlık üst alanı (başlık · kısa dönem/kapsam · sütun başlıkları)
+  korunur.
+
+## Mecralar: süzgeçler ve dönem
+
+- Mecra sekmesi, durum, kurum, iş, ürün ve metin araması TEK TIKLA uygulanır
+  (`mdUygula`). Form yeniden çizilmez: `mdKontrolEsitle` kontrolleri yerinde
+  eşitler, `mdCiz` yalnız gövdeyi yeniler (odak kaybolmaz).
+- Taslak yalnız elle yazılan özel başlangıç/bitiş tarihidir (`ui._mdTaslak`).
+  Ara / Enter ile uygulanır (`mdAraUygula`); başka bir süzgece tıklamak onu
+  uygulamaz, uygulanmış dönem kullanılır. Tarih yazarken ekran çizilmez.
+- Durum etiketleri: Tümü / Opsiyonlu / Yayında / Müsait / Yakında boşalacak.
+  Anlam dönemseldir ve saklanan anahtarlar (`opsiyon|yayin|musait|bosalacak`)
+  değişmedi. Gelecekteki kesin yayın "Planlandı" yazar.
+- Hazır dönemler tam takvim ayıdır ve çapa aya (`merkez`, YYYY-MM-01) göre
+  kurulur (`mdHazirAralik`):
+  3 ay = önceki ay + çapa ay dahil üç ay (varsayılan; dört sütun) ·
+  6 ay = önceki ay + altı ay (yedi sütun) ·
+  Yıl = takvim yılı; çapa Ocak ise önceki Aralık da dahil ·
+  özel dönem = girilen kesin tarihler.
+  Örnek 01.10.2026: 3 ay → 01.09.2026–31.12.2026, 6 ay → 01.09.2026–31.03.2027.
+  Bitiş hep ay sonudur; tek günlük sütun oluşmaz.
+- "Bugüne git" güncel döneme döner (özel dönemdeyse 3 aya). "Geçmiş ayları
+  gizle" hazır ve özel dönemde bulunduğumuz aydan önceki ayları gizler;
+  kapatılınca asıl dönem geri gelir. `MD_SURUM = 19`: eski saklı görünüm yeni
+  varsayılanı etkisiz bırakmaz.
+
+## Mecralar tablosu = Raporlar önizlemesinin düzeni
+
+- Sütunlar No + Yüz (seçim kutusu ve yüz kodu, ör. `P1-A`). Yüz sütununun
+  genişliği çizimden sonra içerikten ölçülür (`mdYuzGenOlc`) ve `--yg` olarak
+  tabloya yazılır; `<col>`, tablo `min-width`i ve yapışkan `left` aynı
+  değişkenleri kullanır. Ölçülen: No 34 px + Yüz 77 px (önce Pano 90 + Yüz 40);
+  Raporlar önizlemesi 33 + 77 px.
+- Tek durumlu ay hücresi durum rengiyle dolu; ay içinde değişen hücre beyaz,
+  dilimler renk işareti + kalın ad + küçük tarih satırıyla (rapor önizlemesiyle
+  aynı). Her dilim tıklanabilir kalır; LED kampanya sütunu 230 px.
+
+## Ortak tasarım değişkenleri (`panel.css :root`)
+
+Taban kurallar şu değişkenlere bağlandı; sayfaya özel yama eklenmedi:
+`--fs-title/--fs-card/--fs-body/--fs-sm/--fs-xs`, `--ctl-h` (36 px; form
+alanı, düğme), `--ctl-h-sm` (32 px; süzgeç, küçük düğme, sekme), `--r-card`,
+`--c-card-line`, `--sh-card`, `--c-row`, `--c-focus`, `--st-yayin-*`,
+`--st-ops-*`, `--st-musait-*`. 760 px altında kontrol yükseklikleri 40/36 px.
+Klavye odağı tek renktir (`--c-focus`); seçim (koyu dolgu + ✓) ve durum
+renkleriyle karışmaz. Mecra durum rozetleri tablo ve raporla aynı tonları
+kullanır (Excel/PDF için aynı değerler `RP_DR` / `MD_RENK` içindedir).
+
+## Doğrulama (01.10.2026)
+
+- `tests/e2e/16_s19_led_sablon_tablo.spec.mjs`: toplu Excel'de LED sayfaları,
+  Mecralar tekil indirmesiyle hücre/dolgu/sütun genişliği eşitliği, dış
+  paylaşımda ad sızmaması, Yüz sütununun gerçek genişliği ve yapışkan konumlar.
+- `tests/e2e/14_…spec.mjs`: tek tıkla süzgeç, tarih taslağı, hazır dönemler.
+- Görsel/ölçüm araçları: `tests/gorsel/s19.mjs`, `envanter.mjs`, `cek.mjs`;
+  demo yayını için salt okunur `demo_dogrula.mjs`.
