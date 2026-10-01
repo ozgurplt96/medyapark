@@ -593,18 +593,19 @@ function rpYuzAyir(name){ const t=String(name||'').trim(); const m=t.match(/^(.*
 function rpMecraKapsam(M,a){
   const siteler=(a.siteler&&a.siteler.length?a.siteler.map(id=>M.mecById[id]):M.mecs).filter(x=>x&&mdKapsamda(x))
     .sort((x,y)=>(x.sort||0)-(y.sort||0)||x.id-y.id);
-  const yuzler=[], led=[]; let pasif=0;
+  const yuzler=[], led=[]; let pasif=0, sira=0;
   siteler.forEach(m=>{
     const alanlar=[...(M.altByMec[m.id]||[])].filter(x=>!mdArsiv(x));
     const yetim=M.orphanByMec[m.id]||[];
     if(yetim.length) alanlar.push({id:'x'+m.id,name:'Diğer pozisyonlar',_sahte:true,mecra_id:m.id});
     alanlar.forEach(al=>{
       if(a.urun&&(al._sahte||String(al.product_id)!==String(a.urun))) return;
-      if(mdEszamanli(al)){ led.push({m,al}); return; }
+      const s=sira++;                                  /* mecra → alan sırası: sayfa sırası budur */
+      if(mdEszamanli(al)){ led.push({m,al,sira:s}); return; }
       (al._sahte?yetim:(M.unitsByAlt[al.id]||[])).forEach(u=>{
         const p=rpYuzAyir(u.name);
         if(u.active===false){ pasif++; return; }
-        yuzler.push({key:'u'+u.id,u,al,m,kod:u.name,pano:p.base,yuz:p.yuz,aile:al._sahte?'Diğer pozisyonlar':mdAile(M,al),
+        yuzler.push({key:'u'+u.id,u,al,m,sira:s,kod:u.name,pano:p.base,yuz:p.yuz,aile:al._sahte?'Diğer pozisyonlar':mdAile(M,al),
           olcu:u.olcu||((M.prods.find(x=>String(x.id)===String(u.product_id||al.product_id))||{}).olcu)||''});
       });
     });
@@ -655,6 +656,37 @@ function rpPanolar(ys,aylar,dahil){
       hucre:aylar.map(ay=>rpDolHucre(y.seg,ay))}));
     const d=yz.some(f=>f.dahil); return {pano,no:d?++no:null,dahil:d,yuzler:yz}; });
 }
+/* ==========================================================
+   LED YAYIN ALANI — TEK AYLIK MODEL (S19)
+   Mecralar'dan doğrudan Excel ile Raporlar (önizleme, PDF, Excel; tekil
+   ve "tüm mecralar") AYNI modeli ve AYNI sayfa üreticisini (rpXlsLedAylik)
+   kullanır: satır = kampanya, aylar sütunda, ayda kampanyanın dönemle
+   kırpılmış günleri. Kampanyasız ay BOŞTUR — "Müsait" yazılmaz, kapasite
+   hesaplanmaz. Her yayın alanı kendi sayfasıdır; alanlar tek listede
+   birleştirilmez.
+   `ic` değilse kurum ve iş adı modele HİÇ girmez (rpLedDisAd).
+   ========================================================== */
+/* Dış paylaşımda kampanya satırının etiketi: sıra numarası (başlangıç
+   tarihine göre). Kurum/iş adından TÜRETİLMEZ. */
+function rpLedDisAd(i){ return `Kampanya ${i+1}`; }
+function rpLedAyMetin(r,ay){ const p=mdLedAyParca(r,ay);
+  return p?(p.tamAy?'Tüm ay':p.s===p.e?rpTrKisa(p.s):`${rpTrKisa(p.s)}–${rpTrKisa(p.e)}`):''; }
+function rpLedAlanModel(M,mc,al,kayitlar,aylar,gun,ic,kull){
+  const kisa=rpMecraKisa(mc.name);
+  const ad=String(al.name).toLocaleLowerCase('tr').startsWith(kisa.toLocaleLowerCase('tr'))?al.name:`${kisa} ${al.name}`;
+  return {key:'led'+al.id,ad:rpSayfaAdi(ad,kull),mecra:mc.name,baslik:`${mc.name} · ${al.name}`,sure:mdSure(al),
+    kayitlar:kayitlar.map((r,i)=>{ const km=mdKayitMetin(r,gun);
+      return {key:'l'+mdKayitKey(r),dahil:true,
+        kurum:ic?(r.customer_name?mdKisaAd(r.customer_name,30):'Kurum belirtilmemiş'):rpLedDisAd(i),
+        is:ic?(r.work_title||(r.record_kind==='legacy'?'eski kayıt':'')):'',
+        durum:km.durum,donem:km.donem,tip:r.commitment==='reserved'?'opsiyon':'yayin',
+        aylar:aylar.map(ay=>rpLedAyMetin(r,ay))}; })};
+}
+/* Rapor bölümleri mecra → alan sırasıyla: statik ürün sayfası ya da LED alanı. */
+function rpMecraBolumler(m){
+  return [...m.sayfalar.map(sf=>({sira:sf.sira,sf})),...m.led.map(L=>({sira:L.sira,L}))].sort((a,b)=>a.sira-b.sira);
+}
+const RP_LED_NOT='Her satır bir kampanyadır; aynı ayda birden çok kampanya yayında olabilir. Boş ay satılabilir boş slot anlamına gelmez; LED kapasitesi hesaplanmaz.';
 RPD_MECRA={
   metinAyar:true,
   amac:'Seçilen dönemde her yüzeyin ay ay durumu: kurum ya da durum ve kesin tarihler. Hesap Mecralar ekranıyla aynıdır.',
@@ -700,7 +732,6 @@ RPD_MECRA={
     const K=rpMecraKapsam(M,a);
     out.aylar=rpDonemAylari(a.bas,a.bit);
     /* Kurum etiketi YALNIZ iç kullanımda kurulur; dış modelde yoktur (rpYuzSegModel). */
-    const kim=r=>{ if(!ic||!r) return null; return rpKimKisa(M,r); };
     const gorunen=new Set();
     let yuzler=K.yuzler.map(y=>{
       const seg=rpYuzSegModel(M,y.u,a.bas,a.bit,ref,ic);
@@ -710,30 +741,32 @@ RPD_MECRA={
     if(a.tamMusait) yuzler=yuzler.filter(y=>y.tam);
     yuzler.forEach(y=>gorunen.add(y.key));
     /* LED — eşzamanlı yayın; statik müsaitliğe ve yüz sayısına katılmaz. */
-    const ledSatir=[];
-    if(!a.tamMusait) K.led.forEach(({m,al})=>{
-      (M.byArea[al.id]||[]).filter(r=>r.commitment!=='cancelled'&&r.block_start<=a.bit&&(r.block_end==null||r.block_end>=a.bas))
-        .sort((x,y)=>String(x.block_start).localeCompare(String(y.block_start)))
-        .forEach(r=>{ const key='l'+mdKayitKey(r); gorunen.add(key);
-          ledSatir.push({key,alan:`${m.name} · ${al.name}`,sure:mdSure(al)||'',tip:r.commitment==='confirmed'?'yayin':'opsiyon',
-            bas:r.block_start,bit:r.block_end,kim:kim(r)||''}); }); });
+    const ledAlan=[];
+    if(!a.tamMusait) K.led.forEach(({m,al,sira})=>{
+      const l=(M.byArea[al.id]||[]).filter(r=>r.commitment!=='cancelled'&&r.block_start<=a.bit&&(r.block_end==null||r.block_end>=a.bas))
+        .sort((x,y)=>String(x.block_start).localeCompare(String(y.block_start))||((x.placement_id||0)-(y.placement_id||0)));
+      if(!l.length) return;
+      l.forEach(r=>gorunen.add('l'+mdKayitKey(r)));
+      ledAlan.push({m,al,sira,l}); });
     out.budanan=rpBuda(T,gorunen);
     /* Lokasyon + ürün ailesi = bir sayfa; pano = A/B çifti. */
     const gm=new Map(), kull=new Set();
-    yuzler.forEach(y=>{ const k=y.m.id+'|'+y.al.id; if(!gm.has(k)) gm.set(k,{m:y.m,al:y.al,aile:y.aile,ys:[]}); gm.get(k).ys.push(y); });
+    yuzler.forEach(y=>{ const k=y.m.id+'|'+y.al.id; if(!gm.has(k)) gm.set(k,{m:y.m,al:y.al,aile:y.aile,sira:y.sira,ys:[]}); gm.get(k).ys.push(y); });
     const dogal=(x,y)=>String(x).localeCompare(String(y),'tr',{numeric:true});
     out.sayfalar=[...gm.values()].map(g=>{
       const panolar=rpPanolar(g.ys,out.aylar,y=>rpDahil(T,y.key));
       const olculer=[...new Set(g.ys.map(y=>y.olcu).filter(Boolean))];
-      return {key:g.m.id+'|'+g.al.id,mecra:g.m.name,aile:g.aile,baslik:`${g.m.name} · ${g.aile}`,
+      return {key:g.m.id+'|'+g.al.id,sira:g.sira,mecra:g.m.name,aile:g.aile,baslik:`${g.m.name} · ${g.aile}`,
         ad:rpSayfaAdi(`${rpMecraKisa(g.m.name)} ${g.aile}`,kull),olcu:olculer.length===1?olculer[0]:'',panolar};
     });
-    out.led=ledSatir.map(l=>({...l,dahil:rpDahil(T,l.key)}));
-    if(out.led.length) out.ledAd=rpSayfaAdi('LED yayınları',kull);
-    const dahilY=yuzler.filter(y=>rpDahil(T,y.key)), dahilL=out.led.filter(l=>l.dahil);
+    /* LED: her yayın alanı kendi aylık sayfası (Mecralar'ın doğrudan Excel'iyle aynı model). */
+    out.led=ledAlan.map(x=>{ const L=rpLedAlanModel(M,x.m,x.al,x.l,out.aylar,ref,ic,kull); L.sira=x.sira;
+      L.kayitlar.forEach(k=>{ k.dahil=rpDahil(T,k.key); }); return L; });
+    const ledSatir=out.led.flatMap(L=>L.kayitlar);
+    const dahilY=yuzler.filter(y=>rpDahil(T,y.key)), dahilL=ledSatir.filter(l=>l.dahil);
     out.dahilYuzSay=dahilY.length; out.dahilLedSay=dahilL.length; out.pasif=K.pasif; out.toplamYuz=K.yuzler.length;
     out.tamMusait=!!a.tamMusait;
-    const lk=[...new Set(dahilY.map(y=>y.m.name).concat(dahilL.map(l=>l.alan.split(' · ')[0])))];
+    const lk=[...new Set(dahilY.map(y=>y.m.name).concat(out.led.filter(L=>L.kayitlar.some(k=>k.dahil)).map(L=>L.mecra)))];
     if(lk.length) out.bilgi.push(['Mecra',lk.join(', ')]);
     if(a.urun) out.bilgi.push(['Ürün',M.pm[a.urun]||'']);
     if(a.tamMusait) out.bilgi.push(['Kapsam','Yalnız dönemin tamamında müsait yüzeyler']);
@@ -749,7 +782,19 @@ RPD_MECRA={
     let h=`<div class="rp3-lej" aria-label="Renk anahtarı">${['yayin','opsiyon','musait','disi'].map(t=>`<span><i style="background:${RP_DR[t].fill}"></i>${RP_DR[t].ad}</span>`).join('')}
       <em>Ay içinde durum değişiyorsa hücre beyaz kalır; her dilim kendi rengi ve tarihiyle alt alta yazılır, üstteki şerit günlere göre bölünür.</em></div>`;
     if(!m.sayfalar.length&&!m.led.length) return h+`<p class="empty">Listelenecek yüzey yok.</p>`;
-    m.sayfalar.forEach(sf=>{ const keys=sf.panolar.flatMap(p=>p.yuzler.map(f=>f.key));
+    rpMecraBolumler(m).forEach(({sf,L})=>{
+      if(L){ const keys=L.kayitlar.map(k=>k.key);
+        h+=`<div class="rp3-sh"><h5 class="rp2-g1">${esc(L.baslik)} <em>LED · eşzamanlı yayın${L.sure?' · kreatif '+esc(L.sure):''}</em> <span class="rp3-sa">Excel sayfası: ${esc(L.ad)}</span></h5>
+          <span class="rp3-tum"><button type="button" class="btn-link" onclick='rpSecTopluKey("mecra",${JSON.stringify(keys)},true)'>tümü</button>
+          <button type="button" class="btn-link" onclick='rpSecTopluKey("mecra",${JSON.stringify(keys)},false)'>hiçbiri</button></span></div>
+          <div class="rp3-kap"><table class="rp3-tab rp3-led"><thead><tr><th scope="col">Kampanya</th><th scope="col">Durum</th><th scope="col">Dönem</th>${m.aylar.map(a=>`<th scope="col">${esc(a.kisa)}</th>`).join('')}</tr></thead><tbody>
+          ${L.kayitlar.map(k=>`<tr class="son${k.dahil?'':' dis'}">
+            <td class="rp3-kmp"><label>${rpCb(T,k.key,k.dahil,k.kurum+' rapora dahil')} <b>${esc(k.kurum)}</b></label>${k.is?`<small>${esc(k.is)}</small>`:''}</td>
+            <td class="rp3-ld" style="color:${RP_DR[k.tip].ink}"><b>${esc(k.durum)}</b></td><td class="rp3-ldn">${esc(k.donem)}</td>
+            ${k.aylar.map(t=>t?`<td class="rp3-lay" style="background:${RP_DR[k.tip].fill};color:${RP_DR[k.tip].ink}"><b>${esc(t)}</b></td>`:'<td class="rp3-lay rp3-lbos"></td>').join('')}</tr>`).join('')}
+          </tbody></table></div><p class="fhint rp3-lnot">${esc(RP_LED_NOT)}</p>`;
+        return; }
+      const keys=sf.panolar.flatMap(p=>p.yuzler.map(f=>f.key));
       h+=`<div class="rp3-sh"><h5 class="rp2-g1">${esc(sf.baslik)}${sf.olcu?` <em>${esc(sf.olcu)}</em>`:''} <span class="rp3-sa">Excel sayfası: ${esc(sf.ad)}</span></h5>
         <span class="rp3-tum"><button type="button" class="btn-link" onclick='rpSecTopluKey("mecra",${JSON.stringify(keys)},true)'>tümü</button>
         <button type="button" class="btn-link" onclick='rpSecTopluKey("mecra",${JSON.stringify(keys)},false)'>hiçbiri</button></span></div>
@@ -760,11 +805,6 @@ RPD_MECRA={
           ${f.hucre.map(hc=>rpTekDurum(hc)?`<td style="background:${RP_DR[hc.dilim[0].tip].fill}">${hc.parca.map(pc=>`<div class="rp3-p" style="color:${RP_DR[pc.tip].ink}"><b>${esc(pc.ust)}</b>${pc.alt?`<small>${esc(pc.alt)}</small>`:''}</div>`).join('')}</td>`
             :`<td class="rp3-karma" style="background:${rpCssSerit(hc)}">${hc.parca.map(pc=>`<div class="rp3-p rp3-dp" style="color:${RP_DR[pc.tip].ink}"><i style="background:${RP_DR[pc.tip].bar}"></i><span>${rpDilimSatir(pc).map(x=>x.b?`<b>${esc(x.t)}</b>`:`<small>${esc(x.t)}</small>`).join('')}</span></div>`).join('')}</td>`).join('')}
         </tr>`).join('')).join('')}</tbody></table></div>`; });
-    if(m.led.length){ h+=`<div class="rp3-sh"><h5 class="rp2-g1">LED yayınları <span class="rp3-sa">Excel sayfası: ${esc(m.ledAd)}</span></h5></div>
-      <p class="fhint">LED eşzamanlı yayındır: kampanya sayısı boş kapasite ya da doluluk göstermez; statik müsaitliğe katılmaz.</p>
-      <div class="rp2-rows">${m.led.map(l=>`<label class="rp2-row ${l.dahil?'':'dis'}">${rpCb(T,l.key,l.dahil,'LED kampanyası rapora dahil')}
-        <b>${esc(l.alan)}</b><span class="rp2-t ${l.tip}">${l.tip==='yayin'?'Yayın':'Opsiyon'}</span> <span>${esc(rpAralik(l.bas,l.bit))}</span>
-        <span class="rp2-det">${esc(l.kim)}</span></label>`).join('')}</div>`; }
     return h;
   },
   pdf(m){
@@ -772,14 +812,25 @@ RPD_MECRA={
     ic.push({text:['yayin','opsiyon','musait','disi'].flatMap(t=>[{text:'  '+RP_DR[t].ad+'  ',background:RP_DR[t].fill,color:RP_DR[t].ink,bold:true},'   '])
       .concat([{text:'Ay içinde durum değişiyorsa hücre beyaz kalır; dilimler alt alta, üstteki şerit günlere göre.',color:RPC.ink3}]),fontSize:8.5,margin:[0,0,0,8]});
     const say=m.sayfalar.reduce((t,s)=>t+s.panolar.reduce((x,p)=>x+p.yuzler.filter(f=>f.dahil).length,0),0);
-    if(!say&&!m.led.some(l=>l.dahil)) ic.push({text:'Listelenecek yüzey yok.',style:'bos'});
+    if(!say&&!m.led.some(L=>L.kayitlar.some(k=>k.dahil))) ic.push({text:'Listelenecek yüzey yok.',style:'bos'});
     const W=770, noW=20, yuzW=46, LH=10.2, FS=8.3;
     const blok=[]; for(let i=0;i<m.aylar.length;i+=6) blok.push(m.aylar.slice(i,i+6).map((a,k)=>({a,i:i+k})));
     /* Yüz hücreleri A ve B için tüm ay sütunlarında AYNI yükseklikte tutulur
        (iç tablo `heights`), böylece bir pano tek tablo satırında kalır ve
        A/B çifti sayfa sonunda bölünmez. Yükseklik metin uzunluğundan tahmin edilir. */
     const satirSay=(t,kap)=>t?Math.max(1,Math.ceil(String(t).length/kap)):0;
-    m.sayfalar.forEach(sf=>{ const panolar=sf.panolar.map(p=>({...p,yuzler:p.yuzler.filter(f=>f.dahil)})).filter(p=>p.yuzler.length);
+    /* LED alanı: Excel sayfasıyla aynı okunuş — satır = kampanya, aylar sütunda (6 ay / tablo). */
+    const ledPdf=L=>{ const kay=L.kayitlar.filter(k=>k.dahil); if(!kay.length) return;
+      blok.forEach((ay,bi)=>{ const colW=Math.floor((W-150-62-84-8*(3+ay.length))/ay.length);
+        ic.push(rpTablo([{b:'Kampanya',g:150},{b:'Durum',g:62},{b:'Dönem',g:84},...ay.map(({a})=>({b:a.kisa,g:colW}))],
+          kay.map(k=>[{stack:[{text:k.kurum,bold:true},...(k.is?[{text:k.is,color:RPC.ink2,fontSize:7.6}]:[])]},
+            {text:k.durum,bold:true,color:RP_DR[k.tip].ink},{text:k.donem,fontSize:7.8},
+            ...ay.map(({i})=>k.aylar[i]?{text:k.aylar[i],bold:true,alignment:'center',fontSize:7.8,color:RP_DR[k.tip].ink,fillColor:RP_DR[k.tip].fill}:{text:''})]),
+          {fs:8.3,ust:[{text:L.baslik+' — LED yayınları'+(bi?'  ·  devam':''),stil:'h2'},
+            {text:(L.sure?'Kreatif: '+L.sure+'  ·  ':'')+RP_LED_NOT,stil:'not'}]})); }); };
+    rpMecraBolumler(m).forEach(({sf,L})=>{
+      if(L){ ledPdf(L); return; }
+      const panolar=sf.panolar.map(p=>({...p,yuzler:p.yuzler.filter(f=>f.dahil)})).filter(p=>p.yuzler.length);
       if(!panolar.length) return;
       blok.forEach((ay,bi)=>{
         const colW=Math.floor((W-noW-yuzW)/ay.length), kap=Math.floor((colW-8)/(FS*0.58));
@@ -812,21 +863,19 @@ RPD_MECRA={
             hLineColor:()=>'#8e8e95',vLineColor:()=>'#b8b8bf',fillColor:i=>i===2?'#FFE699':null,
             paddingLeft:()=>0,paddingRight:()=>0,paddingTop:()=>0,paddingBottom:()=>0},margin:[0,0,0,10]});
       }); });
-    const led=m.led.filter(l=>l.dahil);
-    if(led.length) ic.push(rpTablo([{b:'Yayın alanı',g:'*'},{b:'Durum',g:60},{b:'Dönem',g:150},...(m.ic?[{b:'Kurum',g:160}]:[]),{b:'Kreatif süre',g:60}],
-      led.map(l=>[l.alan,{text:l.tip==='yayin'?'Yayın':'Opsiyon',color:RP_DR[l.tip].ink,bold:true},rpAralik(l.bas,l.bit),...(m.ic?[l.kim||'—']:[]),l.sure||'—']),
-      {ust:[{text:'LED yayınları',stil:'h2'},{text:'LED eşzamanlı yayındır; kampanya sayısı boş kapasite göstermez ve statik müsaitliğe katılmaz.',stil:'not'}]}));
     return {icerik:ic,o:{yon:'landscape'}};
   },
   xlsx(m){
+    /* S19: her LED yayın alanı kendi AYLIK sayfası — Mecralar'ın doğrudan
+       Excel'iyle aynı üretici (rpXlsLedAylik). Toplu indirme için ayrı düz
+       LED listesi TUTULMAZ. Sayfalar mecra → alan sırasındadır. */
     const S=[];
-    m.sayfalar.forEach(sf=>{ const panolar=sf.panolar.map(p=>({...p,yuzler:p.yuzler.filter(f=>f.dahil)})).filter(p=>p.yuzler.length);
+    rpMecraBolumler(m).forEach(({sf,L})=>{
+      if(L){ const kay=L.kayitlar.filter(k=>k.dahil);
+        if(kay.length) S.push({ad:L.ad,yon:'landscape',ozel:ws=>rpXlsLedAylik(ws,m,{...L,kayitlar:kay})});
+        return; }
+      const panolar=sf.panolar.map(p=>({...p,yuzler:p.yuzler.filter(f=>f.dahil)})).filter(p=>p.yuzler.length);
       if(panolar.length) S.push({ad:sf.ad,yon:'landscape',ozel:ws=>rpXlsDoluluk(ws,m,sf,panolar)}); });
-    const led=m.led.filter(l=>l.dahil);
-    if(led.length) S.push({ad:m.ledAd,yon:'landscape',kol:[{b:'Yayın alanı',w:36,sar:true},{b:'Durum',w:10},{b:'Başlangıç',w:12,tip:'tarih'},{b:'Bitiş',w:12,tip:'tarih'},
-        ...(m.ic?[{b:'Kurum',w:30,sar:true}]:[]),{b:'Kreatif süre',w:11}],
-      satir:led.map(l=>[l.alan,l.tip==='yayin'?'Yayın':'Opsiyon',l.bas,l.bit,...(m.ic?[l.kim]:[]),l.sure]),
-      not:'LED eşzamanlı yayındır; kampanya sayısı boş kapasite göstermez ve statik müsaitliğe katılmaz. Bitiş boşsa bitiş belirsizdir.'});
     return S;
   },
   pdfVar:true
@@ -923,7 +972,7 @@ function rpXlsLedAylik(ws,m,L){
   [26,12,19,...ay.map(()=>GEN)].forEach((w,i)=>{ ws.getColumn(i+1).width=w; });
   const c1=ws.getCell(1,1); c1.value=`${L.baslik} — LED yayınları`; c1.font={name:F,bold:true,size:14};
   const c2=ws.getCell(2,1); c2.value=[`Dönem: ${rpTr(m.bas)} – ${rpTr(m.bit)}`,m.kapsam||'',L.sure?`Kreatif: ${L.sure}`:'',
-    'İç kullanım',`Hazırlanma: ${rpAnTr(m.an)}`].filter(Boolean).join('   ·   ');
+    m.ic?'İç kullanım':'Dış paylaşım',m.alici?`Hazırlanan: ${m.alici}`:'',`Hazırlanma: ${rpAnTr(m.an)}`].filter(Boolean).join('   ·   ');
   c2.font={name:F,size:9,color:{argb:'FF55555B'}};
   const hr=ws.getRow(H); hr.height=30;
   ['Kampanya','Durum','Dönem',...ay.map(a=>a.ad)].forEach((t,i)=>{ const c=hr.getCell(i+1); c.value=t;
@@ -944,7 +993,7 @@ function rpXlsLedAylik(ws,m,L){
     const sat=(t,n)=>t?Math.ceil(String(t).length/n):0;
     row.height=Math.max(22,sat(k.kurum,24)*13+sat(k.is,30)*11+6,sat(k.durum,11)*12+6); r++;
   });
-  const sonSatir=rpXlsAltNot(ws,r,son,[{t:'Her satır bir kampanyadır; aynı ayda birden çok kampanya yayında olabilir. Boş ay satılabilir boş slot anlamına gelmez; LED kapasitesi hesaplanmaz.'},
+  const sonSatir=rpXlsAltNot(ws,r,son,[{t:RP_LED_NOT},
     ...(m.aciklama?[{t:m.aciklama}]:[])]);
   ws.views=[{state:'frozen',xSplit:ilk,ySplit:H,topLeftCell:ws.getCell(H+1,ilk+1).address,activeCell:ws.getCell(H+1,ilk+1).address}];
   ws.pageSetup.printArea=`A1:${ws.getColumn(son).letter}${sonSatir}`;

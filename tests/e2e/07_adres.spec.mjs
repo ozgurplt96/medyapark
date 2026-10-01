@@ -106,7 +106,7 @@ test('mecra lokasyonu ve dönemi adreste; bağlantı aynı pencereyi açar', asy
   await page.reload();
   await page.waitForFunction(() => document.querySelector('#mdGovde .md-sonuc'));
   st = await page.evaluate(() => mdDurum());
-  expect([st.bas, st.bit, st.durum, st.hazir]).toEqual(['2031-02-10', '2031-05-10', 'musait', '3']);   // adres varsayılanla ezilmez
+  expect([st.bas, st.bit, st.durum, st.hazir]).toEqual(['2031-02-10', '2031-05-10', 'musait', '']);   // adres varsayılanla ezilmez; özel dönem
   await expect(page.locator('.md-sonuc')).toContainText('10.02.2031 – 10.05.2031');
 });
 
