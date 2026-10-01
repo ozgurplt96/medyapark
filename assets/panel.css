@@ -2808,7 +2808,7 @@ form.md-ara.bekliyor .md-ara-go{box-shadow:0 0 0 3px rgba(241,201,107,.55);}
 /* ==========================================================
    S19 — Baskı & Montaj: üretim kalemi akışı, kayıt detayı, sade form
    Durum üç değerlidir (Yapılacak / Tamamlandı / İptal); "Gecikti" türetilir.
-   Renk daima metin ve işaretle birliktedir (✓ ○ ! ✕). Sıradaki işlem koyu
+   Renk daima metin ve işaretle birliktedir (✓ ○ ! ✕). En yakın planlı işlem koyu
    sol şeritle, detayda açık olan kayıt koyu çerçeveyle gösterilir — durum
    renkleri seçim için kullanılmaz.
    ========================================================== */
@@ -2844,6 +2844,9 @@ form.md-ara.bekliyor .md-ara-go{box-shadow:0 0 0 3px rgba(241,201,107,.55);}
 .opk-c.gec{border-color:#f1bcbc;background:#fff7f7;} .opk-c.gec .opk-ct i{background:var(--c-red-t);color:#fff;}
 .opk-c.gec .opk-cd{color:var(--c-red-t);font-weight:600;}
 .opk-c.sira{box-shadow:inset 3px 0 0 var(--c-ink);}
+/* Tarihsiz yapılacak adım gizlenmez; kesik çerçeve + metinle ayrışır. */
+.opk-c.tarihsiz{border-style:dashed;border-color:var(--c-ink3);}
+.opk-ts{color:var(--c-amber-t);font-weight:600;}
 .opk-c.simdi{outline:2px solid var(--c-ink);outline-offset:1px;}
 .opk-sr{display:flex;flex-direction:column;gap:2px;font-size:var(--fs-sm);min-width:0;}
 .opk-sl{display:none;font:650 11px/1.6 var(--f);letter-spacing:.05em;text-transform:uppercase;color:var(--c-ink3);}

@@ -184,7 +184,23 @@ test.describe('Üretim kalemi akışı', () => {
     await page.locator(`.opk-c[data-op="${sokum}"]`).click();
     await expect(page.locator('#modalBg.open .opk-c')).toHaveCount(3);
     await expect(page.locator('#modalBg.open .opk-c.simdi')).toHaveAttribute('data-op', String(sokum));
-    await expect(page.locator('#modalBg.open .opd-sira')).toContainText('Sıradaki işlem: Montaj · 06.05.2031');
+    await expect(page.locator('#modalBg.open .opd-sira')).toContainText('En yakın planlı işlem: Montaj · 06.05.2031');
+    await page.evaluate(() => closeModal());
+    await expect(page.locator('#content')).not.toContainText(/Sıradaki/);
+    await expect(page.locator('.opk-h')).toContainText('En yakın planlı işlem');
+    /* Tarihsiz yapılacak kayıt gizlenmez: en yakın planlı işlem tarihli olandır, tarihsiz ayrıca yazılır. */
+    sql(`update work_operations set planned_date=null where id=${sokum}`);
+    await listeAc(page);
+    const [K2] = await satirlar(page, job);
+    expect(K2.adim.map(a => a.id)).toEqual([baski, montaj, sokum]);            // tarihsiz adım akışta duruyor
+    expect(K2.adim[2].sinif).toMatch(/tarihsiz/); expect(K2.adim[2].metin).toContain('Yapılacak · tarihsiz');
+    expect(K2.adim[1].sinif).toMatch(/sira/);
+    expect(K2.sira).toMatch(/Montaj 06\.05\.2031 S13T Saha Uygulayıcısı.*Tarihsiz yapılacak: Söküm/);
+    sql(`update work_operations set planned_date=null where id=${montaj}`);
+    await listeAc(page);
+    const [K3] = await satirlar(page, job);
+    expect(K3.sira).toMatch(/Planlı tarih yok.*Tarihsiz yapılacak: Montaj, Söküm/);
+    sql(`update work_operations set planned_date='2031-05-06' where id=${montaj}; update work_operations set planned_date='2031-06-30' where id=${sokum}`);
     /* Takip raporu aynı kalemi baskı + montajı yan yana verir; uygulayan kişi adıyla. */
     const rap = await page.evaluate(async j => { await rpAc('baski', { is: j, donem: 'tum' }); return null; }, job);
     await page.waitForFunction(() => ui._rpTur === 'baski' && ui._rpModel && !rpDurum().yukleniyor);

@@ -5982,9 +5982,14 @@ const OP_TUR_SIRA={baski:0,montaj:1,sokum:2,diger:3};
 const _opTarihSira=o=>String(o.planned_date||'9999-12-31');
 function opAkisSirala(ops){ return [...ops].sort((a,b)=>(OP_TUR_SIRA[a.operation_type]-OP_TUR_SIRA[b.operation_type])
   ||_opTarihSira(a).localeCompare(_opTarihSira(b))||a.id-b.id); }
-/* Sıradaki işlem: yapılacaklar içinde planlanan tarihi en erken olan. */
-function opSiradaki(ops){ return ops.filter(o=>opDurumKod(o.status)==='planned')
+/* EN YAKIN PLANLI İŞLEM: yapılacaklar içinde planlanan TARİHİ OLAN en erken
+   kayıt. "Sıradaki" denmez — zincir sırası iddia edilmez, yalnız takvim.
+   Tarihi girilmemiş yapılacak kayıtlar bu seçime girmez ama gizlenmez:
+   akışta "tarihsiz" adımı olarak durur ve ayrıca yazılır (opTarihsizler). */
+function opSiradaki(ops){ return ops.filter(o=>opDurumKod(o.status)==='planned'&&o.planned_date)
   .sort((a,b)=>_opTarihSira(a).localeCompare(_opTarihSira(b))||(OP_TUR_SIRA[a.operation_type]-OP_TUR_SIRA[b.operation_type])||a.id-b.id)[0]||null; }
+const opTarihsizler=ops=>ops.filter(o=>opDurumKod(o.status)==='planned'&&!o.planned_date);
+const opTarihsizMetin=ops=>{ const t=opTarihsizler(ops); return t.length?`Tarihsiz yapılacak: ${t.map(o=>opTypeLbl(o.operation_type)).join(', ')}`:''; };
 /* `list`: süzgeçten geçen işlemler · `tum`: aynı işlerin bütün işlemleri (kardeşler dahil). */
 function opKalemGrupla(list,tum){
   const byK={}; (tum||[]).forEach(o=>{ if(o.kalem_key) (byK[o.kalem_key]=byK[o.kalem_key]||[]).push(o); });
@@ -6015,21 +6020,25 @@ function opAkisHtml(ops,o2){
     const hangi=turSay[o.operation_type]>1?orgKisa(opYerAd(o)||o.description||'',20):'';
     const ad=opTypeLbl(o.operation_type)+(o.reprint?' · yeniden':'')+(hangi?' · '+hangi:'');
     const metin=opAdimMetin(o,bugun);
-    return `<li><button type="button" class="opk-c ${k}${g?' gec':''}${sira&&sira.id===o.id?' sira':''}${o2.simdi===o.id?' simdi':''}" data-op="${o.id}"
-        onclick="opAc(${o.id})" aria-label="${esc(`${ad} — ${metin}${uyg?' — uygulayan '+uyg:''}${sira&&sira.id===o.id?' — sıradaki işlem':''}. Ayrıntıyı aç`)}">
+    const tarihsiz=k==='planned'&&!o.planned_date;
+    return `<li><button type="button" class="opk-c ${k}${g?' gec':''}${tarihsiz?' tarihsiz':''}${sira&&sira.id===o.id?' sira':''}${o2.simdi===o.id?' simdi':''}" data-op="${o.id}"
+        onclick="opAc(${o.id})" aria-label="${esc(`${ad} — ${metin}${uyg?' — uygulayan '+uyg:''}${sira&&sira.id===o.id?' — en yakın planlı işlem':''}. Ayrıntıyı aç`)}">
       <span class="opk-ct"><i aria-hidden="true">${k==='done'?'✓':k==='cancelled'?'✕':g?'!':'○'}</i>${esc(ad)}</span>
       <span class="opk-cd">${esc(metin)}</span>
       ${uyg?`<span class="opk-cu">${esc(uyg)}</span>`:''}</button></li>`; }).join('')}</ol>`;
 }
 function opSiradakiHtml(ops){
   const s=opSiradaki(ops), bugun=_cIso(new Date());
+  /* Tarihsiz yapılacak kayıt her durumda yazılır. */
+  const ts=opTarihsizMetin(ops), tsHtml=ts?`<span class="opk-ts">${esc(ts)}</span>`:'';
   if(!s){ const a=ops.filter(o=>opDurumKod(o.status)!=='cancelled');
-    return `<span class="opk-st">${a.length?'Hepsi tamamlandı':'İptal'}</span>`; }
+    return ts?`<span class="opk-st">Planlı tarih yok</span>${tsHtml}`
+      :`<span class="opk-st">${a.length?'Hepsi tamamlandı':'İptal'}</span>`; }
   const g=opGecGun(s,bugun), uyg=opUygAd(s,30);
   return `<b>${esc(opTypeLbl(s.operation_type))}</b>
-    <span class="mono">${s.planned_date?esc(trTarih(s.planned_date)):'tarihsiz'}</span>
+    <span class="mono">${esc(trTarih(s.planned_date))}</span>
     <span class="opk-su">${uyg?esc(uyg):'<em>uygulayan belirlenmedi</em>'}</span>
-    ${g?`<span class="op-st gec">Gecikti · ${g} gün</span>`:''}`;
+    ${g?`<span class="op-st gec">Gecikti · ${g} gün</span>`:''}${tsHtml}`;
 }
 
 async function operasyon(c){
@@ -6081,7 +6090,7 @@ async function operasyon(c){
         <span class="opk-ad">${esc(opKalemAd(K.ops))}</span>
       </div>
       <div class="opk-ak">${opAkisHtml(K.ops)}</div>
-      <div class="opk-sr"><span class="opk-sl">Sıradaki</span>${opSiradakiHtml(K.ops)}</div>
+      <div class="opk-sr"><span class="opk-sl">En yakın planlı işlem</span>${opSiradakiHtml(K.ops)}</div>
     </div>`; };
 
   c.innerHTML=`<div class="sec-head">
@@ -6130,7 +6139,7 @@ async function operasyon(c){
     ${opFiltreBanner(f,from,to,list.length)}
 
     ${kalemler.length?`<div class="sec-card opk" role="list" aria-label="Üretim kalemleri">
-      <div class="opk-h" aria-hidden="true"><span>İş · kalem</span><span>Akış — tamamlanan ve yapılacak işlemler</span><span>Sıradaki işlem</span></div>
+      <div class="opk-h" aria-hidden="true"><span>İş · kalem</span><span>Akış — tamamlanan ve yapılacak işlemler</span><span>En yakın planlı işlem</span></div>
       ${kalemler.map(satir).join('')}</div>`
     :'<div class="sec-card"><p class="empty">Bu dönemde planlanmış baskı/montaj yok.</p></div>'}`;
 }
@@ -6264,7 +6273,8 @@ async function opAc(id){
     </dl>
     <h4 class="opd-b">Üretim kalemi akışı</h4>
     ${kalem.length>1?`${opAkisHtml(kalem,{simdi:o.id})}
-        <p class="fhint opd-sira">${sira?`Sıradaki işlem: <b>${esc(opTypeLbl(sira.operation_type))}</b> · ${sira.planned_date?esc(trTarih(sira.planned_date)):'tarihsiz'} · ${esc(opUygAd(sira,40)||'uygulayan belirlenmedi')}`:'Bu kalemin bütün işlemleri tamamlandı ya da iptal edildi.'}</p>`
+        <p class="fhint opd-sira">${sira?`En yakın planlı işlem: <b>${esc(opTypeLbl(sira.operation_type))}</b> · ${esc(trTarih(sira.planned_date))} · ${esc(opUygAd(sira,40)||'uygulayan belirlenmedi')}.`
+          :opTarihsizler(kalem).length?'Planlı tarihi olan yapılacak işlem yok.':'Bu kalemin bütün işlemleri tamamlandı ya da iptal edildi.'}${opTarihsizMetin(kalem)?` <b>${esc(opTarihsizMetin(kalem))}.</b>`:''}</p>`
       :'<p class="fhint">Bu kayıt tek başına bir kalemdir; bağlantılı montaj ya da söküm aşağıdan eklenebilir. Bağ zorunlu değildir.</p>'}
     <h4 class="opd-b">Fotoğraf ve belgeler <span class="chip">${belgeler.length}</span></h4>
     ${belgeler.length?`<div class="opd-bl">${belgeler.map(d=>`<div class="bl-row" data-doc="${d.id}">
