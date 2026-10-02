@@ -23,12 +23,16 @@
 
 .EXAMPLE
     .\scripts\prova-env.ps1 start     # boş prova yığınını kur ve başlat
+    .\scripts\prova-env.ps1 start -Temiz   # TEMİZ KURULUM provası: şema kurulu, veri yok (seed çalışmaz)
     .\scripts\prova-env.ps1 sync      # yalnız uygulama dosyalarını tazele
     .\scripts\prova-env.ps1 stop      # durdur ve SİL (volume dahil)
     .\scripts\prova-env.ps1 status
 #>
 [CmdletBinding()]
-param([ValidateSet('start','stop','status','sync')][string]$Action='start')
+param([ValidateSet('start','stop','status','sync')][string]$Action='start',
+      # S20 — temiz canlı kurulum provası: bütün migration'lar uygulanır, HİÇBİR seed çalışmaz.
+      # Kurulum verisi (mecra/ürün/ayar tanımları) ayrıca yüklenir; operasyon tabloları boş kalır.
+      [switch]$Temiz)
 
 $ErrorActionPreference = 'Stop'
 $repo  = Split-Path -Parent $PSScriptRoot
@@ -81,7 +85,9 @@ foreach ($f in $files) {
 }
 # Prova DB'si BOŞ başlar: geliştirme migration'ları ve seed'ler kopyadan çıkarılır.
 # (İleri paket, canlı kopyası yüklendikten SONRA dosya dosya uygulanır.)
-foreach ($k in 'supabase\migrations','supabase\seeds') {
+# -Temiz: migration'lar kalır (şema kurulur), yalnız seed'ler çıkarılır.
+$sil = if ($Temiz) { @('supabase\seeds') } else { @('supabase\migrations','supabase\seeds') }
+foreach ($k in $sil) {
     $p = Join-Path $app $k
     if (Test-Path $p) { Get-ChildItem $p -File | Remove-Item -Force }
 }
@@ -126,8 +132,12 @@ if (-not $ok) { $out | Select-Object -Last 15 | Write-Host; throw 'Prova yığı
 Step 'Prova işareti'
 docker exec $db psql -U postgres -d postgres -v ON_ERROR_STOP=1 -qc "comment on database postgres is 'medyapark-prova-ortami'" | Out-Null
 $n = docker exec $db psql -U postgres -d postgres -tAc "select count(*) from information_schema.tables where table_schema='public'"
-if ("$n".Trim() -ne '0') { throw "Prova DB'si boş başlamadı (public tablo: $n)." }
+if ($Temiz) {
+    $v = docker exec $db psql -U postgres -d postgres -tAc "select (select count(*) from customers)+(select count(*) from jobs)+(select count(*) from mecralar)+(select count(*) from team)"
+    if ("$v".Trim() -ne '0') { throw "Temiz kurulum boş başlamadı (kayıt: $v)." }
+} elseif ("$n".Trim() -ne '0') { throw "Prova DB'si boş başlamadı (public tablo: $n)." }
 
 Start-Static
 Write-Host ''
-Write-Host "Prova ortamı hazır (BOŞ DB): http://localhost:$port/admin  ·  API http://127.0.0.1:58321" -ForegroundColor Green
+$durum = if ($Temiz) { 'TEMİZ KURULUM: şema var, veri yok' } else { 'BOŞ DB' }
+Write-Host "Prova ortamı hazır ($durum): http://localhost:$port/admin  ·  API http://127.0.0.1:58321" -ForegroundColor Green

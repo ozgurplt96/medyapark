@@ -74,10 +74,17 @@ begin
 
   ---------------------------------------------------------------- 5
   -- Kapsam SİLME DEĞİLDİR: kapsam dışı lokasyonların envanteri durur.
+  -- S20: temiz kurulumda kapsam dışı lokasyon HİÇ yoktur (yalnız kararlaştırılmış
+  -- kapsam kurulur); korunacak bir şey olmadığı için denetim uygulanmaz.
+  select count(*) into v2 from public.mecralar where not operational;
   select count(*) into v from public.units u
     join public.mecralar m on m.id = u.mecra_id where not m.operational;
-  if v = 0 then raise exception 'DENETİM 5 DÜŞTÜ: kapsam dışı envanter kaybolmuş'; end if;
-  raise notice 'DENETİM 5 ✓ kapsam dışı korunan yüz = %', v;
+  if v2 = 0 then
+    raise notice 'DENETİM 5 ✓ kapsam dışı lokasyon yok (temiz kurulum)';
+  else
+    if v = 0 then raise exception 'DENETİM 5 DÜŞTÜ: kapsam dışı envanter kaybolmuş'; end if;
+    raise notice 'DENETİM 5 ✓ kapsam dışı korunan yüz = %', v;
+  end if;
 
   ---------------------------------------------------------------- 6
   -- Public projeksiyon SÖZLEŞMESİ: müşteri kimliği ve opsiyon süresi

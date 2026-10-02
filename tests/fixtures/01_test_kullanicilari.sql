@@ -52,6 +52,16 @@ begin
     insert into public.customers (firma) values ('S13 Regresyon Kurumu');
   end if;
 
+  -- S20: paket örnek veriye (seed) bağımlı kalmasın — temiz kurulumda da (kurum/iş yokken) koşabilsin.
+  -- İkinci bir kurum ("başka kurumun kaydı" senaryoları) ve kalıcı bir iş (okuma/gezinme senaryoları).
+  if not exists (select 1 from public.customers where firma = 'S13 İkinci Kurum') then
+    insert into public.customers (firma) values ('S13 İkinci Kurum');
+  end if;
+  if not exists (select 1 from public.jobs where title = 'S13 Sabit İş') then
+    insert into public.jobs (title, status, customer_id)
+    select 'S13 Sabit İş', 'temas_takip', id from public.customers where firma = 'S13 Regresyon Kurumu';
+  end if;
+
   -- Kişisel ajanda: yalnız sahibi görmeli.
   if not exists (select 1 from public.personal_events where title = 'S13 özel randevu') then
     insert into public.personal_events (team_id, title, event_date, event_time, note)

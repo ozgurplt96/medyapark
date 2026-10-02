@@ -1,5 +1,8 @@
 # Geçiş provası — araçlar ve yöntem
 
+> **2 Ekim 2026 — geçersiz kılındı.** Devralınan sistemin verisi taşınmayacak; uygulama temiz bir canlı
+> backend ile açılıyor. Güncel belge: `S20_TEMIZ_CANLI_KURULUM.md`. Bu belge yalnız yöntem kaydı olarak durur.
+
 1 Ekim 2026. Canlıya geçişten önce, **canlı şemanın kopyasına** ileri migration paketini uygulayıp
 sonucu denetlemek için kullanılan araçlar. Bu belge yalnız yöntemi anlatır; canlı veriye ilişkin
 sayılar, eşleştirme listeleri ve kararlar Git dışındaki geçiş notundadır.

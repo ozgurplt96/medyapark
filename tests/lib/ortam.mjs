@@ -97,6 +97,7 @@ export function temizle() {
     delete from contact_affiliations where contact_id in (select id from contacts where name like 'S13T %');
     delete from contacts where name like 'S13T %';
     delete from customers where firma like 'S13T %';
+    delete from team where name like 'S13T %';
     delete from suppliers where firma like 'S13T%';
     delete from products where name like 'S13T%';
     delete from pages where slug like 's13t%';

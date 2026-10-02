@@ -7,6 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../assets/config.js?v=156"></script>
 <style>
 :root{
   --ink:#13233b; --ink-soft:#3d4c63; --muted:#6d7a8c; --line:#e6e9ee;
@@ -508,11 +509,12 @@ td.net{color:var(--green);font-weight:800}
 
 <script>
 /* =========================================================
-   SUPABASE BAĞLANTISI (medyapark projesi)
+   SUPABASE BAĞLANTISI
+   S20: bu sayfa eskiden adres ne olursa olsun devralınan Supabase projesine
+   sabit bağlıydı. Artık uygulamanın geri kalanıyla AYNI ortamı kullanır
+   (assets/config.js: yerel / demo / canlı; tanımsız adreste açılmaz).
    ========================================================= */
-const SB_URL="https://wubljodinspijiqzywav.supabase.co";
-const SB_KEY="sb_publishable_36AtxToYL_3yZGyhE69zXw_T-xYOQNu";
-const supa=window.supabase.createClient(SB_URL,SB_KEY);
+const supa=sb;
 const BUCKET="media", FOLDER="tuyap";
 
 /* =========================================================
