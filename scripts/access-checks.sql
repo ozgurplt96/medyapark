@@ -75,7 +75,12 @@ begin
   -- approve_quote anonim çağrılamaz (S13 B03).
   if has_function_privilege('anon', 'public.approve_quote(bigint)', 'execute') then
     raise exception 'DENETİM 5 DÜŞTÜ: anon approve_quote çalıştırabiliyor'; end if;
-  raise notice 'DENETİM 5 ✓ approve_quote anonim çağrılamaz';
+  -- PS21: ekip kaydını giriş hesabına bağlama yalnız oturum açmış çağıranda (içeride is_admin() ister).
+  if to_regprocedure('public.ekip_hesap_bagla(bigint)') is null then
+    raise exception 'DENETİM 5 DÜŞTÜ: ekip_hesap_bagla yok'; end if;
+  if has_function_privilege('anon', 'public.ekip_hesap_bagla(bigint)', 'execute') then
+    raise exception 'DENETİM 5 DÜŞTÜ: anon ekip_hesap_bagla çalıştırabiliyor'; end if;
+  raise notice 'DENETİM 5 ✓ approve_quote ve ekip_hesap_bagla anonim çağrılamaz';
 
   ---------------------------------------------------------------- 6
   -- Kuruma bağlı her kişinin en az bir bağlantısı var (S13 B04): aksi

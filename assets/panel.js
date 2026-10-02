@@ -465,7 +465,7 @@ async function ekGeriAl(kid,mesaj){
 function islemAnahtari(yer){ const m=(ui._islem=ui._islem||{}); return m[yer]||(m[yer]=crypto.randomUUID()); }
 function islemYeni(yer){ if(ui._islem) delete ui._islem[yer]; }
 function belirsizMi(e){ return !(e&&e.code)&&/Failed to fetch|NetworkError|network|Load failed|fetch failed/i.test(String((e&&e.message)||e||'')); }
-const _BELIRSIZ='mp_belirsiz';
+const _BELIRSIZ=MP_DEPO+'belirsiz';
 function belirsizOku(){ try{ const l=JSON.parse(sessionStorage.getItem(_BELIRSIZ)||'[]');
   return Array.isArray(l)?l.filter(x=>x&&x.anahtar&&Date.now()-x.at<864e5):[]; }catch(e){ return []; } }
 function belirsizYaz(l){ try{ sessionStorage.setItem(_BELIRSIZ,JSON.stringify(l.slice(-10))); }catch(e){} }
@@ -1842,12 +1842,12 @@ const NAV=NAVG.flatMap(g=>g[2].map(n=>[n[0],n[1],n[2],'']));
 function navGrupOf(sec){ const g=NAVG.find(g=>g[2].some(n=>n[0]===sec)); return g?g[0]:null; }
 /* Workspace bölümleri NAVG grubuna ait değildir; null dönmesi doğrudur. */
 function navAcikGruplar(){
-  try{ const v=JSON.parse(localStorage.getItem('mp_nav_acik')||'null'); if(Array.isArray(v))return new Set(v); }catch(e){}
+  try{ const v=JSON.parse(localStorage.getItem(MP_DEPO+'nav_acik')||'null'); if(Array.isArray(v))return new Set(v); }catch(e){}
   return new Set(NAVG.map(g=>g[0]));       /* ilk açılışta hepsi açık */
 }
 function navGrupTogle(ad){
   const set=navAcikGruplar(); set.has(ad)?set.delete(ad):set.add(ad);
-  try{ localStorage.setItem('mp_nav_acik',JSON.stringify([...set])); }catch(e){}
+  try{ localStorage.setItem(MP_DEPO+'nav_acik',JSON.stringify([...set])); }catch(e){}
   navCiz();
 }
 const GIZLI_GRUP=['Site İçeriği','Yönetim'];       /* üye seviyesinin görmediği gruplar */
@@ -2280,10 +2280,13 @@ async function go(s){ if(typeof dirtyGuard==='function' && !(await dirtyGuard())
     toast('Bu bölüm Yönetim yüzeyine aittir.');
     s='workspace-home';
   }
+  /* S20: yönetici bir bölüme doğrudan (bağlantı, yenileme, pano kartı) geldiyse
+     menü o bölümün yüzeyine geçer; aksi halde menüde bulunmayan bir ekranda kalırdı. */
+  if(ui._role==='admin'){ const y=bolumYuzeyi(s); if(y && y!==surfaceGet()) surfaceUygula(y); }
   ui.section=s;
   ui._ajGor='liste';                           /* bolume girmek Ajandam'i Liste'de acar */
   const g=navGrupOf(s);                        /* kapali gruptaki bolume gidilirse grubu ac */
-  if(g){ const set=navAcikGruplar(); if(!set.has(g)){ set.add(g); try{localStorage.setItem('mp_nav_acik',JSON.stringify([...set]));}catch(e){} } }
+  if(g){ const set=navAcikGruplar(); if(!set.has(g)){ set.add(g); try{localStorage.setItem(MP_DEPO+'nav_acik',JSON.stringify([...set]));}catch(e){} } }
   navCiz();
   navKayit('sec',s,0);
   document.getElementById('ttl').textContent=TITLES[s]||''; renderSection(); yeniTeklifKontrol&&yeniTeklifKontrol(); }
@@ -3081,7 +3084,7 @@ const ISF_DEF={life:['acik','bekliyor'],q:'',org:'',phase:'',ilgili:'',
 /* Work görünümü filtresi oturum içinde korunur (07 §18/2). */
 function isFiltre(){
   let f={};
-  try{ f=JSON.parse(sessionStorage.getItem('mp_is_filtre')||'null')||{}; }catch(e){ f={}; }
+  try{ f=JSON.parse(sessionStorage.getItem(MP_DEPO+'is_filtre')||'null')||{}; }catch(e){ f={}; }
   const o={...ISF_DEF,...f};
   if(!Array.isArray(o.life)||!o.life.length) o.life=ISF_DEF.life.slice();
   /* Geriye uyumluluk: eski `mine` -> asg='me' -> bugun ilgili=<ben>. */
@@ -3095,9 +3098,9 @@ function isFiltre(){
   o.acil=!!o.acil; o.gec=!!o.gec;
   return o;
 }
-function isFiltreYaz(f){ try{ sessionStorage.setItem('mp_is_filtre',JSON.stringify(f)); }catch(e){} }
+function isFiltreYaz(f){ try{ sessionStorage.setItem(MP_DEPO+'is_filtre',JSON.stringify(f)); }catch(e){} }
 function isTab(){
-  try{ const t=sessionStorage.getItem('mp_is_tab'); return ISTABS.some(x=>x[0]===t)?t:'pano'; }
+  try{ const t=sessionStorage.getItem(MP_DEPO+'is_tab'); return ISTABS.some(x=>x[0]===t)?t:'pano'; }
   catch(e){ return 'pano'; }
 }
 /* Kaldirilan sekmelere giden eski kisayollar/oturum degerleri sessizce
@@ -3105,7 +3108,7 @@ function isTab(){
 const IS_ESKI_TAB={takiplerim:'liste',bekleyenler:'liste'};
 function isTabYaz(t){
   const k=IS_ESKI_TAB[t]||t;
-  try{ sessionStorage.setItem('mp_is_tab',ISTABS.some(x=>x[0]===k)?k:'pano'); }catch(e){}
+  try{ sessionStorage.setItem(MP_DEPO+'is_tab',ISTABS.some(x=>x[0]===k)?k:'pano'); }catch(e){}
   navUrlTazele();
 }
 function isTabGit(t){ isTabYaz(t); renderSection(); }
@@ -3386,7 +3389,7 @@ function isPano(box,D,f){
 /* ============ LİSTE — operasyonel tablo (audit §6 İş Takip) ============
    Aynı `jobs` satırları; ikinci bir Work modeli değil. Sıralama tıklanan
    başlıkla değişir, oturumda korunur. */
-function isListeSira(){ try{ return JSON.parse(sessionStorage.getItem('mp_is_sira')||'null')||{k:'akt',d:-1}; }catch(e){ return {k:'akt',d:-1}; } }
+function isListeSira(){ try{ return JSON.parse(sessionStorage.getItem(MP_DEPO+'is_sira')||'null')||{k:'akt',d:-1}; }catch(e){ return {k:'akt',d:-1}; } }
 async function isListeSiraSet(k){
   const s=isListeSira();
   const klavye=document.activeElement&&document.activeElement.classList.contains('th-srt');
@@ -3395,7 +3398,7 @@ async function isListeSiraSet(k){
   /* S13: yeniden çizimden sonra klavye odağı aynı sütun düğmesine döner. */
   if(klavye){ const b=document.querySelector(`button.th-srt[data-srt="${k}"]`); if(b) b.focus(); }
 }
-function isListeYaz(s){ try{ sessionStorage.setItem('mp_is_sira',JSON.stringify(s)); }catch(e){} }
+function isListeYaz(s){ try{ sessionStorage.setItem(MP_DEPO+'is_sira',JSON.stringify(s)); }catch(e){} }
 
 function isListeRows(D,f){
   const s=isListeSira();
@@ -3539,10 +3542,10 @@ async function isListeExport(){
 const TKV_KAYNAK=[['takip','Güncelleme'],['op','Baskı & Montaj']];
 
 function tkvDurum(){
-  try{ return JSON.parse(sessionStorage.getItem('mp_tkv')||'null')||{ay:0,gun:null,kaynak:''}; }
+  try{ return JSON.parse(sessionStorage.getItem(MP_DEPO+'tkv')||'null')||{ay:0,gun:null,kaynak:''}; }
   catch(e){ return {ay:0,gun:null,kaynak:''}; }
 }
-function tkvYaz(d){ try{ sessionStorage.setItem('mp_tkv',JSON.stringify(d)); }catch(e){} }
+function tkvYaz(d){ try{ sessionStorage.setItem(MP_DEPO+'tkv',JSON.stringify(d)); }catch(e){} }
 function tkvAy(delta){ const d=tkvDurum(); tkvYaz({...d,ay:d.ay+delta,gun:null}); renderSection(); }
 function tkvBugun(){ tkvYaz({...tkvDurum(),ay:0,gun:_cIso(new Date())}); renderSection(); }
 function tkvGun(g){ tkvYaz({...tkvDurum(),gun:g}); renderSection(); }
@@ -4019,12 +4022,12 @@ const ACC_CLS={hazir:'sand',gonderildi:'teal',islendi:'',yok:''};
    "bu isin muhasebesi ne durumda?" sorusunu cevaplayamiyordu -
    kullanici once tum kumeyi gorup sonra daraltabilmeli. */
 function accFiltre(){
-  let f; try{ f=JSON.parse(sessionStorage.getItem('mp_acc')||'null'); }catch(e){ f=null; }
+  let f; try{ f=JSON.parse(sessionStorage.getItem(MP_DEPO+'acc')||'null'); }catch(e){ f=null; }
   f={st:'tumu',q:'',...(f||{})};
   if(f.st!=='tumu'&&!ACCST.some(x=>x[0]===f.st)) f.st='tumu';
   return f;
 }
-function accYaz(f){ try{ sessionStorage.setItem('mp_acc',JSON.stringify(f)); }catch(e){} }
+function accYaz(f){ try{ sessionStorage.setItem(MP_DEPO+'acc',JSON.stringify(f)); }catch(e){} }
 function accSekme(st){ accYaz({...accFiltre(),st}); renderSection(); }
 /* Ayni renderer kalibi (§25). */
 function accAra(){ accYaz({...accFiltre(),q:gv('accQ')||''}); canliArama('accQ',renderSection); }
@@ -5976,7 +5979,7 @@ const OP_DONEM_IKI=[['yaklasan','Yaklaşan 30 gün'],['ay','Bu ay'],['gecen','Ge
                     ['yil','Bu yıl'],['ozel','Özel aralık']];
 const OP_DEF={donem:'hafta',from:'',to:'',type:'',kapsam:'aktif',q:''};
 function opFiltre(){
-  let f; try{ f=JSON.parse(sessionStorage.getItem('mp_op_filtre')||'null'); }catch(e){ f=null; }
+  let f; try{ f=JSON.parse(sessionStorage.getItem(MP_DEPO+'op_filtre')||'null'); }catch(e){ f=null; }
   f={...OP_DEF,...(f||{})};
   /* Eski surumden gelen tekil `status` kapsama cevrilir; veri kaybi yok. */
   if(f.status){ f.kapsam=(f.status==='done')?'tamam':(f.status==='cancelled')?'iptal':'aktif'; }
@@ -5984,7 +5987,7 @@ function opFiltre(){
   if(!OP_KAPSAM[f.kapsam]&&f.kapsam!=='tum') f.kapsam='aktif';
   return f;
 }
-function opFiltreYaz(f){ try{ sessionStorage.setItem('mp_op_filtre',JSON.stringify(f)); }catch(e){} }
+function opFiltreYaz(f){ try{ sessionStorage.setItem(MP_DEPO+'op_filtre',JSON.stringify(f)); }catch(e){} }
 
 /* ---------- ÜRETİM KALEMİ AKIŞI (S19) ----------
    Aynı `kalem_key`i taşıyan işlemler tek üretim kalemidir (PS15): bir
@@ -6904,22 +6907,39 @@ const WS_IZIN=new Set(WS_NAV.map(n=>n[0]).concat(WS_EXTRA));
    UI'da da gizlenir ki team_member reddedilecek bir düğme görmesin —
    gizleme yetkilendirme değildir, yalnız tutarlı bir arayüzdür. */
 const isAdmin=()=>ui._role==='admin';
+/* S20: Team Workspace günlük çalışma alanıdır; yönetici de onunla açılır.
+   Yönetim, yöneticinin AYRICA geçebildiği ikinci yüzeydir (açıkça seçilirse
+   hatırlanır). */
 function surfaceGet(){
   if(ui._role!=='admin') return 'workspace';
-  try{ return localStorage.getItem('mp_surface')==='workspace'?'workspace':'yonetim'; }
-  catch(e){ return 'yonetim'; }
+  try{ return localStorage.getItem(MP_DEPO+'surface')==='yonetim'?'yonetim':'workspace'; }
+  catch(e){ return 'workspace'; }
 }
-function surfaceSet(v){
-  try{ localStorage.setItem('mp_surface',v); }catch(e){}
+/* Yalnız bir yüzeye ait bölümler. Ortak bölümler (İşler, Hafıza, Raporlar,
+   Baskı & Montaj, Ekip) bulunulan yüzeyde kalır. */
+const WS_YALNIZ=new Set(['workspace-home','ws-mecralar','muhasebe']);
+function bolumYuzeyi(s){
+  if(WS_YALNIZ.has(s)) return 'workspace';
+  if(NAV.some(n=>n[0]===s) && !WS_IZIN.has(s)) return 'yonetim';
+  return null;
+}
+/* Yüzeyi uygular: tercih, marka alt yazısı, anahtar ve menü birlikte değişir. */
+function surfaceUygula(v){
+  try{ localStorage.setItem(MP_DEPO+'surface',v); }catch(e){}
   const sub=document.querySelector('.brand-sub');
   if(sub) sub.textContent=(v==='workspace'?'Team Workspace':'Yönetim Paneli');
+  const sw=document.getElementById('surfaceSw');
+  if(sw) sw.outerHTML=surfaceSwitchHtml();
+}
+function surfaceSet(v){
+  surfaceUygula(v);
   navCiz();
   go(v==='workspace'?'workspace-home':'dashboard');
 }
 function surfaceSwitchHtml(){
   if(ui._role!=='admin') return '';           /* team_member'a switch gösterilmez */
   const s=surfaceGet();
-  return `<div class="ws-switch" role="group" aria-label="Yüzey seçimi">
+  return `<div class="ws-switch" id="surfaceSw" role="group" aria-label="Yüzey seçimi">
     <button type="button" class="${s==='workspace'?'on':''}" aria-pressed="${s==='workspace'}"
       onclick="surfaceSet('workspace')">Workspace</button>
     <button type="button" class="${s==='yonetim'?'on':''}" aria-pressed="${s==='yonetim'}"
@@ -7022,13 +7042,13 @@ function wsHafta(){
 const PS_SAYFA=20;
 const PS_DEF={p:1,job:'',org:'',kisi:'',acil:false,gec:false,benim:false};
 function psDurum(){
-  let d; try{ d=JSON.parse(sessionStorage.getItem('mp_panelim')||'null'); }catch(e){ d=null; }
+  let d; try{ d=JSON.parse(sessionStorage.getItem(MP_DEPO+'panelim')||'null'); }catch(e){ d=null; }
   d={...PS_DEF,...(d||{})};
   delete d.n;                          /* eski surumden kalan alan */
   d.p=Math.max(1,+d.p||1);
   return d;
 }
-function psYaz(d){ try{ sessionStorage.setItem('mp_panelim',JSON.stringify(d)); }catch(e){} }
+function psYaz(d){ try{ sessionStorage.setItem(MP_DEPO+'panelim',JSON.stringify(d)); }catch(e){} }
 /* Filtre degisimi HER ZAMAN 1. sayfaya doner: 3. sayfadayken filtre
    daraltilinca bos ekrana bakmak "sonuc yok" gibi okunurdu (§27). */
 function psFiltre(patch){ psYaz({...psDurum(),...patch,p:1}); renderSection(); }
@@ -7046,13 +7066,13 @@ function psFiltreDegis(){
    onaylanmasi gereken gelen kutusu degil, farkindalik akisi. */
 const HR_DEF={gor:'guncelleme',p:1,tur:''};
 function hrDurum(){
-  let d; try{ d=JSON.parse(sessionStorage.getItem('mp_hareket')||'null'); }catch(e){ d=null; }
+  let d; try{ d=JSON.parse(sessionStorage.getItem(MP_DEPO+'hareket')||'null'); }catch(e){ d=null; }
   d={...HR_DEF,...(d||{})};
   d.p=Math.max(1,+d.p||1);
   if(!['',...Object.keys(HR_GRUP)].includes(d.tur)) d.tur='';
   return d;
 }
-function hrYaz(d){ try{ sessionStorage.setItem('mp_hareket',JSON.stringify(d)); }catch(e){} }
+function hrYaz(d){ try{ sessionStorage.setItem(MP_DEPO+'hareket',JSON.stringify(d)); }catch(e){} }
 function hrGor(g){ hrYaz({...hrDurum(),gor:g}); renderSection(); }
 function hrTur(t){ hrYaz({...hrDurum(),tur:t,p:1}); renderSection(); }   /* filtre -> 1. sayfa */
 function hrSayfa(p){ hrYaz({...hrDurum(),p:Math.max(1,p)}); renderSection();
@@ -9688,10 +9708,10 @@ const mailNorm=v=>String(v||'').trim().toLocaleLowerCase('tr');
 const trLower=v=>String(v||'').toLocaleLowerCase('tr');
 
 function hafDurum(){
-  try{ return JSON.parse(sessionStorage.getItem('mp_haf')||'null')||{tab:'tumu',q:'',rol:''}; }
+  try{ return JSON.parse(sessionStorage.getItem(MP_DEPO+'haf')||'null')||{tab:'tumu',q:'',rol:''}; }
   catch(e){ return {tab:'tumu',q:'',rol:''}; }
 }
-function hafYaz(d){ try{ sessionStorage.setItem('mp_haf',JSON.stringify(d)); }catch(e){} navUrlTazele(); }
+function hafYaz(d){ try{ sessionStorage.setItem(MP_DEPO+'haf',JSON.stringify(d)); }catch(e){} navUrlTazele(); }
 function hafTab(t){ hafYaz({...hafDurum(),tab:t}); renderSection(); }
 function hafAra(){ hafYaz({...hafDurum(),q:gv('hafQ')||''}); hafCiz(); }
 function hafRol(){ hafYaz({...hafDurum(),rol:gv('hafRol')||''}); hafCiz(); }
@@ -9880,9 +9900,9 @@ function hafSay(n,birim){ return `<p class="haf-say">${n} ${esc(birim)}</p>`; }
    Varsayılan kompakt liste; resimde küçük önizleme, diğerlerinde biçim
    simgesi. Sunucu tarafı süzme + sayfalama (20/sayfa). */
 const BL_DEF={q:'',kat:'',kurum:'',is:'',iliskisiz:false,from:'',to:'',p:1};
-function blDurum(){ let d; try{ d=JSON.parse(sessionStorage.getItem('mp_belge')||'null'); }catch(e){ d=null; }
+function blDurum(){ let d; try{ d=JSON.parse(sessionStorage.getItem(MP_DEPO+'belge')||'null'); }catch(e){ d=null; }
   d={...BL_DEF,...(d||{})}; d.p=Math.max(1,+d.p||1); return d; }
-function blYaz(d){ try{ sessionStorage.setItem('mp_belge',JSON.stringify(d)); }catch(e){} }
+function blYaz(d){ try{ sessionStorage.setItem(MP_DEPO+'belge',JSON.stringify(d)); }catch(e){} }
 /* Süzgeç değişimi 1. sayfaya döner (S4.1 kuralı); yalnız liste yeniden
    çizilir — arama kutusu odağını kaybetmez. */
 function blFiltre(patch){ blYaz({...blDurum(),...patch,p:1}); blKontrolTazele(); blListeCiz(); }
@@ -10741,15 +10761,16 @@ async function ekip(c){
   if(ui._teamOpen){ const t=list.find(x=>x.id===ui._teamOpen); if(t){ return teamProfil(c,t); } ui._teamOpen=null; }
   const rows=list.map(x=>`<div class="tm-card" onclick="ui._teamOpen=${x.id};renderSection()">
     ${teamAvatar(x,44)}
-    <div class="tm-b"><div class="tm-n">${esc(x.name)}${x.app_role==='admin'?'<span class="pill pil-on">yönetici</span>':''}</div>
+    <div class="tm-b"><div class="tm-n">${esc(x.name)}${x.app_role==='admin'?'<span class="pill pil-on">yönetici</span>':''}${x.active===false?'<span class="pill">pasif</span>':''}${yoneticiMi()&&!x.auth_user_id?'<span class="pill sand">giriş hesabı yok</span>':''}</div>
       <div class="tm-r">${esc(x.unvan||x.role||'')}</div>
       <div class="tm-m">${esc(x.eposta||'e-posta yok')}${x.telefon?' · '+esc(x.telefon):''}</div></div>
     <span class="tm-go">›</span></div>`).join('');
-  const epostasiz=list.filter(x=>!x.eposta).length;
+  /* S20: içeri girebilmek için ekip kaydının bir giriş hesabına BAĞLI olması gerekir. */
+  const hesapsiz=yoneticiMi()?list.filter(x=>!x.auth_user_id&&x.active!==false).length:0;
   c.innerHTML=`<div class="sec-head"><div><h3>Ekip</h3><p class="sub">${list.length} üye · profile girmek için karta tıklayın</p></div>
       <button class="btn btn-primary btn-sm" onclick="teamForm(0)">+ Kişi</button></div>
-    ${epostasiz?`<div class="banner">${epostasiz} üyenin e-posta adresi yok. Yetki sınırlaması ve bildirim e-postaları, panele giriş yapılan adresle eşleştiği için çalışmaz — profilden e-posta ekleyin.</div>`:''}
-    <div class="tm-grid">${rows||'<p class="muted">Kişi yok.</p>'}</div>`;
+    ${hesapsiz?`<div class="banner">${hesapsiz} üyenin giriş hesabı bağlı değil; bu kişiler uygulamaya giremez. Giriş hesabı açıldıktan sonra üyenin profilinden “Giriş hesabını bağla” deyin.</div>`:''}
+    <div class="tm-grid">${rows||'<p class="muted">Henüz ekip üyesi yok. “+ Kişi” ile ekleyin.</p>'}</div>`;
 }
 function teamAvatar(x,sz){
   sz=sz||40;
@@ -10788,8 +10809,11 @@ async function teamProfil(c,t){
       ${teamAvatar(t,78)}
       <div class="tp-i"><h2>${esc(t.name)}${t.app_role==='admin'?'<span class="pill pil-on">yönetici</span>':''}</h2>
         <div class="tp-r">${esc(t.unvan||t.role||'—')}</div>
-        <div class="tp-m">${esc(t.eposta||'e-posta yok')}${t.telefon?' · '+esc(t.telefon):''}</div></div>
-      ${(isAdmin()||kendiProfili)?`<button class="btn btn-outline btn-sm" onclick="teamForm(${t.id})">Profili Düzenle</button>`:''}
+        <div class="tp-m">${esc(t.eposta||'e-posta yok')}${t.telefon?' · '+esc(t.telefon):''}</div>
+        ${isAdmin()?`<div class="tp-m" id="tpHesap">Giriş hesabı: ${t.auth_user_id?'<b>bağlı</b>':'<b>bağlı değil</b> — bu kişi uygulamaya giremez'}</div>`:''}</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end">
+      ${(isAdmin()&&!t.auth_user_id)?`<button class="btn btn-outline btn-sm" id="tpBagla" onclick="teamHesapBagla(${t.id})">Giriş hesabını bağla</button>`:''}
+      ${(isAdmin()||kendiProfili)?`<button class="btn btn-outline btn-sm" onclick="teamForm(${t.id})">Profili Düzenle</button>`:''}</div>
     </div>
     <div class="tp-kpi">
       <div class="tp-k"><b>${grup.takip.length}</b><span>Takip ettiği iş</span></div>
@@ -10811,7 +10835,36 @@ async function teamProfil(c,t){
             ${isAdmin()?`<button class="btn btn-outline btn-sm" onclick="teamNotPaylas(${t.id})">Panoya Gönder</button>`:''}</div>`
           :`<p class="muted" style="font-size:11.5px;margin:8px 0 0">Salt okunur.</p>`}
         </div></section>
+      ${kendiProfili?`<section class="card"><div class="card-h"><h3>Şifre</h3></div>
+        <div class="card-b"><label class="flabel" for="tpPw">Yeni şifre</label>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <input class="inp" id="tpPw" type="password" autocomplete="new-password" style="flex:1 1 180px" placeholder="En az 8 karakter">
+            <button class="btn btn-primary btn-sm" id="tpPwB" onclick="profilSifre()">Şifreyi güncelle</button></div>
+          <p class="muted" style="font-size:11.5px;margin:8px 0 0">Size geçici bir şifre verildiyse ilk girişte buradan değiştirin.</p>
+        </div></section>`:''}
     </div></div>`;
+}
+/* S20: ekip kaydını, e-postasıyla açılmış giriş hesabına bağlar (yalnız yönetici;
+   bağ kimlik üzerinden kurulur — bkz. migration ps21). Hesabı OLUŞTURMAZ. */
+const HESAP_NEDEN={kayit_yok:'Ekip kaydı bulunamadı.',eposta_yok:'Bu üyenin e-posta adresi yok. Önce profilden giriş e-postasını yazın.',
+  hesap_yok:'Bu e-postayla açılmış bir giriş hesabı yok. Hesap açıldıktan sonra yeniden deneyin.',
+  hesap_onaysiz:'Bu e-postanın giriş hesabı henüz onaylanmamış.',baska_uyede:'Bu giriş hesabı başka bir ekip üyesine bağlı.'};
+async function teamHesapBagla(id){
+  const b=document.getElementById('tpBagla'); if(b&&b.disabled) return; if(b) b.disabled=true;
+  const r=await sb.rpc('ekip_hesap_bagla',{p_team_id:id});
+  if(b) b.disabled=false;
+  if(r.error){ mpAlert(hataMetni(r.error),'Hesap bağlanamadı'); return; }
+  if(!r.data||r.data.ok===false){ mpAlert(HESAP_NEDEN[(r.data||{}).neden]||'Hesap bağlanamadı.','Giriş hesabı'); return; }
+  toast(r.data.durum==='zaten_bagli'?'Giriş hesabı zaten bağlı.':'Giriş hesabı bağlandı; bu kişi artık giriş yapabilir.');
+  renderSection();
+}
+async function profilSifre(){
+  const p=gv('tpPw')||''; if(p.length<8){ mpAlert('Şifre en az 8 karakter olmalı.','Şifre'); return; }
+  const b=document.getElementById('tpPwB'); if(b&&b.disabled) return; if(b) b.disabled=true;
+  const r=await guard(()=>api('password_change',{password:p}),'Şifre güncellenemedi');
+  if(b) b.disabled=false;
+  if(r===null) return;
+  document.getElementById('tpPw').value=''; toast('Şifre güncellendi.');
 }
 /* Güvenli self-profil RPC sarmalayıcısı (Correction Sprint 2 §10).
    NULL = alanı değiştirme, '' = alanı temizle. Çağıran auth.uid()'den
@@ -10902,7 +10955,7 @@ async function teamForm(id){
         <option value="team_member" ${x.app_role!=='admin'?'selected':''}>Ekip Üyesi — Team Workspace</option>
         <option value="admin" ${x.app_role==='admin'?'selected':''}>Yönetici — Yönetim Paneli + Workspace</option></select></div>
     <div class="field"><label class="flabel">Görev/Departman</label><input class="inp" id="tr" value="${esc(x.role)}" placeholder="Satış &amp; Pazarlama"></div></div>
-    <p class="muted" style="font-size:11.5px;margin:2px 0 14px">Yetki, panele giriş yapılan e-posta ile bu adres eşleştiğinde uygulanır. Bildirim e-postaları da Satış &amp; Pazarlama görevli üyelere ve yöneticilere gider.</p>
+    <p class="muted" style="font-size:11.5px;margin:2px 0 14px">Bu kişinin giriş yapabilmesi için bu e-postayla bir giriş hesabı açılmalı ve profilinden “Giriş hesabını bağla” denmelidir. Bildirim e-postaları Satış &amp; Pazarlama görevli üyelere ve yöneticilere gider.</p>
     <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn btn-ghost btn-sm" onclick="modalVazgec()">Vazgeç</button><button class="btn btn-primary btn-sm" onclick="teamSave()">Kaydet</button></div>`);
 }
 async function teamSave(){
@@ -11463,6 +11516,6 @@ async function saveFooter(){ await api('settings_save',{footer_about:gv('fAbout'
 async function exportBackup(){ const tables=['settings','pages','products','mecralar','alt_mecralar','units','bookings','customers','contacts','quotes','quote_items','jobs','work_parties','entries','work_operations','team','notes','suppliers'];
   const out={_exported:new Date().toISOString()}; for(const t of tables){ try{ const {data}=await sb.from(t).select('*'); out[t]=data||[]; }catch(e){ out[t]='HATA'; } }
   const blob=new Blob([JSON.stringify(out,null,2)],{type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='medyapark-yedek-'+new Date().toISOString().slice(0,10)+'.json'; a.click(); URL.revokeObjectURL(a.href); }
-async function changePw(){ const p=gv('npw'); if(p.length<4){mpAlert('En az 4 karakter.');return;} await api('password_change',{password:p}); mpAlert('Şifre güncellendi.'); }
+async function changePw(){ const p=gv('npw'); if(p.length<8){mpAlert('Şifre en az 8 karakter olmalı.');return;} await api('password_change',{password:p}); mpAlert('Şifre güncellendi.'); }
 
 boot();

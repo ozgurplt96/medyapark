@@ -355,7 +355,7 @@ function mdHazirBul(b,e){
   }
   return {hazir:'',merkez:''};
 }
-function mdDurum(){ let d={}; try{ d=JSON.parse(sessionStorage.getItem('mp_medya')||'{}')||{}; }catch(e){}
+function mdDurum(){ let d={}; try{ d=JSON.parse(sessionStorage.getItem(MP_DEPO+'medya')||'{}')||{}; }catch(e){}
   /* `acik` her çağrıda YENİ nesne: paylaşılan bir varsayılanı mutasyona
      açmak oturum boyunca sızan durum yaratırdı. */
   const acik=(d.acik&&typeof d.acik==='object'&&!Array.isArray(d.acik))?{...d.acik}:{};
@@ -380,7 +380,7 @@ function mdDurumYaz(d){ const o={...d,v:MD_SURUM};
   /* `oto`: dönem hâlâ normal ilk açılışın dönemi mi (gün dönümünde yeniden kurulur). */
   const v=mdVarsayilanDonem();
   o.oto=o.hazir==='3'&&o.merkez===v.merkez&&o.bas===v.bas&&o.bit===v.bit;
-  try{ sessionStorage.setItem('mp_medya',JSON.stringify(o)); }catch(e){}
+  try{ sessionStorage.setItem(MP_DEPO+'medya',JSON.stringify(o)); }catch(e){}
   if(typeof navUrlTazele==='function') navUrlTazele(); }   /* S14: lokasyon/grup/dönem adreste */
 /* Aramanın alanları — taslak ile uygulanan bu anahtarlar üzerinden karşılaştırılır. */
 const MD_ARAMA_ALAN=['bas','bit','durum','site','urun','kurum','is','q'];
